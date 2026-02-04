@@ -1,0 +1,251 @@
+"""Condition evaluation and action execution for user-defined tasks"""
+
+import re
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+from .agent import BossAgent
+from .state import StateManager
+
+
+class ConditionEvaluator:
+    """Evaluate conditions on task results"""
+
+    def extract_metadata(self, output: str) -> dict[str, Any]:
+        """Extract metadata from agent output for condition evaluation
+
+        Looks for patterns like:
+        - "Found X items" -> {items: X}
+        - "Success rate: X%" -> {success_rate: X}
+        - "X failures detected" -> {failures: X}
+        - "Status: X" -> {status: "X"}
+        """
+        metadata = {}
+
+        # Pattern: "Found X <something>"
+        found_pattern = r"[Ff]ound\s+(\d+)\s+(\w+)"
+        for match in re.finditer(found_pattern, output):
+            count = int(match.group(1))
+            item_type = match.group(2).lower()
+            # Store both specific and generic counts
+            metadata[item_type] = count
+            if "count" not in metadata:
+                metadata["count"] = count
+
+        # Pattern: "X failures"
+        failures_pattern = r"(\d+)\s+failures?"
+        match = re.search(failures_pattern, output, re.IGNORECASE)
+        if match:
+            metadata["failures"] = int(match.group(1))
+
+        # Pattern: "Success rate: X%"
+        success_rate_pattern = r"[Ss]uccess\s+rate[:\s]+(\d+(?:\.\d+)?)%?"
+        match = re.search(success_rate_pattern, output)
+        if match:
+            metadata["success_rate"] = float(match.group(1))
+
+        # Pattern: "Status: X"
+        status_pattern = r"[Ss]tatus[:\s]+(\w+)"
+        match = re.search(status_pattern, output)
+        if match:
+            metadata["status"] = match.group(1).lower()
+
+        # Pattern: "X updated" or "X new"
+        updated_pattern = r"(\d+)\s+(updated|new)"
+        for match in re.finditer(updated_pattern, output, re.IGNORECASE):
+            count = int(match.group(1))
+            update_type = match.group(2).lower()
+            metadata[f"{update_type}_count"] = count
+
+        return metadata
+
+    def evaluate(self, condition_str: str, metadata: dict[str, Any]) -> bool:
+        """Evaluate a condition string against metadata
+
+        Supports:
+        - Comparison operators: >, <, >=, <=, ==, !=
+        - String matching: contains, not_contains
+
+        Examples:
+        - "count > 5"
+        - "failures >= 10"
+        - "status == 'failed'"
+        - "message contains 'critical'"
+        """
+        condition_str = condition_str.strip()
+
+        # Handle "contains" operator
+        if " contains " in condition_str:
+            parts = condition_str.split(" contains ", 1)
+            field = parts[0].strip()
+            value = parts[1].strip().strip("'\"")
+
+            field_value = str(metadata.get(field, ""))
+            return value in field_value
+
+        # Handle "not_contains" operator
+        if " not_contains " in condition_str:
+            parts = condition_str.split(" not_contains ", 1)
+            field = parts[0].strip()
+            value = parts[1].strip().strip("'\"")
+
+            field_value = str(metadata.get(field, ""))
+            return value not in field_value
+
+        # Handle comparison operators
+        for op in [">=", "<=", "==", "!=", ">", "<"]:
+            if op in condition_str:
+                parts = condition_str.split(op, 1)
+                field = parts[0].strip()
+                value_str = parts[1].strip().strip("'\"")
+
+                # Get field value from metadata
+                field_value = metadata.get(field)
+                if field_value is None:
+                    return False
+
+                # Try to convert value to appropriate type
+                try:
+                    if isinstance(field_value, (int, float)):
+                        value = float(value_str)
+                    else:
+                        value = value_str
+                except (ValueError, TypeError):
+                    value = value_str
+
+                # Evaluate comparison
+                if op == ">":
+                    return field_value > value
+                elif op == "<":
+                    return field_value < value
+                elif op == ">=":
+                    return field_value >= value
+                elif op == "<=":
+                    return field_value <= value
+                elif op == "==":
+                    return field_value == value
+                elif op == "!=":
+                    return field_value != value
+
+        return False
+
+
+class ActionExecutor:
+    """Execute actions based on condition evaluation"""
+
+    def __init__(self, agent: BossAgent, state_manager: StateManager):
+        self.agent = agent
+        self.state_manager = state_manager
+
+    async def execute(self, action: dict, context: dict):
+        """Execute an action with given context
+
+        Available actions:
+        - notify: Print notification to console
+        - log: Write to log file
+        - create_google_doc: Create Google Doc with results
+        - store_kg: Store in knowledge graph
+
+        Context should include:
+        - result: The task result output
+        - metadata: Extracted metadata
+        - task_name: Name of the task
+        """
+        action_type = action.get("action")
+
+        if action_type == "notify":
+            await self._notify(action, context)
+        elif action_type == "log":
+            await self._log(action, context)
+        elif action_type == "create_google_doc":
+            await self._create_doc(action, context)
+        elif action_type == "store_kg":
+            await self._store_kg(action, context)
+        else:
+            print(f"Unknown action type: {action_type}")
+
+    async def _notify(self, action: dict, context: dict):
+        """Send notification (console for now, extensible to Slack/email)"""
+        message = action.get("message", "Notification")
+        level = action.get("level", "info")
+
+        # Replace placeholders in message
+        message = self._replace_placeholders(message, context)
+
+        # Format based on level
+        if level == "error":
+            print(f"🔴 {message}")
+        elif level == "warning":
+            print(f"⚠️  {message}")
+        else:
+            print(f"ℹ️  {message}")
+
+    async def _log(self, action: dict, context: dict):
+        """Write to log file"""
+        message = action.get("message", context.get("result", ""))
+        log_file_name = action.get("file", f"{context['task_name']}.log")
+
+        # Replace placeholders
+        message = self._replace_placeholders(message, context)
+
+        # Write to log file in ~/.boss/logs/
+        log_dir = Path.home() / ".boss" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        log_file = log_dir / log_file_name
+        timestamp = datetime.now().isoformat()
+
+        with open(log_file, "a") as f:
+            f.write(f"[{timestamp}] {message}\n")
+
+        print(f"📝 Logged to {log_file}")
+
+    async def _create_doc(self, action: dict, context: dict):
+        """Create Google Doc with results"""
+        title = action.get("title", f"Report - {datetime.now().strftime('%Y-%m-%d')}")
+        folder = action.get("folder")
+
+        # Replace placeholders in title
+        title = self._replace_placeholders(title, context)
+
+        # Use agent to create doc via MCP
+        prompt = f"""
+        Create a Google Doc with the following content:
+
+        Title: {title}
+        {f"Folder: {folder}" if folder else ""}
+
+        Content:
+        {context.get('result', '')}
+
+        Please use the create_google_doc_from_markdown MCP tool.
+        """
+
+        try:
+            result = await self.agent.query(prompt)
+            print(f"📄 Created Google Doc: {title}")
+        except Exception as e:
+            print(f"Error creating Google Doc: {e}")
+
+    async def _store_kg(self, action: dict, context: dict):
+        """Store result in knowledge graph"""
+        # This would integrate with the knowledge graph
+        # For now, just print a message
+        entity_type = action.get("entity_type", "task_result")
+        print(f"📊 Would store in KG as {entity_type}")
+        # TODO: Implement KG storage
+
+    def _replace_placeholders(self, text: str, context: dict) -> str:
+        """Replace placeholders like {count}, {date}, etc."""
+        metadata = context.get("metadata", {})
+
+        # Replace {date} with current date
+        text = text.replace("{date}", datetime.now().strftime("%Y-%m-%d"))
+
+        # Replace metadata placeholders
+        for key, value in metadata.items():
+            placeholder = f"{{{key}}}"
+            if placeholder in text:
+                text = text.replace(placeholder, str(value))
+
+        return text

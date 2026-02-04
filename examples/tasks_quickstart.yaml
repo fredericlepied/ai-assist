@@ -1,0 +1,124 @@
+# Quick Start Examples for BOSS User-Defined Tasks
+# Copy this file to ~/.boss/tasks.yaml and customize as needed
+
+tasks:
+  # Example 1: Simple monitoring task
+  - name: "Basic Status Check"
+    interval: 5m
+    prompt: "Check for any DCI job failures in the last 10 minutes"
+
+  # Example 2: Task with notification
+  - name: "Critical Failure Alert"
+    interval: 10m
+    prompt: |
+      Search for DCI jobs with status failure or error in the last 15 minutes.
+      Start your response with: "Found X failures"
+    conditions:
+      - if: "failures > 0"
+        then:
+          action: notify
+          message: "⚠️ Alert: {failures} new failures detected!"
+          level: warning
+
+  # Example 3: Daily summary with Google Doc
+  - name: "Daily Report"
+    enabled: false  # Disabled by default - enable when ready
+    interval: 24h
+    prompt: |
+      Analyze all DCI jobs from the last 24 hours.
+
+      Provide a summary with:
+      - Total jobs: X
+      - Success rate: Y%
+      - Top 3 failure patterns
+      - Recommendations
+
+      Format the first line as: "Total jobs: X"
+    conditions:
+      - if: "jobs > 0"
+        then:
+          action: create_google_doc
+          title: "DCI Daily Report - {date}"
+          folder: "Reports"
+
+  # Example 4: Multiple conditions (tiered alerts)
+  - name: "Tiered Monitoring"
+    interval: 15m
+    prompt: |
+      Check for DCI failures in the last 20 minutes.
+      Report as: "Found X failures"
+    conditions:
+      # Critical alert for many failures
+      - if: "failures > 10"
+        then:
+          action: notify
+          message: "🔴 CRITICAL: {failures} failures detected!"
+          level: error
+
+      # Log if moderate failures
+      - if: "failures > 5"
+        then:
+          action: log
+          message: "Moderate failure count: {failures}"
+
+      # Info notification for any failures
+      - if: "failures > 0"
+        then:
+          action: notify
+          message: "ℹ️ {failures} failures found"
+          level: info
+
+  # Example 5: Jira monitoring
+  - name: "Jira Updates"
+    interval: 30m
+    prompt: |
+      Search for Jira tickets in project CILAB that were updated in the last hour.
+      List ticket keys and brief summary of changes.
+      Format: "Found X updated tickets"
+    conditions:
+      - if: "updated_count > 0"
+        then:
+          action: log
+          message: "Jira updates: {output}"
+          file: "jira_updates.log"
+
+  # Example 6: Morning standup (time-based schedule)
+  - name: "Morning Standup"
+    interval: "morning on weekdays"  # 9:00 AM Monday-Friday
+    enabled: false  # Enable when ready
+    prompt: |
+      Morning standup check:
+      1. Critical issues from overnight
+      2. Failed jobs in last 12 hours
+      3. Urgent action items
+
+      Format: "Found X urgent items"
+    conditions:
+      - if: "urgent_items > 0"
+        then:
+          action: notify
+          message: "🌅 Good morning! {urgent_items} items need attention"
+
+  # Example 7: End of day review (specific time)
+  - name: "End of Day Review"
+    interval: "17:00 on weekdays"  # 5:00 PM Monday-Friday
+    enabled: false  # Enable when ready
+    prompt: |
+      End of day summary:
+      - Jobs completed today
+      - Any failures
+      - Items for tomorrow
+    conditions:
+      - if: "failures > 0"
+        then:
+          action: notify
+          message: "📊 EOD: {failures} failures today"
+
+# Tips:
+# 1. Start with simple tasks and add complexity gradually
+# 2. Test prompts interactively first (boss interactive)
+# 3. Use "enabled: false" to keep tasks for reference without running them
+# 4. Check ~/.boss/logs/ for action logs
+# 5. Monitor execution in ~/.boss/state/task_*.json
+#
+# See TASKS.md for full documentation

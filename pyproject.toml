@@ -1,0 +1,29 @@
+[project]
+name = "boss"
+version = "0.1.0"
+description = "AI assistant for managers with MCP tools for monitoring Jira and DCI jobs"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp-agent>=0.1.0",
+    "anthropic[vertex]>=0.40.0",
+    "schedule>=1.2.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "httpx>=0.27.0",
+    "pyyaml>=6.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-mock>=3.14.0",
+]
+
+[project.scripts]
+boss = "boss.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

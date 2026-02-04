@@ -1,0 +1,86 @@
+# Example user-defined tasks for BOSS
+#
+# Place this file at ~/.boss/tasks.yaml to define custom periodic tasks.
+# Tasks will run automatically when you start BOSS in monitor mode.
+
+tasks:
+  # Task with conditions and actions
+  - name: "Critical Failures Monitor"
+    description: "Check for critical DCI failures every 10 minutes"
+    interval: 10m
+    enabled: true
+    prompt: |
+      Search for DCI jobs with status failure or error in the last hour.
+      Focus on jobs in telco-cilab-bos2 lab.
+      Identify critical failures that need immediate attention.
+
+      Provide a summary starting with:
+      "Found X failures" where X is the number found.
+
+      Then list:
+      1. Critical issues that need attention
+      2. Job IDs and brief descriptions
+    conditions:
+      - if: "failures > 0"
+        then:
+          action: notify
+          message: "⚠️ Found {failures} critical failures!"
+          level: warning
+
+      - if: "failures > 5"
+        then:
+          action: log
+          message: "High failure count detected: {failures} failures"
+
+  # Daily summary task
+  - name: "Daily Release Summary"
+    description: "Generate daily summary of OCP 4.19 release status"
+    interval: 24h
+    enabled: false  # Disabled by default
+    prompt: |
+      Search for all DCI jobs using OCP 4.19.0 component in the last 24 hours.
+
+      Provide a comprehensive summary:
+      1. Total jobs run
+      2. Success rate percentage
+      3. Common failure patterns
+      4. Labs with most issues
+      5. Recommendations
+
+  # Quick check every 5 minutes
+  - name: "Recent Updates Monitor"
+    description: "Monitor for recent updates every 5 minutes"
+    interval: 5m
+    enabled: true
+    prompt: |
+      Check for any DCI jobs or Jira tickets updated in the last 10 minutes.
+
+      If found, provide:
+      - Job/ticket IDs
+      - What changed
+      - Whether it needs attention
+
+  # Time-based schedule - Morning standup on work days
+  - name: "Morning Standup Check"
+    description: "Daily standup check at 9 AM on weekdays"
+    interval: "morning on weekdays"
+    enabled: false  # Enable when ready
+    prompt: |
+      Good morning! Check for items needing attention:
+      1. Critical Jira tickets opened overnight
+      2. Failed DCI jobs from last 12 hours
+      3. Urgent issues requiring immediate action
+
+      Format response as: "Found X urgent items"
+
+  # End of week summary
+  - name: "Friday Wrap-up"
+    description: "Weekly summary every Friday at 5 PM"
+    interval: "17:00 on friday"
+    enabled: false  # Enable when ready
+    prompt: |
+      Generate end-of-week summary for the team:
+      - Total DCI jobs run this week
+      - Success rate compared to last week
+      - Top 3 issues encountered
+      - Recommendations for next week
