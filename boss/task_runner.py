@@ -47,21 +47,17 @@ class TaskRunner:
         timestamp = datetime.now()
 
         try:
-            # Execute the task prompt using the agent
             output = await self.agent.query(self.task_def.prompt)
 
-            # Extract metadata from output
             evaluator = ConditionEvaluator()
             metadata = evaluator.extract_metadata(output)
 
-            # Check conditions and execute actions
             if self.task_def.conditions:
                 executor = ActionExecutor(self.agent, self.state_manager)
 
                 for condition in self.task_def.conditions:
                     if "if" in condition and "then" in condition:
                         if evaluator.evaluate(condition["if"], metadata):
-                            # Execute the action
                             context = {
                                 "result": output,
                                 "metadata": metadata,
@@ -69,7 +65,6 @@ class TaskRunner:
                             }
                             await executor.execute(condition["then"], context)
 
-            # Track execution in state
             self.state_manager.update_monitor(
                 self.state_key,
                 {
@@ -80,7 +75,6 @@ class TaskRunner:
                 }
             )
 
-            # Save to history
             self.state_manager.append_history(
                 self.state_key,
                 {
@@ -100,7 +94,6 @@ class TaskRunner:
             )
 
         except Exception as e:
-            # Track failure in state
             error_msg = str(e)
             self.state_manager.update_monitor(
                 self.state_key,
@@ -111,7 +104,6 @@ class TaskRunner:
                 }
             )
 
-            # Save error to history
             self.state_manager.append_history(
                 self.state_key,
                 {

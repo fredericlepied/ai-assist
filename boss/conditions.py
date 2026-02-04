@@ -169,10 +169,8 @@ class ActionExecutor:
         message = action.get("message", "Notification")
         level = action.get("level", "info")
 
-        # Replace placeholders in message
         message = self._replace_placeholders(message, context)
 
-        # Format based on level
         if level == "error":
             print(f"🔴 {message}")
         elif level == "warning":
@@ -185,10 +183,8 @@ class ActionExecutor:
         message = action.get("message", context.get("result", ""))
         log_file_name = action.get("file", f"{context['task_name']}.log")
 
-        # Replace placeholders
         message = self._replace_placeholders(message, context)
 
-        # Write to log file in ~/.boss/logs/
         log_dir = Path.home() / ".boss" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -205,10 +201,8 @@ class ActionExecutor:
         title = action.get("title", f"Report - {datetime.now().strftime('%Y-%m-%d')}")
         folder = action.get("folder")
 
-        # Replace placeholders in title
         title = self._replace_placeholders(title, context)
 
-        # Use agent to create doc via MCP
         prompt = f"""
         Create a Google Doc with the following content:
 
@@ -239,10 +233,8 @@ class ActionExecutor:
         """Replace placeholders like {count}, {date}, etc."""
         metadata = context.get("metadata", {})
 
-        # Replace {date} with current date
         text = text.replace("{date}", datetime.now().strftime("%Y-%m-%d"))
 
-        # Replace metadata placeholders
         for key, value in metadata.items():
             placeholder = f"{{{key}}}"
             if placeholder in text:

@@ -207,8 +207,18 @@ boss /monitor
 This will:
 - Check configured Jira projects every 5 minutes (default)
 - Check DCI jobs every 5 minutes (default)
+- **Store all findings in the temporal knowledge graph** (automatic)
 - Run user-defined tasks from `~/.boss/tasks.yaml` (if configured)
 - Report findings to console or configured notification channel
+
+**Knowledge Graph Integration:**
+All DCI jobs and Jira tickets are automatically stored in the temporal knowledge graph, allowing you to:
+- Query historical data (`boss /kg-asof '2026-02-04 14:00'`)
+- Track changes over time (`boss /kg-changes 24`)
+- Find late discoveries (`boss /kg-late 60`)
+- View entity details (`boss /kg-show <id>`)
+
+See [KNOWLEDGE_GRAPH_INTEGRATION.md](KNOWLEDGE_GRAPH_INTEGRATION.md) for details.
 
 ### User-Defined Tasks
 
@@ -335,15 +345,33 @@ BOSS maintains persistent state to avoid redundant queries and track monitoring 
 - **Query Cache**: Caches query results with configurable TTL (default: 5 minutes)
 - **History**: Maintains JSONL logs of monitoring checks
 - **Conversation Context**: Saves interactive session context
+- **Knowledge Graph**: Temporal database of all entities and relationships (NEW!)
 
-State is stored in `~/.boss/state/`:
+State is stored in `~/.boss/`:
 ```
-~/.boss/state/
-├── jira_monitor.json        # Jira monitor state
-├── dci_monitor.json         # DCI monitor state
-├── cache/                   # Cached query results
-├── history/                 # Historical logs (JSONL)
-└── context/                 # Saved conversation contexts
+~/.boss/
+├── state/
+│   ├── jira_monitor.json        # Jira monitor state
+│   ├── dci_monitor.json         # DCI monitor state
+│   ├── cache/                   # Cached query results
+│   ├── history/                 # Historical logs (JSONL)
+│   └── context/                 # Saved conversation contexts
+└── knowledge_graph.db           # Temporal knowledge graph (SQLite)
+```
+
+### Knowledge Graph
+The knowledge graph stores:
+- All DCI jobs and components with temporal tracking
+- All Jira tickets with status history
+- Relationships between entities
+- Discovery lag (when created vs. when discovered)
+
+Query the knowledge graph:
+```bash
+boss /kg-stats              # View statistics
+boss /kg-changes 24         # Changes in last 24 hours
+boss /kg-asof '2026-02-04'  # Historical state
+boss /kg-show <id>          # Entity details
 ```
 
 ## Development

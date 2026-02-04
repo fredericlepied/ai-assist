@@ -38,7 +38,6 @@ class JiraMonitor:
         issues = []
 
         for project in self.projects:
-            # Check cache first
             cache_key = f"jira_project_{project}"
             cached = self.state_manager.get_cached_query(cache_key)
 
@@ -47,7 +46,6 @@ class JiraMonitor:
                 issues.append(cached)
                 continue
 
-            # Query for recent issues
             jql = f"project = {project} AND updated >= -1d ORDER BY updated DESC"
             prompt = f"""
             Search for Jira tickets using this JQL query: {jql}
@@ -67,26 +65,84 @@ class JiraMonitor:
                     "timestamp": datetime.now().isoformat(),
                 }
 
-                # Cache the result
                 self.state_manager.cache_query_result(cache_key, issue_data, ttl_seconds=300)
 
-                # Save to history
                 self.state_manager.append_history(self.monitor_name, {
                     "project": project,
                     "check_time": datetime.now().isoformat()
                 })
 
+                if self.knowledge_graph:
+                    await self._store_jira_tickets_in_kg(jql, project)
+
                 issues.append(issue_data)
             except Exception as e:
                 print(f"Error checking Jira project {project}: {e}")
 
-        # Update state
         self.state_manager.update_monitor(
             self.monitor_name,
             {"projects": self.projects, "issue_count": len(issues)}
         )
 
         return issues
+
+    async def _store_jira_tickets_in_kg(self, jql: str, project: str):
+        """Call Jira MCP tool directly and store structured data in KG"""
+        try:
+            session = self.agent.sessions.get("dci")
+            if not session:
+                return
+
+            result = await session.call_tool("search_jira_tickets", {
+                "jql": jql,
+                "max_results": 20
+            })
+
+            if result.content:
+                for item in result.content:
+                    if hasattr(item, "text"):
+                        try:
+                            tickets_data = json.loads(item.text)
+                            tx_time = datetime.now()
+
+                            tickets = []
+                            if isinstance(tickets_data, list):
+                                tickets = tickets_data
+                            elif isinstance(tickets_data, dict):
+                                tickets = tickets_data.get("issues", [])
+
+                            for ticket in tickets:
+                                ticket_key = ticket.get("key")
+                                if not ticket_key:
+                                    continue
+
+                                created_str = ticket.get("fields", {}).get("created", "")
+                                try:
+                                    valid_from = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                                except (ValueError, AttributeError):
+                                    valid_from = tx_time
+
+                                self.knowledge_graph.insert_entity(
+                                    entity_type="jira_ticket",
+                                    entity_id=ticket_key,
+                                    valid_from=valid_from,
+                                    tx_from=tx_time,
+                                    data={
+                                        "key": ticket_key,
+                                        "project": project,
+                                        "summary": ticket.get("fields", {}).get("summary"),
+                                        "status": ticket.get("fields", {}).get("status", {}).get("name"),
+                                        "priority": ticket.get("fields", {}).get("priority", {}).get("name"),
+                                        "assignee": ticket.get("fields", {}).get("assignee", {}).get("displayName") if ticket.get("fields", {}).get("assignee") else None,
+                                    }
+                                )
+                        except json.JSONDecodeError as e:
+                            print(f"Warning: Could not parse Jira response JSON: {e}")
+                        except Exception as e:
+                            print(f"Warning: Could not process Jira ticket: {e}")
+
+        except Exception as e:
+            print(f"Warning: Could not store Jira tickets in knowledge graph: {e}")
 
 
 class DCIMonitor:
@@ -108,9 +164,9 @@ class DCIMonitor:
     async def check(self) -> list[dict]:
         """Check for DCI job updates"""
         if not self.queries:
-            # Default query for recent failures
+            yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
             self.queries = [
-                "((status in ['failure', 'error']) and (created_at >= '2026-02-04'))"
+                f"((status in ['failure', 'error']) and (created_at >= '{yesterday}'))"
             ]
 
         state = self.state_manager.get_monitor_state(self.monitor_name)
@@ -118,7 +174,6 @@ class DCIMonitor:
         all_job_ids = set()
 
         for query in self.queries:
-            # Check cache first
             cache_key = f"dci_query_{hash(query)}"
             cached = self.state_manager.get_cached_query(cache_key)
 
@@ -129,14 +184,14 @@ class DCIMonitor:
 
             prompt = f"""
             Search DCI jobs with this query: {query}
+            Limit results to 20 most recent jobs.
 
-            Please provide a summary including:
-            1. List of job IDs found
-            2. Total number of jobs matching
-            3. NEW failures (jobs not seen in previous checks)
-            4. Failure patterns or common issues
-            5. Jobs that need investigation
-            6. Any trends or concerns
+            Please provide a concise summary including:
+            1. Total number of jobs matching
+            2. Number of failures/errors
+            3. Most recent 5 job IDs
+            4. Key failure patterns (if any)
+            5. Urgent items needing attention
             """
 
             try:
@@ -147,10 +202,8 @@ class DCIMonitor:
                     "timestamp": datetime.now().isoformat(),
                 }
 
-                # Cache the result
                 self.state_manager.cache_query_result(cache_key, result_data, ttl_seconds=300)
 
-                # Save to history
                 self.state_manager.append_history(self.monitor_name, {
                     "query": query,
                     "check_time": datetime.now().isoformat()
@@ -158,8 +211,7 @@ class DCIMonitor:
 
                 results.append(result_data)
 
-                # Store in knowledge graph if available
-                if self.knowledge_graph:
+                if self.knowledge_graph and result:
                     await self._store_dci_jobs_in_kg(result, query)
 
                 # Track job IDs (would need to parse from result in real implementation)
@@ -169,12 +221,10 @@ class DCIMonitor:
             except Exception as e:
                 print(f"Error checking DCI with query '{query}': {e}")
 
-        # Get new items since last check
         new_items = self.state_manager.get_new_items(self.monitor_name, all_job_ids)
         if new_items:
             print(f"Found {len(new_items)} new DCI items since last check")
 
-        # Update state
         self.state_manager.update_monitor(
             self.monitor_name,
             {"queries": self.queries, "result_count": len(results)},
@@ -184,101 +234,112 @@ class DCIMonitor:
         return results
 
     async def _store_dci_jobs_in_kg(self, result_text: str, query: str):
-        """Parse DCI job results and store in knowledge graph
-
-        This is a helper to extract structured data from agent responses
-        and populate the knowledge graph with jobs, components, and relationships.
-        """
-        # Ask the agent to extract structured data from the result
-        extract_prompt = f"""
-        From this DCI job query result, extract structured information:
-
-        {result_text}
-
-        Please provide a JSON array of jobs with this structure:
-        [{{
-            "job_id": "job ID from DCI",
-            "status": "failure|error|success",
-            "created_at": "ISO timestamp when job was created",
-            "remoteci": "lab name",
-            "components": [{{"type": "component type", "version": "version", "tags": ["tag1"]}}]
-        }}]
-
-        Only include jobs that have clear job IDs. Return ONLY the JSON array, no other text.
-        """
-
+        """Call DCI MCP tool directly and store structured data in KG"""
         try:
-            json_str = await self.agent.query(extract_prompt)
-            # Strip markdown code blocks if present
-            if "```" in json_str:
-                json_str = json_str.split("```json")[1].split("```")[0] if "```json" in json_str else json_str.split("```")[1].split("```")[0]
+            session = self.agent.sessions.get("dci")
+            if not session:
+                return
 
-            jobs_data = json.loads(json_str.strip())
+            # Use 'query' parameter (not 'where') - limit to 20 jobs
+            result = await session.call_tool("search_dci_jobs", {
+                "query": query,
+                "limit": 20,
+                "sort": "-created_at"
+            })
 
-            tx_time = datetime.now()
+            if result.content:
+                for item in result.content:
+                    if hasattr(item, "text"):
+                        text_content = item.text.strip()
 
-            for job_data in jobs_data:
-                job_id = job_data.get("job_id")
-                if not job_id:
-                    continue
+                        if not text_content:
+                            print("Debug: DCI MCP tool returned empty response")
+                            continue
 
-                # Parse valid_from (when job was created)
-                created_str = job_data.get("created_at", "")
-                try:
-                    valid_from = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
-                except (ValueError, AttributeError):
-                    valid_from = tx_time  # Fallback to now if parse fails
+                        try:
+                            jobs_response = json.loads(text_content)
+                            tx_time = datetime.now()
 
-                # Insert job entity
-                entity_id = f"dci-job-{job_id}"
-                self.knowledge_graph.insert_entity(
-                    entity_type="dci_job",
-                    entity_id=entity_id,
-                    valid_from=valid_from,
-                    tx_from=tx_time,
-                    data={
-                        "job_id": job_id,
-                        "status": job_data.get("status", "unknown"),
-                        "remoteci": job_data.get("remoteci"),
-                        "query": query
-                    }
-                )
+                            if isinstance(jobs_response, dict) and "error" in jobs_response:
+                                print(f"DCI API error: {jobs_response['error']}")
+                                continue
 
-                # Insert components and relationships
-                for comp_data in job_data.get("components", []):
-                    comp_type = comp_data.get("type")
-                    comp_version = comp_data.get("version")
-                    if not comp_type:
-                        continue
+                            jobs = []
+                            if isinstance(jobs_response, list):
+                                jobs = jobs_response
+                            elif isinstance(jobs_response, dict):
+                                # DCI API returns {"hits": [...], "total": {...}}
+                                jobs = jobs_response.get("hits", jobs_response.get("jobs", []))
 
-                    comp_id = f"component-{comp_type}-{comp_version}" if comp_version else f"component-{comp_type}"
+                            if not jobs:
+                                total = jobs_response.get("total", {}) if isinstance(jobs_response, dict) else {}
+                                total_count = total.get("value", 0) if isinstance(total, dict) else 0
+                                if total_count > 0:
+                                    print(f"Debug: Found {total_count} matching jobs but 0 returned in hits")
+                                continue
 
-                    # Insert component if not exists (or get existing)
-                    try:
-                        self.knowledge_graph.insert_entity(
-                            entity_type="component",
-                            entity_id=comp_id,
-                            valid_from=valid_from,  # Component existed when job ran
-                            tx_from=tx_time,
-                            data={
-                                "type": comp_type,
-                                "version": comp_version,
-                                "tags": comp_data.get("tags", [])
-                            }
-                        )
-                    except Exception:
-                        # Component might already exist, that's fine
-                        pass
+                            for job in jobs:
+                                job_id = job.get("id")
+                                if not job_id:
+                                    continue
 
-                    # Create relationship
-                    self.knowledge_graph.insert_relationship(
-                        rel_type="job_uses_component",
-                        source_id=entity_id,
-                        target_id=comp_id,
-                        valid_from=valid_from,
-                        tx_from=tx_time,
-                        properties={"tags": comp_data.get("tags", [])}
-                    )
+                                created_str = job.get("created_at", "")
+                                try:
+                                    valid_from = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                                except (ValueError, AttributeError):
+                                    valid_from = tx_time
+
+                                self.knowledge_graph.insert_entity(
+                                    entity_type="dci_job",
+                                    entity_id=job_id,
+                                    valid_from=valid_from,
+                                    tx_from=tx_time,
+                                    data={
+                                        "job_id": job_id,
+                                        "status": job.get("status", "unknown"),
+                                        "remoteci_id": job.get("remoteci_id"),
+                                        "topic_id": job.get("topic_id"),
+                                        "state": job.get("state"),
+                                    }
+                                )
+
+                                for component in job.get("components", []):
+                                    comp_id = component.get("id")
+                                    if not comp_id:
+                                        continue
+
+                                    comp_type = component.get("type")
+                                    comp_version = component.get("version")
+
+                                    try:
+                                        self.knowledge_graph.insert_entity(
+                                            entity_type="dci_component",
+                                            entity_id=comp_id,
+                                            valid_from=valid_from,
+                                            tx_from=tx_time,
+                                            data={
+                                                "type": comp_type,
+                                                "version": comp_version,
+                                                "name": component.get("name"),
+                                            }
+                                        )
+                                    except Exception:
+                                        pass  # Component might already exist
+
+                                    self.knowledge_graph.insert_relationship(
+                                        rel_type="job_uses_component",
+                                        source_id=job_id,
+                                        target_id=comp_id,
+                                        valid_from=valid_from,
+                                        tx_from=tx_time,
+                                        properties={}
+                                    )
+
+                        except json.JSONDecodeError as e:
+                            print(f"Warning: Could not parse DCI response JSON: {e}")
+                            print(f"Debug: Response text (first 200 chars): {text_content[:200]}")
+                        except Exception as e:
+                            print(f"Warning: Could not process DCI job: {e}")
 
         except Exception as e:
             print(f"Warning: Could not store DCI jobs in knowledge graph: {e}")
@@ -307,10 +368,9 @@ class MonitoringScheduler:
             agent, config.monitoring.dci_queries, state_manager, knowledge_graph
         )
         self.user_tasks: list["TaskRunner"] = []
-        self.user_task_handles: list[asyncio.Task] = []  # Track user task coroutines
+        self.user_task_handles: list[asyncio.Task] = []
         self.running = False
 
-        # Load user-defined tasks on initialization
         if self.task_file:
             self.user_tasks = self._load_user_tasks(self.task_file)
 
@@ -323,7 +383,6 @@ class MonitoringScheduler:
             loader = TaskLoader()
             task_defs = loader.load_from_yaml(task_file)
 
-            # Filter enabled tasks and create runners
             runners = []
             for task_def in task_defs:
                 if task_def.enabled:
@@ -348,24 +407,18 @@ class MonitoringScheduler:
         print("="*60)
 
         try:
-            # Load new task definitions
             new_tasks = self._load_user_tasks(self.task_file)
 
-            # Cancel existing user task coroutines
             for task_handle in self.user_task_handles:
                 task_handle.cancel()
 
-            # Wait for all to be cancelled
             if self.user_task_handles:
                 await asyncio.gather(*self.user_task_handles, return_exceptions=True)
 
-            # Clear old handles
             self.user_task_handles.clear()
 
-            # Update tasks
             self.user_tasks = new_tasks
 
-            # Restart user tasks
             for task_runner in self.user_tasks:
                 interval = 0 if task_runner.task_def.is_time_based else task_runner.task_def.interval_seconds
                 task_handle = asyncio.create_task(
@@ -392,12 +445,10 @@ class MonitoringScheduler:
         print("Starting monitoring scheduler...")
         print(f"State directory: {self.state_manager.state_dir}")
 
-        # Clean up expired cache on startup
         removed = self.state_manager.cleanup_expired_cache()
         if removed:
             print(f"Cleaned up {removed} expired cache entries")
 
-        # Schedule built-in monitors
         tasks = [
             self._schedule_task(
                 "Jira Monitor",
@@ -411,7 +462,6 @@ class MonitoringScheduler:
             ),
         ]
 
-        # Schedule user-defined tasks
         for task_runner in self.user_tasks:
             # For time-based schedules, interval is just a placeholder
             interval = 0 if task_runner.task_def.is_time_based else task_runner.task_def.interval_seconds
@@ -429,7 +479,6 @@ class MonitoringScheduler:
         if self.user_tasks:
             print(f"Scheduled {len(self.user_tasks)} user-defined tasks")
 
-        # Add file watcher if task file is specified
         if self.task_file:
             watcher = TaskFileWatcher(self.task_file, self.reload_tasks)
             tasks.append(asyncio.create_task(watcher.watch()))

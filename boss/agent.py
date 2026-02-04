@@ -14,9 +14,7 @@ class BossAgent:
     def __init__(self, config: BossConfig):
         self.config = config
 
-        # Initialize Anthropic client (either direct API or Vertex AI)
         if config.use_vertex:
-            # Build kwargs for AnthropicVertex
             vertex_kwargs = {"project_id": config.vertex_project_id}
             if config.vertex_region:
                 vertex_kwargs["region"] = config.vertex_region
@@ -32,18 +30,20 @@ class BossAgent:
         self.available_tools: list[dict] = []
         self._server_tasks: list[asyncio.Task] = []
 
+        # Track tool calls for KG storage
+        self.last_tool_calls: list[dict] = []
+
     async def connect_to_servers(self):
         """Connect to all configured MCP servers"""
         for server_name, server_config in self.config.mcp_servers.items():
             try:
-                # Start server connection as a background task
                 task = asyncio.create_task(
                     self._run_server(server_name, server_config),
                     name=f"mcp_{server_name}"
                 )
                 self._server_tasks.append(task)
 
-                # Wait for the server to initialize (give it up to 5 seconds)
+                # Wait for server initialization (up to 5 seconds)
                 for i in range(10):
                     await asyncio.sleep(0.5)
                     if server_name in self.sessions:
@@ -76,7 +76,6 @@ class BossAgent:
                 # to start the _receive_loop task that processes incoming messages!
                 async with ClientSession(read_stream, write_stream) as session:
                     print(f"[{name}] Initializing session...", flush=True)
-                    # Initialize the session
                     try:
                         result = await asyncio.wait_for(session.initialize(), timeout=10.0)
                         print(f"[{name}] Session initialized! Result: {result}", flush=True)
@@ -89,7 +88,6 @@ class BossAgent:
                     self.sessions[name] = session
 
                     print(f"[{name}] Listing tools...", flush=True)
-                    # Get available tools from this server
                     tools_list = await session.list_tools()
                     print(f"[{name}] Got {len(tools_list.tools)} tools", flush=True)
                     for tool in tools_list.tools:
@@ -135,10 +133,8 @@ class BossAgent:
                 messages=messages,
             )
 
-            # Add assistant response to messages
             messages.append({"role": "assistant", "content": response.content})
 
-            # Check if we need to process tool calls
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
@@ -152,23 +148,19 @@ class BossAgent:
                         "content": result,
                     })
 
-            # If no tool calls, we're done
             if not tool_results:
-                # Extract final text response
                 final_text = ""
                 for block in response.content:
                     if hasattr(block, "text"):
                         final_text += block.text
                 return final_text
 
-            # Add tool results to continue the conversation
             messages.append({"role": "user", "content": tool_results})
 
         return "Maximum turns reached without final answer"
 
     async def _execute_tool(self, tool_name: str, arguments: dict) -> str:
         """Execute a tool call on the appropriate MCP server"""
-        # Parse server name and original tool name
         parts = tool_name.split("__", 1)
         if len(parts) != 2:
             return f"Error: Invalid tool name format: {tool_name}"
@@ -183,7 +175,6 @@ class BossAgent:
         try:
             result = await session.call_tool(original_tool_name, arguments)
 
-            # Format the result
             if result.content:
                 return "\n".join([
                     item.text if hasattr(item, "text") else str(item)
@@ -195,11 +186,9 @@ class BossAgent:
 
     async def close(self):
         """Close all MCP server connections"""
-        # Cancel all server tasks
         for task in self._server_tasks:
             task.cancel()
 
-        # Wait for them to finish
         if self._server_tasks:
             await asyncio.gather(*self._server_tasks, return_exceptions=True)
 
