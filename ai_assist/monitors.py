@@ -240,11 +240,18 @@ class MonitoringScheduler:
                 else:
                     print(f"{name}: No updates")
 
+            except asyncio.CancelledError:
+                # Task was cancelled (e.g., during reload) - exit gracefully
+                break
             except Exception as e:
                 print(f"Error in {name}: {e}")
 
             if not (task_def and task_def.is_time_based):
-                await asyncio.sleep(interval)
+                try:
+                    await asyncio.sleep(interval)
+                except asyncio.CancelledError:
+                    # Cancelled during sleep - exit gracefully
+                    break
 
     def _report_results(self, monitor_name: str, results: list[dict]):
         """Report monitoring results"""

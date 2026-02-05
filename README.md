@@ -22,21 +22,15 @@ An intelligent AI assistant powered by Claude and MCP (Model Context Protocol) t
 
 **Option A: Vertex AI** (Google Cloud - Recommended for enterprise)
 1. ✅ **Google Cloud Project with Vertex AI** - Your company likely has this
-2. ✅ **DCI Credentials** - From your DCI administrator
-3. ⚠️ **Jira Token** - Optional, only if you want Jira monitoring
-4. ⚠️ **Google Credentials** - Optional, only if you want Google Docs integration
 
 **Option B: Direct API** (Personal/Free tier)
 1. ✅ **Anthropic API Key** - Get from https://console.anthropic.com/ (free tier available)
-2. ✅ **DCI Credentials** - From your DCI administrator
-3. ⚠️ **Jira Token** - Optional, only if you want Jira monitoring
-4. ⚠️ **Google Credentials** - Optional, only if you want Google Docs integration
 
 ### Installation
 
 1. Clone the repository:
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/fredericlepied/ai-assist
 cd ai-assist
 ```
 
@@ -61,15 +55,11 @@ cp .env.example .env
 ```bash
 ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project-id  # Your GCP project ID
 # ANTHROPIC_VERTEX_REGION=us-east5               # Optional - usually not needed
-DCI_CLIENT_ID=your_dci_client_id                 # From your DCI admin
-DCI_API_SECRET=your_dci_api_secret               # From your DCI admin
 ```
 
 **Option B - Direct API** (personal/free tier):
 ```bash
 ANTHROPIC_API_KEY=your_anthropic_key_here  # Get from console.anthropic.com
-DCI_CLIENT_ID=your_dci_client_id           # From your DCI admin
-DCI_API_SECRET=your_dci_api_secret         # From your DCI admin
 ```
 
 ## Configuration
@@ -88,14 +78,6 @@ ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project-id
 
 # Method 2: Direct API Key (personal/free tier)
 ANTHROPIC_API_KEY=your_api_key_here
-
-# API credentials (used by MCP servers if not in YAML)
-DCI_CLIENT_ID=your_dci_client_id
-DCI_API_SECRET=your_dci_api_secret
-DCI_CS_URL=https://api.distributed-ci.io
-JIRA_API_TOKEN=your_jira_token
-JIRA_URL=https://issues.redhat.com
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
 ```
 
 ### MCP Servers Configuration (~/.ai-assist/mcp_servers.yaml)
@@ -160,17 +142,6 @@ If your company uses Claude via Google Cloud (like Claude Code), use this method
 4. Create a new API key
 5. Copy the key and set it as `ANTHROPIC_API_KEY` in `.env`
 6. New accounts get $5 in free credits
-
-**Jira API Token:**
-1. Go to https://issues.redhat.com/secure/ViewProfile.jspa
-2. Click "Personal Access Tokens" → "Create token"
-3. Copy the token and set it as `JIRA_API_TOKEN`
-
-**DCI Credentials:**
-Contact your DCI administrator for `DCI_CLIENT_ID` and `DCI_API_SECRET`.
-
-**Google Docs (optional):**
-Follow Google Cloud documentation to create service account credentials.
 
 ### Troubleshooting Vertex AI
 
@@ -375,6 +346,47 @@ ai-assist /monitor
 # Your new schedule runs automatically
 ```
 
+**Example Monitoring Prompts:**
+
+Good prompts are specific and actionable. The AI has access to all MCP tools, so you can:
+- Query specific data (DCI jobs, Jira tickets)
+- Analyze patterns and trends
+- Generate and save reports
+- Combine multiple data sources
+
+```
+DCI Failure Monitor (every 5 minutes):
+"Check for DCI jobs with status 'failure' or 'error' created in the last 5 minutes.
+Summarize the job IDs, failure reasons, and affected components."
+
+Jira Blocker Tickets (every 10 minutes):
+"Find JIRA tickets in projects CILAB, CNF with priority 'Blocker' and status 'Open'.
+List ticket keys, summaries, and how long they've been open."
+
+Daily Summary Task (9am weekdays):
+"Generate a daily summary including:
+1. DCI job statistics from yesterday (total, failed, success rate)
+2. New critical Jira tickets created yesterday
+3. Any recurring failure patterns in the last 24 hours
+Save the report as 'daily-{date}' using the write_report tool"
+
+Weekly Trends (9am Monday):
+"Analyze DCI failures from the past 7 days.
+Identify top 3 most common failure types and affected components.
+Create a report with trends and recommendations.
+Save to 'weekly-analysis' report."
+
+Custom Integration:
+"Check DCI jobs tagged 'nightly' that failed in the last 12 hours.
+For each failure, check if there's a related JIRA ticket.
+If no ticket exists, list the job ID and suggest creating one."
+```
+
+**Tips for good prompts:**
+- Be specific about time ranges ("last 5 minutes", "yesterday", "last 7 days")
+- Specify what data to include (job IDs, ticket keys, summaries)
+- For tasks, mention if you want reports saved
+- You can reference MCP tools by name if needed
 
 **Example Report Usage:**
 ```bash
@@ -496,11 +508,3 @@ See example files in `.ai-assist/` directory for templates.
 
 - Python 3.12+
 - Anthropic API key
-
-## License
-
-[Add your license here]
-
-## Contributing
-
-[Add contributing guidelines here]
