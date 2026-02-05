@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
-from .agent import BossAgent
+from .agent import AiAssistAgent
 from .state import StateManager
 
 
@@ -133,7 +133,7 @@ class ConditionEvaluator:
 class ActionExecutor:
     """Execute actions based on condition evaluation"""
 
-    def __init__(self, agent: BossAgent, state_manager: StateManager):
+    def __init__(self, agent: AiAssistAgent, state_manager: StateManager):
         self.agent = agent
         self.state_manager = state_manager
 

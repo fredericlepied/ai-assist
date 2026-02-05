@@ -3,7 +3,7 @@
 import pytest
 import asyncio
 from pathlib import Path
-from boss.task_watcher import TaskFileWatcher
+from ai_assist.task_watcher import TaskFileWatcher
 
 
 @pytest.fixture

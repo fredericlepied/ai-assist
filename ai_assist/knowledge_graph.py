@@ -118,11 +118,11 @@ class KnowledgeGraph:
         """Initialize the knowledge graph
 
         Args:
-            db_path: Path to SQLite database file. If None, uses ~/.boss/knowledge_graph.db
+            db_path: Path to SQLite database file. If None, uses ~/.ai-assist/knowledge_graph.db
                     If ":memory:", uses in-memory database for testing
         """
         if db_path is None:
-            db_path = str(Path.home() / ".boss" / "knowledge_graph.db")
+            db_path = str(Path.home() / ".ai-assist" / "knowledge_graph.db")
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
         self.db_path = db_path

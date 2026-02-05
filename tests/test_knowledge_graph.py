@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timedelta
-from boss.knowledge_graph import KnowledgeGraph, Entity, Relationship
+from ai_assist.knowledge_graph import KnowledgeGraph, Entity, Relationship
 
 
 @pytest.fixture

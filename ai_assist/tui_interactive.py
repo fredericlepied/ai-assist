@@ -1,4 +1,4 @@
-"""TUI-enhanced interactive mode for BOSS"""
+"""TUI-enhanced interactive mode for ai-assist"""
 
 import asyncio
 import os
@@ -14,15 +14,15 @@ from rich.live import Live
 from rich.spinner import Spinner
 from rich.table import Table
 
-from .agent import BossAgent
+from .agent import AiAssistAgent
 from .state import StateManager
-from .tui import BossCompleter
+from .tui import AiAssistCompleter
 from .context import ConversationMemory, KnowledgeGraphContext
 from .knowledge_graph import KnowledgeGraph
 
 
 async def query_with_feedback(
-    agent: BossAgent,
+    agent: AiAssistAgent,
     prompt: str,
     console: Console,
     conversation_memory: ConversationMemory = None,
@@ -31,7 +31,7 @@ async def query_with_feedback(
     """Query the agent with real-time feedback and streaming display
 
     Args:
-        agent: The BossAgent instance
+        agent: The AiAssistAgent instance
         prompt: User's current question
         console: Rich console for output
         conversation_memory: Optional conversation history for context
@@ -117,7 +117,7 @@ async def query_with_feedback(
                 # First text chunk - stop spinner and start showing response
                 if not response_started:
                     live.stop()
-                    console.print("\n[bold cyan]BOSS:[/bold cyan] ", end="")
+                    console.print("\n[bold cyan]ai-assist:[/bold cyan] ", end="")
                     response_started = True
 
                 # Print chunk immediately
@@ -174,7 +174,7 @@ async def query_with_feedback(
     return full_response
 
 
-async def tui_interactive_mode(agent: BossAgent, state_manager: StateManager):
+async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager):
     """Run interactive mode with TUI enhancements"""
     console = Console()
 
@@ -195,14 +195,14 @@ async def tui_interactive_mode(agent: BossAgent, state_manager: StateManager):
     session = PromptSession(
         message="You> ",
         multiline=False,  # Enter submits by default
-        completer=BossCompleter(),
+        completer=AiAssistCompleter(),
         history=FileHistory(str(history_file)),
         key_bindings=kb
     )
 
     # Display welcome banner
     console.print(Panel.fit(
-        "[bold cyan]BOSS - AI Assistant for Managers[/bold cyan]\n\n"
+        "[bold cyan]ai-assist - AI Assistant for Managers[/bold cyan]\n\n"
         "Type your questions or commands.\n"
         "Commands: [yellow]/status[/yellow], [yellow]/history[/yellow], "
         "[yellow]/clear-cache[/yellow], [yellow]/kg-save[/yellow], [yellow]/help[/yellow]\n"
@@ -350,7 +350,7 @@ async def handle_clear_cache_command(state_manager: StateManager, console: Conso
 async def handle_help_command(console: Console):
     """Handle /help command"""
     help_text = """
-# BOSS Interactive Mode Help
+# ai-assist Interactive Mode Help
 
 ## Commands
 - `/status` - Show state statistics
@@ -362,13 +362,13 @@ async def handle_help_command(console: Console):
 - `/help` - Show this help
 
 ## Conversation Memory 💬
-BOSS now remembers your conversation! Follow-up questions work naturally:
-- "What are the latest DCI failures?" → BOSS answers
-- "Why did they fail?" → BOSS knows what "they" refers to!
+ai-assist now remembers your conversation! Follow-up questions work naturally:
+- "What are the latest DCI failures?" → ai-assist answers
+- "Why did they fail?" → ai-assist knows what "they" refers to!
 - Use `/clear` to start a fresh conversation
 
 ## Knowledge Graph Learning 🧠
-BOSS automatically saves tool results to the knowledge graph:
+ai-assist automatically saves tool results to the knowledge graph:
 - When you query Jira or DCI, entities are saved
 - Future queries can use cached data (faster!)
 - See feedback: "💾 Saved 5 entities to knowledge graph"
@@ -389,7 +389,7 @@ BOSS automatically saves tool results to the knowledge graph:
 - Tab completion works for all `/` commands
 - History is saved across sessions at `~/.boss/interactive_history.txt`
 - Responses are formatted as Markdown when possible
-- BOSS remembers up to 10 recent exchanges for context
+- ai-assist remembers up to 10 recent exchanges for context
 """
     console.print(Markdown(help_text))
     console.print()

@@ -2,21 +2,21 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from boss.tui_interactive import (
+from ai_assist.tui_interactive import (
     tui_interactive_mode,
     handle_status_command,
     handle_history_command,
     handle_clear_cache_command,
     handle_help_command
 )
-from boss.agent import BossAgent
-from boss.state import StateManager
+from ai_assist.agent import AiAssistAgent
+from ai_assist.state import StateManager
 
 
 @pytest.fixture
 def mock_agent():
     """Create a mock agent"""
-    agent = AsyncMock(spec=BossAgent)
+    agent = AsyncMock(spec=AiAssistAgent)
     agent.query = AsyncMock(return_value="Test response")
 
     # Mock streaming query to yield text and done signal
@@ -109,7 +109,7 @@ async def test_help_command():
     await handle_help_command(console)
 
     output_text = output.getvalue()
-    assert "BOSS Interactive Mode Help" in output_text
+    assert "ai-assist Interactive Mode Help" in output_text
     assert "/status" in output_text
     assert "/history" in output_text
 
@@ -117,7 +117,7 @@ async def test_help_command():
 @pytest.mark.asyncio
 async def test_tui_mode_initializes(mock_agent, mock_state_manager):
     """Test TUI mode initializes without errors"""
-    with patch('boss.tui_interactive.PromptSession') as mock_session_class:
+    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
         # Simulate user typing /exit
         mock_session = AsyncMock()
         mock_session.prompt_async = AsyncMock(side_effect=["/exit"])
@@ -135,7 +135,7 @@ async def test_tui_mode_initializes(mock_agent, mock_state_manager):
 async def test_multiline_input_handling(mock_state_manager):
     """Test multi-line input is parsed correctly"""
     # Create mock agent with streaming support
-    agent = AsyncMock(spec=BossAgent)
+    agent = AsyncMock(spec=AiAssistAgent)
     streaming_called = []
 
     async def mock_streaming(prompt=None, messages=None, progress_callback=None):
@@ -154,7 +154,7 @@ async def test_multiline_input_handling(mock_state_manager):
     agent.clear_tool_calls = MagicMock()
     agent.kg_save_enabled = True
 
-    with patch('boss.tui_interactive.PromptSession') as mock_session_class:
+    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
         # Simulate multi-line input then exit
         mock_session = AsyncMock()
         mock_session.prompt_async = AsyncMock(side_effect=[
@@ -173,7 +173,7 @@ async def test_multiline_input_handling(mock_state_manager):
 @pytest.mark.asyncio
 async def test_empty_input_ignored(mock_agent, mock_state_manager):
     """Test empty input is ignored"""
-    with patch('boss.tui_interactive.PromptSession') as mock_session_class:
+    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
         mock_session = AsyncMock()
         mock_session.prompt_async = AsyncMock(side_effect=[
             "",  # Empty input
@@ -192,7 +192,7 @@ async def test_empty_input_ignored(mock_agent, mock_state_manager):
 async def test_conversation_tracking(mock_state_manager):
     """Test conversation context is tracked"""
     # Create mock agent with streaming
-    agent = AsyncMock(spec=BossAgent)
+    agent = AsyncMock(spec=AiAssistAgent)
 
     async def mock_streaming(prompt=None, messages=None, progress_callback=None):
         yield "Test response"
@@ -203,7 +203,7 @@ async def test_conversation_tracking(mock_state_manager):
     agent.clear_tool_calls = MagicMock()
     agent.kg_save_enabled = True
 
-    with patch('boss.tui_interactive.PromptSession') as mock_session_class:
+    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
         mock_session = AsyncMock()
         mock_session.prompt_async = AsyncMock(side_effect=[
             "Test question",
@@ -226,7 +226,7 @@ async def test_conversation_tracking(mock_state_manager):
 @pytest.mark.asyncio
 async def test_keyboard_interrupt_handling(mock_agent, mock_state_manager):
     """Test KeyboardInterrupt is handled gracefully"""
-    with patch('boss.tui_interactive.PromptSession') as mock_session_class:
+    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
         mock_session = AsyncMock()
         mock_session.prompt_async = AsyncMock(side_effect=KeyboardInterrupt)
         mock_session_class.return_value = mock_session
@@ -240,7 +240,7 @@ async def test_keyboard_interrupt_handling(mock_agent, mock_state_manager):
 @pytest.mark.asyncio
 async def test_eoferror_handling(mock_agent, mock_state_manager):
     """Test EOFError (Ctrl-D) is handled gracefully"""
-    with patch('boss.tui_interactive.PromptSession') as mock_session_class:
+    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
         mock_session = AsyncMock()
         mock_session.prompt_async = AsyncMock(side_effect=EOFError)
         mock_session_class.return_value = mock_session
@@ -254,7 +254,7 @@ async def test_eoferror_handling(mock_agent, mock_state_manager):
 @pytest.mark.asyncio
 async def test_progress_feedback_callback():
     """Test progress callback is invoked during query"""
-    from boss.tui_interactive import query_with_feedback
+    from ai_assist.tui_interactive import query_with_feedback
     from rich.console import Console
     from io import StringIO
 
@@ -262,7 +262,7 @@ async def test_progress_feedback_callback():
     console = Console(file=output, force_terminal=False)
 
     # Create a mock agent with streaming
-    mock_agent = AsyncMock(spec=BossAgent)
+    mock_agent = AsyncMock(spec=AiAssistAgent)
 
     async def mock_streaming(prompt=None, messages=None, progress_callback=None):
         # Simulate calling the callback
@@ -291,7 +291,7 @@ async def test_progress_feedback_callback():
 async def test_feedback_with_tool_calls(mock_state_manager):
     """Test feedback shows tool calls"""
     # Create mock agent with streaming and tool calls
-    agent = AsyncMock(spec=BossAgent)
+    agent = AsyncMock(spec=AiAssistAgent)
 
     async def mock_streaming_with_tools(prompt=None, messages=None, progress_callback=None):
         if progress_callback:
@@ -310,7 +310,7 @@ async def test_feedback_with_tool_calls(mock_state_manager):
     agent.clear_tool_calls = MagicMock()
     agent.kg_save_enabled = True
 
-    with patch('boss.tui_interactive.PromptSession') as mock_session_class:
+    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
         mock_session = AsyncMock()
         mock_session.prompt_async = AsyncMock(side_effect=[
             "Find failed jobs",

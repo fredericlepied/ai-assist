@@ -1,5 +1,5 @@
 [project]
-name = "boss"
+name = "ai-assist"
 version = "0.1.0"
 description = "AI assistant for managers with MCP tools for monitoring Jira and DCI jobs"
 readme = "README.md"
@@ -24,7 +24,7 @@ dev = [
 ]
 
 [project.scripts]
-boss = "boss.main:main"
+ai-assist = "ai_assist.main:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -3,6 +3,46 @@ revision = 1
 requires-python = ">=3.12"
 
 [[package]]
+name = "ai-assist"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "anthropic", extra = ["vertex"] },
+    { name = "httpx" },
+    { name = "mcp-agent" },
+    { name = "prompt-toolkit" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "schedule" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-mock" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", extras = ["vertex"], specifier = ">=0.40.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "mcp-agent", specifier = ">=0.1.0" },
+    { name = "prompt-toolkit", specifier = ">=3.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
+    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.0" },
+    { name = "rich", specifier = ">=13.0.0" },
+    { name = "schedule", specifier = ">=1.2.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -172,42 +212,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/6b/5c/685e6633917e101e5
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3a/2a/7cc015f5b9f5db42b7d48157e23356022889fc354a2813c15934b7cb5c0e/attrs-25.4.0-py3-none-any.whl", hash = "sha256:adcf7e2a1fb3b36ac48d97835bb6d8ade15b8dcce26aba8bf1d14847b57a3373", size = 67615 },
 ]
-
-[[package]]
-name = "boss"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "anthropic", extra = ["vertex"] },
-    { name = "httpx" },
-    { name = "mcp-agent" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "schedule" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-mock" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", extras = ["vertex"], specifier = ">=0.40.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "mcp-agent", specifier = ">=0.1.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
-    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "pyyaml", specifier = ">=6.0.0" },
-    { name = "schedule", specifier = ">=1.2.0" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "certifi"

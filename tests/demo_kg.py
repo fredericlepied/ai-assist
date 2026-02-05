@@ -3,7 +3,7 @@
 
 from datetime import datetime, timedelta
 from pathlib import Path
-from boss.knowledge_graph import KnowledgeGraph
+from ai_assist.knowledge_graph import KnowledgeGraph
 
 def populate_demo_data():
     """Populate knowledge graph with demo data"""

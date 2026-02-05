@@ -3,9 +3,9 @@
 import pytest
 import json
 from datetime import datetime, timedelta
-from boss.introspection_tools import IntrospectionTools
-from boss.knowledge_graph import KnowledgeGraph
-from boss.context import ConversationMemory
+from ai_assist.introspection_tools import IntrospectionTools
+from ai_assist.knowledge_graph import KnowledgeGraph
+from ai_assist.context import ConversationMemory
 
 
 @pytest.fixture

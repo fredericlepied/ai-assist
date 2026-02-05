@@ -1,4 +1,4 @@
-"""MCP Agent for BOSS"""
+"""MCP Agent for ai-assist"""
 
 import asyncio
 import json
@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 from mcp import ClientSession, StdioServerParameters
 from anthropic import Anthropic, AnthropicVertex
-from .config import BossConfig, MCPServerConfig
+from .config import AiAssistConfig, MCPServerConfig
 from .mcp_stdio_fix import stdio_client_fixed
 from .introspection_tools import IntrospectionTools
 
@@ -15,10 +15,10 @@ if TYPE_CHECKING:
     from .context import ConversationMemory
 
 
-class BossAgent:
+class AiAssistAgent:
     """AI Agent with MCP capabilities"""
 
-    def __init__(self, config: BossConfig, knowledge_graph: Optional["KnowledgeGraph"] = None):
+    def __init__(self, config: AiAssistConfig, knowledge_graph: Optional["KnowledgeGraph"] = None):
         self.config = config
         self.knowledge_graph = knowledge_graph
         self.kg_save_enabled = True  # Can be toggled by user

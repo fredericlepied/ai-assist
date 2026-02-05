@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from .agent import BossAgent
+from .agent import AiAssistAgent
 from .state import StateManager
 from .knowledge_graph import KnowledgeGraph
 from .tasks import TaskLoader
@@ -18,7 +18,7 @@ class MonitoringScheduler:
 
     def __init__(
         self,
-        agent: BossAgent,
+        agent: AiAssistAgent,
         config,
         state_manager: StateManager,
         knowledge_graph: Optional[KnowledgeGraph] = None,

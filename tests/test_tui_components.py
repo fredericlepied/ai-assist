@@ -2,12 +2,12 @@
 
 import pytest
 from prompt_toolkit.document import Document
-from boss.tui import BossCompleter
+from ai_assist.tui import AiAssistCompleter
 
 
 def test_boss_completer_initialization():
-    """Test BossCompleter initializes with commands"""
-    completer = BossCompleter()
+    """Test AiAssistCompleter initializes with commands"""
+    completer = AiAssistCompleter()
 
     assert len(completer.commands) > 0
     assert "/status" in completer.commands
@@ -16,7 +16,7 @@ def test_boss_completer_initialization():
 
 def test_command_completion_prefix():
     """Test completion works with command prefix"""
-    completer = BossCompleter()
+    completer = AiAssistCompleter()
 
     # Create a document with /st
     document = Document("/st", cursor_position=3)
@@ -30,7 +30,7 @@ def test_command_completion_prefix():
 
 def test_command_completion_multiple_matches():
     """Test completion with multiple matches"""
-    completer = BossCompleter()
+    completer = AiAssistCompleter()
 
     # Create a document with /
     document = Document("/", cursor_position=1)
@@ -43,7 +43,7 @@ def test_command_completion_multiple_matches():
 
 def test_command_completion_no_prefix():
     """Test no completion without / prefix"""
-    completer = BossCompleter()
+    completer = AiAssistCompleter()
 
     # Create a document without /
     document = Document("status", cursor_position=6)
@@ -56,7 +56,7 @@ def test_command_completion_no_prefix():
 
 def test_command_completion_exact_match():
     """Test completion for exact match"""
-    completer = BossCompleter()
+    completer = AiAssistCompleter()
 
     # Create a document with /exit
     document = Document("/exit", cursor_position=5)
@@ -70,7 +70,7 @@ def test_command_completion_exact_match():
 
 def test_command_completion_case_insensitive():
     """Test completion is case insensitive"""
-    completer = BossCompleter()
+    completer = AiAssistCompleter()
 
     # Create a document with /ST
     document = Document("/ST", cursor_position=3)
@@ -83,7 +83,7 @@ def test_command_completion_case_insensitive():
 
 def test_command_description_provided():
     """Test completion includes descriptions"""
-    completer = BossCompleter()
+    completer = AiAssistCompleter()
 
     document = Document("/st", cursor_position=3)
 
@@ -96,7 +96,7 @@ def test_command_description_provided():
 
 def test_completion_quit_commands():
     """Test completion for quit/exit commands"""
-    completer = BossCompleter()
+    completer = AiAssistCompleter()
 
     # Test /q
     document = Document("/q", cursor_position=2)
@@ -108,7 +108,7 @@ def test_completion_quit_commands():
 
 def test_completion_help_command():
     """Test completion for help command"""
-    completer = BossCompleter()
+    completer = AiAssistCompleter()
 
     document = Document("/h", cursor_position=2)
     completions = list(completer.get_completions(document, None))
@@ -118,7 +118,7 @@ def test_completion_help_command():
 
 def test_completion_clear_cache_command():
     """Test completion for clear commands"""
-    completer = BossCompleter()
+    completer = AiAssistCompleter()
 
     document = Document("/clear", cursor_position=6)
     completions = list(completer.get_completions(document, None))

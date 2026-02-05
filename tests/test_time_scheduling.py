@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, time as dt_time, timedelta
-from boss.tasks import TaskDefinition, TaskLoader
+from ai_assist.tasks import TaskDefinition, TaskLoader
 
 
 def test_parse_morning_on_weekdays():

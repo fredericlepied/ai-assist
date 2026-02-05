@@ -1,4 +1,4 @@
-"""Main entry point for BOSS"""
+"""Main entry point for ai-assist"""
 
 import asyncio
 import json
@@ -7,7 +7,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from .config import get_config
-from .agent import BossAgent
+from .agent import AiAssistAgent
 from .monitors import MonitoringScheduler
 from .state import StateManager
 from .knowledge_graph import KnowledgeGraph
@@ -23,7 +23,7 @@ def should_use_tui():
         return False
 
     # Check environment variable
-    mode = os.getenv("BOSS_INTERACTIVE_MODE", "tui").lower()
+    mode = os.getenv("AI_ASSIST_INTERACTIVE_MODE", "tui").lower()
     if mode == "basic":
         return False
 
@@ -36,7 +36,7 @@ def should_use_tui():
         return False
 
 
-async def interactive_mode(agent: BossAgent, state_manager: StateManager, use_tui: bool = None):
+async def interactive_mode(agent: AiAssistAgent, state_manager: StateManager, use_tui: bool = None):
     """Run in interactive mode with TUI or basic fallback"""
     if use_tui is None:
         use_tui = should_use_tui()
@@ -47,16 +47,16 @@ async def interactive_mode(agent: BossAgent, state_manager: StateManager, use_tu
             await tui_interactive_mode(agent, state_manager)
         except ImportError:
             print("TUI libraries not available, using basic mode")
-            print("Install with: pip install 'boss[dev]' prompt-toolkit rich")
+            print("Install with: pip install 'ai-assist[dev]' prompt-toolkit rich")
             await basic_interactive_mode(agent, state_manager)
     else:
         await basic_interactive_mode(agent, state_manager)
 
 
-async def basic_interactive_mode(agent: BossAgent, state_manager: StateManager):
+async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManager):
     """Original simple interactive mode (fallback)"""
     print("\n" + "="*60)
-    print("BOSS - AI Assistant for Managers")
+    print("ai-assist - AI Assistant for Managers")
     print("="*60)
     print("\nType your questions or commands.")
     print("Commands: /status, /history, /clear-cache, /help")
@@ -102,7 +102,7 @@ async def basic_interactive_mode(agent: BossAgent, state_manager: StateManager):
                 continue
 
             if user_input.lower() == "/help":
-                print("\nBOSS Interactive Mode Help")
+                print("\nai-assist Interactive Mode Help")
                 print("="*60)
                 print("Commands:")
                 print("  /status      - Show state statistics")
@@ -113,7 +113,7 @@ async def basic_interactive_mode(agent: BossAgent, state_manager: StateManager):
                 print()
                 continue
 
-            print("\nBOSS: ", end="", flush=True)
+            print("\nAssistant: ", end="", flush=True)
             response = await agent.query(user_input)
             print(response)
             print()
@@ -133,14 +133,14 @@ async def basic_interactive_mode(agent: BossAgent, state_manager: StateManager):
 
 
 async def monitoring_mode(
-    agent: BossAgent,
+    agent: AiAssistAgent,
     config,
     state_manager: StateManager,
     knowledge_graph: KnowledgeGraph
 ):
     """Run in monitoring mode"""
-    monitor_file = Path.home() / ".boss" / "monitors.yaml"
-    task_file = Path.home() / ".boss" / "tasks.yaml"
+    monitor_file = Path.home() / ".ai-assist" / "monitors.yaml"
+    task_file = Path.home() / ".ai-assist" / "tasks.yaml"
 
     scheduler = MonitoringScheduler(
         agent,
@@ -158,7 +158,7 @@ async def monitoring_mode(
         scheduler.stop()
 
 
-async def run_query(agent: BossAgent, query: str):
+async def run_query(agent: AiAssistAgent, query: str):
     """Run a single query"""
     response = await agent.query(query)
     print(response)
@@ -182,7 +182,7 @@ def kg_stats_command(kg: KnowledgeGraph):
 
 
 def kg_asof_command(kg: KnowledgeGraph, time_str: str):
-    """Show what BOSS knew at a specific time"""
+    """Show what ai-assist knew at a specific time"""
     try:
         time = datetime.fromisoformat(time_str)
     except ValueError:
@@ -192,7 +192,7 @@ def kg_asof_command(kg: KnowledgeGraph, time_str: str):
     queries = KnowledgeGraphQueries(kg)
     results = queries.what_did_we_know_at(time)
 
-    print(f"\nWhat BOSS knew at {time.isoformat()}:")
+    print(f"\nWhat ai-assist knew at {time.isoformat()}:")
     print("=" * 50)
     print(f"Total entities: {len(results)}")
     for entity in results[:20]:  # Limit to 20 for display
@@ -316,7 +316,7 @@ async def main_async():
     if command and not command.startswith('/'):
         print(f"Error: Commands must start with /")
         print(f"Did you mean: /{command}?")
-        print("\nRun 'boss /help' to see available commands")
+        print("\nRun 'ai-assist /help' to see available commands")
         sys.exit(1)
 
     if command:
@@ -330,7 +330,7 @@ async def main_async():
         print("\n" + "="*60)
         print("ERROR: No Anthropic credentials configured")
         print("="*60)
-        print("\nBOSS requires Anthropic API access to function.")
+        print("\nai-assist requires Anthropic API access to function.")
         print("\nYou have TWO options:")
         print("\n1. VERTEX AI (Google Cloud) - Recommended for enterprise:")
         print("   • Set environment variables:")
@@ -352,7 +352,7 @@ async def main_async():
     knowledge_graph = KnowledgeGraph()
 
     # Only initialize agent if needed (with knowledge graph for interactive learning)
-    agent = BossAgent(config, knowledge_graph=knowledge_graph) if needs_agent else None
+    agent = AiAssistAgent(config, knowledge_graph=knowledge_graph) if needs_agent else None
 
     try:
         if agent:
@@ -362,7 +362,7 @@ async def main_async():
         if command:
 
             if command == "help":
-                print("\nBOSS - AI Assistant for Managers")
+                print("\nai-assist - AI Assistant for Managers")
                 print("="*60)
                 print("\nAvailable commands:")
                 print("  /monitor           - Start monitoring DCI and Jira")
@@ -371,7 +371,7 @@ async def main_async():
                 print("  /status            - Show state statistics")
                 print("  /clear-cache       - Clear expired cache")
                 print("  /kg-stats          - Show knowledge graph statistics")
-                print("  /kg-asof '<time>'  - What BOSS knew at a specific time")
+                print("  /kg-asof '<time>'  - What ai-assist knew at a specific time")
                 print("  /kg-late [min]     - Show late discoveries (default: 30 min)")
                 print("  /kg-changes [hrs]  - Show recent changes (default: 1 hour)")
                 print("  /kg-show <id>      - Show entity details with context")
@@ -382,7 +382,7 @@ async def main_async():
                 await monitoring_mode(agent, config, state_manager, knowledge_graph)
             elif command == "query":
                 if len(sys.argv) < 3:
-                    print("Usage: boss /query 'your question here'")
+                    print("Usage: ai-assist /query 'your question here'")
                     sys.exit(1)
                 query = " ".join(sys.argv[2:])
                 await run_query(agent, query)
@@ -390,7 +390,7 @@ async def main_async():
                 await interactive_mode(agent, state_manager)
             elif command == "status":
                 stats = state_manager.get_stats()
-                print("\nBOSS State Statistics:")
+                print("\nai-assist State Statistics:")
                 print("=" * 40)
                 for key, value in stats.items():
                     print(f"{key:20s}: {value}")
@@ -403,7 +403,7 @@ async def main_async():
                 kg_stats_command(knowledge_graph)
             elif command == "kg-asof":
                 if len(sys.argv) < 3:
-                    print("Usage: boss /kg-asof '2026-02-04 14:00'")
+                    print("Usage: ai-assist /kg-asof '2026-02-04 14:00'")
                     sys.exit(1)
                 time_str = sys.argv[2]
                 kg_asof_command(knowledge_graph, time_str)
@@ -415,13 +415,13 @@ async def main_async():
                 kg_changes_command(knowledge_graph, hours)
             elif command == "kg-show":
                 if len(sys.argv) < 3:
-                    print("Usage: boss /kg-show <entity-id>")
+                    print("Usage: ai-assist /kg-show <entity-id>")
                     sys.exit(1)
                 entity_id = sys.argv[2]
                 kg_show_command(knowledge_graph, entity_id)
             else:
                 print(f"Unknown command: /{command}")
-                print("\nRun 'boss /help' to see available commands")
+                print("\nRun 'ai-assist /help' to see available commands")
                 sys.exit(1)
         else:
             # Default to interactive mode

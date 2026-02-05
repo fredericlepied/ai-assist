@@ -3,8 +3,8 @@
 import pytest
 import os
 from unittest.mock import patch, MagicMock
-from boss.config import BossConfig, get_config
-from boss.agent import BossAgent
+from ai_assist.config import AiAssistConfig, get_config
+from ai_assist.agent import AiAssistAgent
 
 
 def test_vertex_config_detection():
@@ -14,7 +14,7 @@ def test_vertex_config_detection():
         "ANTHROPIC_VERTEX_REGION": "us-central1",
         "ANTHROPIC_API_KEY": "",  # No API key
     }, clear=True):
-        config = BossConfig.from_env()
+        config = AiAssistConfig.from_env()
 
         assert config.vertex_project_id == "test-project-123"
         assert config.vertex_region == "us-central1"
@@ -28,7 +28,7 @@ def test_direct_api_key_config():
         "ANTHROPIC_API_KEY": "sk-ant-test123",
         "ANTHROPIC_VERTEX_PROJECT_ID": "",
     }, clear=True):
-        config = BossConfig.from_env()
+        config = AiAssistConfig.from_env()
 
         assert config.anthropic_api_key == "sk-ant-test123"
         assert config.vertex_project_id == ""
@@ -41,7 +41,7 @@ def test_vertex_takes_priority_when_both_set():
         "ANTHROPIC_API_KEY": "sk-ant-test123",
         "ANTHROPIC_VERTEX_PROJECT_ID": "test-project-123",
     }, clear=True):
-        config = BossConfig.from_env()
+        config = AiAssistConfig.from_env()
 
         # When API key is set, use_vertex should be False
         # (API key takes priority)
@@ -54,25 +54,25 @@ def test_vertex_region_default():
         "ANTHROPIC_VERTEX_PROJECT_ID": "test-project-123",
         "ANTHROPIC_API_KEY": "",
     }, clear=True):
-        config = BossConfig.from_env()
+        config = AiAssistConfig.from_env()
 
         assert config.vertex_region is None  # No default - SDK will choose
 
 
 def test_agent_uses_vertex_client():
-    """Test that BossAgent uses AnthropicVertex when configured"""
+    """Test that AiAssistAgent uses AnthropicVertex when configured"""
     with patch.dict(os.environ, {
         "ANTHROPIC_VERTEX_PROJECT_ID": "test-project-123",
         "ANTHROPIC_VERTEX_REGION": "us-central1",
         "ANTHROPIC_API_KEY": "",
     }, clear=True):
-        config = BossConfig.from_env()
+        config = AiAssistConfig.from_env()
 
         # Mock AnthropicVertex to avoid actual GCP calls
-        with patch('boss.agent.AnthropicVertex') as mock_vertex:
+        with patch('ai_assist.agent.AnthropicVertex') as mock_vertex:
             mock_vertex.return_value = MagicMock()
 
-            agent = BossAgent(config)
+            agent = AiAssistAgent(config)
 
             # Verify AnthropicVertex was called with correct params
             mock_vertex.assert_called_once_with(
@@ -82,18 +82,18 @@ def test_agent_uses_vertex_client():
 
 
 def test_agent_uses_vertex_client_without_region():
-    """Test that BossAgent uses AnthropicVertex without region (SDK default)"""
+    """Test that AiAssistAgent uses AnthropicVertex without region (SDK default)"""
     with patch.dict(os.environ, {
         "ANTHROPIC_VERTEX_PROJECT_ID": "test-project-123",
         "ANTHROPIC_API_KEY": "",
     }, clear=True):
-        config = BossConfig.from_env()
+        config = AiAssistConfig.from_env()
 
         # Mock AnthropicVertex to avoid actual GCP calls
-        with patch('boss.agent.AnthropicVertex') as mock_vertex:
+        with patch('ai_assist.agent.AnthropicVertex') as mock_vertex:
             mock_vertex.return_value = MagicMock()
 
-            agent = BossAgent(config)
+            agent = AiAssistAgent(config)
 
             # Verify AnthropicVertex was called without region param
             mock_vertex.assert_called_once_with(
@@ -102,18 +102,18 @@ def test_agent_uses_vertex_client_without_region():
 
 
 def test_agent_uses_direct_api_client():
-    """Test that BossAgent uses Anthropic when using API key"""
+    """Test that AiAssistAgent uses Anthropic when using API key"""
     with patch.dict(os.environ, {
         "ANTHROPIC_API_KEY": "sk-ant-test123",
         "ANTHROPIC_VERTEX_PROJECT_ID": "",
     }, clear=True):
-        config = BossConfig.from_env()
+        config = AiAssistConfig.from_env()
 
         # Mock Anthropic to avoid actual API calls
-        with patch('boss.agent.Anthropic') as mock_anthropic:
+        with patch('ai_assist.agent.Anthropic') as mock_anthropic:
             mock_anthropic.return_value = MagicMock()
 
-            agent = BossAgent(config)
+            agent = AiAssistAgent(config)
 
             # Verify Anthropic was called with correct params
             mock_anthropic.assert_called_once_with(
@@ -127,7 +127,7 @@ def test_no_credentials_configured():
         "ANTHROPIC_API_KEY": "",
         "ANTHROPIC_VERTEX_PROJECT_ID": "",
     }, clear=True):
-        config = BossConfig.from_env()
+        config = AiAssistConfig.from_env()
 
         assert config.anthropic_api_key == ""
         assert config.vertex_project_id == ""
@@ -139,11 +139,11 @@ def test_env_var_loading():
     test_env = {
         "ANTHROPIC_VERTEX_PROJECT_ID": "my-gcp-project",
         "ANTHROPIC_VERTEX_REGION": "europe-west1",
-        "BOSS_MODEL": "claude-opus-4-5-20251101",
+        "AI_ASSIST_MODEL": "claude-opus-4-5-20251101",
     }
 
     with patch.dict(os.environ, test_env, clear=True):
-        config = BossConfig.from_env()
+        config = AiAssistConfig.from_env()
 
         assert config.vertex_project_id == "my-gcp-project"
         assert config.vertex_region == "europe-west1"

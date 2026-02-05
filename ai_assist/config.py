@@ -1,4 +1,4 @@
-"""Configuration management for BOSS"""
+"""Configuration management for ai-assist"""
 
 import os
 import yaml
@@ -20,8 +20,8 @@ class MCPServerConfig(BaseModel):
 
 
 
-class BossConfig(BaseModel):
-    """Main BOSS configuration"""
+class AiAssistConfig(BaseModel):
+    """Main ai-assist configuration"""
     anthropic_api_key: str = Field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
 
     # Vertex AI configuration (alternative to direct API key)
@@ -43,10 +43,10 @@ class BossConfig(BaseModel):
     notification_channel: str = Field(default="console", description="console, email, slack, etc.")
 
     @classmethod
-    def from_env(cls, mcp_servers_file: Optional[Path] = None) -> "BossConfig":
+    def from_env(cls, mcp_servers_file: Optional[Path] = None) -> "AiAssistConfig":
         """Load configuration from environment variables and YAML files"""
         if mcp_servers_file is None:
-            mcp_servers_file = Path.home() / ".boss" / "mcp_servers.yaml"
+            mcp_servers_file = Path.home() / ".ai-assist" / "mcp_servers.yaml"
 
         mcp_servers = load_mcp_servers_from_yaml(mcp_servers_file)
 
@@ -54,7 +54,7 @@ class BossConfig(BaseModel):
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             vertex_project_id=os.getenv("ANTHROPIC_VERTEX_PROJECT_ID"),
             vertex_region=os.getenv("ANTHROPIC_VERTEX_REGION"),
-            model=os.getenv("BOSS_MODEL", "claude-sonnet-4-5@20250929"),
+            model=os.getenv("AI_ASSIST_MODEL", "claude-sonnet-4-5@20250929"),
             mcp_servers=mcp_servers
         )
 
@@ -107,6 +107,6 @@ def load_mcp_servers_from_yaml(path: Path) -> dict[str, MCPServerConfig]:
         return {}
 
 
-def get_config() -> BossConfig:
+def get_config() -> AiAssistConfig:
     """Get the current configuration"""
-    return BossConfig.from_env()
+    return AiAssistConfig.from_env()

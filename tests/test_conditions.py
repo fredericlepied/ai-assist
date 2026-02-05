@@ -1,7 +1,7 @@
 """Tests for condition evaluation"""
 
 import pytest
-from boss.conditions import ConditionEvaluator
+from ai_assist.conditions import ConditionEvaluator
 
 
 def test_extract_metadata_found_pattern():

@@ -2,9 +2,9 @@
 
 import pytest
 from datetime import datetime
-from boss.agent import BossAgent
-from boss.config import BossConfig
-from boss.knowledge_graph import KnowledgeGraph
+from ai_assist.agent import AiAssistAgent
+from ai_assist.config import AiAssistConfig
+from ai_assist.knowledge_graph import KnowledgeGraph
 
 
 @pytest.fixture
@@ -16,17 +16,17 @@ def kg():
 @pytest.fixture
 def agent_with_kg(kg):
     """Create agent with knowledge graph"""
-    config = BossConfig(
+    config = AiAssistConfig(
         anthropic_api_key="test-key",
         mcp_servers={}
     )
-    return BossAgent(config, knowledge_graph=kg)
+    return AiAssistAgent(config, knowledge_graph=kg)
 
 
 def test_agent_initializes_with_kg(kg):
     """Test agent accepts knowledge graph parameter"""
-    config = BossConfig(anthropic_api_key="test-key", mcp_servers={})
-    agent = BossAgent(config, knowledge_graph=kg)
+    config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
+    agent = AiAssistAgent(config, knowledge_graph=kg)
 
     assert agent.knowledge_graph is kg
     assert agent.kg_save_enabled is True
@@ -34,8 +34,8 @@ def test_agent_initializes_with_kg(kg):
 
 def test_agent_initializes_without_kg():
     """Test agent works without knowledge graph"""
-    config = BossConfig(anthropic_api_key="test-key", mcp_servers={})
-    agent = BossAgent(config, knowledge_graph=None)
+    config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
+    agent = AiAssistAgent(config, knowledge_graph=None)
 
     assert agent.knowledge_graph is None
     assert agent.kg_save_enabled is True

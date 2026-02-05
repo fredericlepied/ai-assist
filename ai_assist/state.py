@@ -34,7 +34,7 @@ class StateManager:
     """Manage persistent state across monitoring runs"""
 
     def __init__(self, state_dir: Path = None):
-        self.state_dir = state_dir or Path.home() / ".boss" / "state"
+        self.state_dir = state_dir or Path.home() / ".ai-assist" / "state"
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.monitors: dict[str, MonitorState] = {}
         self.cache_dir = self.state_dir / "cache"

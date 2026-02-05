@@ -2,8 +2,8 @@
 
 import pytest
 from datetime import datetime, timedelta
-from boss.knowledge_graph import KnowledgeGraph
-from boss.kg_queries import KnowledgeGraphQueries
+from ai_assist.knowledge_graph import KnowledgeGraph
+from ai_assist.kg_queries import KnowledgeGraphQueries
 
 
 def test_end_to_end_workflow():

@@ -3,8 +3,8 @@
 import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
-from boss.monitors import MonitoringScheduler
-from boss.state import StateManager
+from ai_assist.monitors import MonitoringScheduler
+from ai_assist.state import StateManager
 
 
 @pytest.fixture

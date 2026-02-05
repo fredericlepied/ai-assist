@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 from .tasks import TaskDefinition
-from .agent import BossAgent
+from .agent import AiAssistAgent
 from .state import StateManager
 from .conditions import ConditionEvaluator, ActionExecutor
 
@@ -25,7 +25,7 @@ class TaskRunner:
     def __init__(
         self,
         task_def: TaskDefinition,
-        agent: BossAgent,
+        agent: AiAssistAgent,
         state_manager: StateManager
     ):
         self.task_def = task_def

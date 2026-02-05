@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from boss.tasks import TaskDefinition, TaskLoader
+from ai_assist.tasks import TaskDefinition, TaskLoader
 
 
 def test_parse_interval_seconds():

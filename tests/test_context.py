@@ -2,8 +2,8 @@
 
 import pytest
 from datetime import datetime, timedelta
-from boss.context import ConversationMemory, KnowledgeGraphContext
-from boss.knowledge_graph import KnowledgeGraph
+from ai_assist.context import ConversationMemory, KnowledgeGraphContext
+from ai_assist.knowledge_graph import KnowledgeGraph
 
 
 def test_conversation_memory_initialization():

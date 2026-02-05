@@ -3,9 +3,9 @@
 import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
-from boss.tasks import TaskDefinition
-from boss.task_runner import TaskRunner, TaskResult
-from boss.state import StateManager
+from ai_assist.tasks import TaskDefinition
+from ai_assist.task_runner import TaskRunner, TaskResult
+from ai_assist.state import StateManager
 
 
 @pytest.fixture

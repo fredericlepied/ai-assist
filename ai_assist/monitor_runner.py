@@ -8,7 +8,7 @@ from .knowledge_graph import KnowledgeGraph
 from .tasks import MonitorDefinition
 
 if TYPE_CHECKING:
-    from .agent import BossAgent
+    from .agent import AiAssistAgent
 
 
 class MonitorRunner:
@@ -17,7 +17,7 @@ class MonitorRunner:
     def __init__(
         self,
         monitor_def: MonitorDefinition,
-        agent: "BossAgent",
+        agent: "AiAssistAgent",
         state_manager: StateManager,
         knowledge_graph: Optional[KnowledgeGraph] = None
     ):

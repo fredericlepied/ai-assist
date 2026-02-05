@@ -2,8 +2,8 @@
 
 import pytest
 from datetime import datetime, timedelta
-from boss.knowledge_graph import KnowledgeGraph
-from boss.kg_queries import KnowledgeGraphQueries
+from ai_assist.knowledge_graph import KnowledgeGraph
+from ai_assist.kg_queries import KnowledgeGraphQueries
 
 
 @pytest.fixture
@@ -274,7 +274,7 @@ def test_get_ticket_with_context(kg, queries):
 
 def test_format_duration():
     """Test duration formatting"""
-    from boss.kg_queries import KnowledgeGraphQueries
+    from ai_assist.kg_queries import KnowledgeGraphQueries
 
     assert KnowledgeGraphQueries._format_duration(0) == "0s"
     assert KnowledgeGraphQueries._format_duration(45) == "45s"

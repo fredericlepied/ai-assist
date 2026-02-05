@@ -1,10 +1,10 @@
-"""TUI components for BOSS"""
+"""TUI components for ai-assist"""
 
 from prompt_toolkit.completion import Completer, Completion
 
 
-class BossCompleter(Completer):
-    """Command completer for BOSS interactive mode"""
+class AiAssistCompleter(Completer):
+    """Command completer for ai-assist interactive mode"""
 
     def __init__(self):
         self.commands = [
