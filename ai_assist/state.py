@@ -4,21 +4,27 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class MonitorState(BaseModel):
     """State for a single monitor"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     last_check: Optional[datetime] = None
     last_results: dict[str, Any] = Field(default_factory=dict)
     seen_items: set[str] = Field(default_factory=set)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat(),
-            set: lambda v: list(v)
-        }
+    @field_serializer('seen_items')
+    def serialize_seen_items(self, value: set[str]) -> list[str]:
+        """Serialize set to list for JSON compatibility"""
+        return list(value)
+
+    @field_serializer('last_check')
+    def serialize_last_check(self, value: Optional[datetime]) -> Optional[str]:
+        """Serialize datetime to ISO format string"""
+        return value.isoformat() if value else None
 
     @classmethod
     def from_dict(cls, data: dict) -> "MonitorState":
