@@ -7,7 +7,7 @@
 uv sync
 
 # Verify installation
-uv run boss kg-stats
+uv run ai-assist kg-stats
 ```
 
 ## Quick Demo (5 minutes)
@@ -37,49 +37,49 @@ Total relationships: 7
 
 **View statistics:**
 ```bash
-uv run boss kg-stats
+uv run ai-assist kg-stats
 ```
 
 **Find jobs discovered late:**
 ```bash
-uv run boss kg-late 10  # Jobs discovered >10 min late
+uv run ai-assist kg-late 10  # Jobs discovered >10 min late
 ```
 
 **Show job details with relationships:**
 ```bash
-uv run boss kg-show dci-job-123456
+uv run ai-assist kg-show dci-job-123456
 ```
 
 **Show ticket with related jobs:**
 ```bash
-uv run boss kg-show ticket-CILAB-1234
+uv run ai-assist kg-show ticket-CILAB-1234
 ```
 
 **Temporal snapshot (what we knew at a specific time):**
 ```bash
-uv run boss kg-asof "2026-02-04 18:00"
+uv run ai-assist kg-asof "2026-02-04 18:00"
 ```
 
 **Recent changes:**
 ```bash
-uv run boss kg-changes 1  # Changes in last 1 hour
+uv run ai-assist kg-changes 1  # Changes in last 1 hour
 ```
 
 ## CLI Commands Reference
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `kg-stats` | Show statistics | `boss kg-stats` |
-| `kg-asof "<time>"` | Temporal snapshot | `boss kg-asof "2026-02-04 14:00"` |
-| `kg-late [min]` | Late discoveries | `boss kg-late 30` |
-| `kg-changes [hrs]` | Recent changes | `boss kg-changes 2` |
-| `kg-show <id>` | Entity details | `boss kg-show dci-job-123456` |
+| `kg-stats` | Show statistics | `ai-assist kg-stats` |
+| `kg-asof "<time>"` | Temporal snapshot | `ai-assist kg-asof "2026-02-04 14:00"` |
+| `kg-late [min]` | Late discoveries | `ai-assist kg-late 30` |
+| `kg-changes [hrs]` | Recent changes | `ai-assist kg-changes 2` |
+| `kg-show <id>` | Entity details | `ai-assist kg-show dci-job-123456` |
 
 ## Python API
 
 ```python
-from boss.knowledge_graph import KnowledgeGraph
-from boss.kg_queries import KnowledgeGraphQueries
+from ai_assist.knowledge_graph import KnowledgeGraph
+from ai_assist.kg_queries import KnowledgeGraphQueries
 from datetime import datetime, timedelta
 
 # Initialize
@@ -153,8 +153,8 @@ pytest tests/test_knowledge_graph.py::test_insert_entity_with_bitemporal -v
    - Example: Job started at 10:00, ended at 10:15
 
 2. **Transaction Time** (`tx_from`, `tx_to`)
-   - When BOSS **learned** about the fact
-   - Example: BOSS discovered the job at 10:45
+   - When ai-assist **learned** about the fact
+   - Example: ai-assist discovered the job at 10:45
 
 ### Discovery Lag
 
@@ -166,7 +166,7 @@ Discovery Lag = tx_from - valid_from
 
 Example:
 - Job failed at 10:00 (`valid_from`)
-- BOSS discovered it at 10:45 (`tx_from`)
+- ai-assist discovered it at 10:45 (`tx_from`)
 - Discovery lag: 45 minutes
 
 This identifies monitoring delays!
@@ -176,13 +176,13 @@ This identifies monitoring delays!
 ### 1. Monitoring Quality
 Find jobs discovered significantly late:
 ```bash
-boss kg-late 30  # >30 min lag
+ai-assist kg-late 30  # >30 min lag
 ```
 
 ### 2. Historical Analysis
-See what BOSS knew at a specific time:
+See what ai-assist knew at a specific time:
 ```bash
-boss kg-asof "2026-02-04 14:00"
+ai-assist kg-asof "2026-02-04 14:00"
 ```
 
 ### 3. Impact Analysis
@@ -199,7 +199,7 @@ jobs = [entity for rel, entity in related if entity.entity_type == "dci_job"]
 ### 4. Ticket Tracking
 See all jobs related to a ticket:
 ```bash
-boss kg-show ticket-CILAB-1234
+ai-assist kg-show ticket-CILAB-1234
 ```
 
 ### 5. Trend Analysis
@@ -212,11 +212,11 @@ print(f"P95 lag: {stats['p95_lag_minutes']} minutes")
 
 ## Database Location
 
-Default: `~/.boss/knowledge_graph.db`
+Default: `~/.ai-assist/knowledge_graph.db`
 
 This is a SQLite database that you can:
-- Back up: `cp ~/.boss/knowledge_graph.db backup.db`
-- Inspect: `sqlite3 ~/.boss/knowledge_graph.db`
+- Back up: `cp ~/.ai-assist/knowledge_graph.db backup.db`
+- Inspect: `sqlite3 ~/.ai-assist/knowledge_graph.db`
 - Export: Use SQLite export tools
 
 ## Troubleshooting
@@ -227,7 +227,7 @@ This is a SQLite database that you can:
 uv run python tests/demo_kg.py
 
 # Or run monitors to collect real data
-boss monitor
+ai-assist monitor
 ```
 
 **Commands not working?**
@@ -236,13 +236,13 @@ boss monitor
 uv sync
 
 # Verify CLI works
-uv run boss kg-stats
+uv run ai-assist kg-stats
 ```
 
 **Need to reset?**
 ```bash
 # Delete database (will lose all data!)
-rm ~/.boss/knowledge_graph.db
+rm ~/.ai-assist/knowledge_graph.db
 
 # Repopulate with demo data
 uv run python tests/demo_kg.py
@@ -260,5 +260,5 @@ uv run python tests/demo_kg.py
 
 - Full documentation: `KNOWLEDGE_GRAPH.md`
 - Implementation details: `IMPLEMENTATION_SUMMARY.md`
-- Source code: `boss/knowledge_graph.py`, `boss/kg_queries.py`
+- Source code: `ai_assist/knowledge_graph.py`, `ai_assist/kg_queries.py`
 - Tests: `tests/test_*.py`

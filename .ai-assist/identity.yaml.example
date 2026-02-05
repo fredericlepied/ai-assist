@@ -1,0 +1,51 @@
+version: '1.0'
+
+# User information
+user:
+  name: Fred Lepied
+  role: Engineering Manager
+  organization: Red Hat
+  timezone: Europe/Paris
+
+  # Optional: Detailed work context (team structure, priorities, etc.)
+  # This helps the assistant understand your team and give better advice
+  context: |
+    I manage a team of 8 engineers working on OpenShift CI/CD infrastructure.
+
+    Team structure:
+    - Senior Engineers: Sarah (authentication, 10y exp), Marcus (networking, 8y exp)
+    - Mid-level: Alex (CI pipelines), Jordan (testing automation), Chen (monitoring)
+    - Junior: Maria (just joined, learning DCI), Raj (6 months, focus on Jira automation)
+    - Contractor: Jamie (part-time, handles documentation)
+
+    Key areas:
+    - DCI (Distributed CI): Alex leads, Chen supports
+    - OpenShift testing: Jordan and Marcus collaborate
+    - Authentication/security: Sarah owns, I review
+
+    Current priorities:
+    - Migrate DCI to new infrastructure (Q1 2026)
+    - Reduce test flakiness by 50%
+    - Onboard Maria successfully
+
+# Assistant configuration
+assistant:
+  nickname: Nexus
+
+  # Optional: Custom personality override
+  # If set, this replaces the default system prompt
+  # personality: |
+  #   You are Nexus, Fred's AI assistant for managing engineering teams.
+  #   You are knowledgeable about CI/CD, OpenShift, and distributed systems.
+  #   You help with team management, prioritization, and technical decisions.
+
+# Communication preferences
+preferences:
+  # Formality: professional, casual, friendly
+  formality: professional
+
+  # Verbosity: concise, detailed, verbose
+  verbosity: concise
+
+  # Emoji usage: none, minimal, moderate, liberal
+  emoji_usage: moderate

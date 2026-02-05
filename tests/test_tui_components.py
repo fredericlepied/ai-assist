@@ -5,7 +5,7 @@ from prompt_toolkit.document import Document
 from ai_assist.tui import AiAssistCompleter
 
 
-def test_boss_completer_initialization():
+def test_ai_assist_completer_initialization():
     """Test AiAssistCompleter initializes with commands"""
     completer = AiAssistCompleter()
 

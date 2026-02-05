@@ -1,5 +1,5 @@
-# Quick Start Examples for BOSS User-Defined Tasks
-# Copy this file to ~/.boss/tasks.yaml and customize as needed
+# Quick Start Examples for ai-assist User-Defined Tasks
+# Copy this file to ~/.ai_assist/tasks.yaml and customize as needed
 
 tasks:
   # Example 1: Simple monitoring task
@@ -116,9 +116,9 @@ tasks:
 
 # Tips:
 # 1. Start with simple tasks and add complexity gradually
-# 2. Test prompts interactively first (boss interactive)
+# 2. Test prompts interactively first (ai-assist interactive)
 # 3. Use "enabled: false" to keep tasks for reference without running them
-# 4. Check ~/.boss/logs/ for action logs
-# 5. Monitor execution in ~/.boss/state/task_*.json
+# 4. Check ~/.ai_assist/logs/ for action logs
+# 5. Monitor execution in ~/.ai_assist/state/task_*.json
 #
 # See TASKS.md for full documentation

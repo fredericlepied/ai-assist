@@ -1,33 +1,33 @@
-# BOSS Command Reference
+# ai-assist Command Reference
 
-All BOSS commands start with the `/` prefix, consistent with TUI interfaces like Claude Code.
+All ai-assist commands start with the `/` prefix, consistent with TUI interfaces like Claude Code.
 
 ## Command Line Usage
 
 ```bash
 # Interactive mode (default)
-boss
-boss /interactive
+ai-assist
+ai-assist /interactive
 
 # Help
-boss /help
+ai-assist /help
 
 # Monitoring
-boss /monitor
+ai-assist /monitor
 
 # One-off queries
-boss /query "What are the latest DCI failures?"
+ai-assist /query "What are the latest DCI failures?"
 
 # State management
-boss /status
-boss /clear-cache
+ai-assist /status
+ai-assist /clear-cache
 
 # Knowledge graph queries
-boss /kg-stats
-boss /kg-asof '2026-02-04 14:00'
-boss /kg-late 30
-boss /kg-changes 1
-boss /kg-show <entity-id>
+ai-assist /kg-stats
+ai-assist /kg-asof '2026-02-04 14:00'
+ai-assist /kg-late 30
+ai-assist /kg-changes 1
+ai-assist /kg-show <entity-id>
 ```
 
 ## Interactive Mode Commands
@@ -54,11 +54,11 @@ Start continuous monitoring of DCI and Jira based on configuration in `.env`.
 - `DCI_QUERIES` - Pipe-separated list of DCI query strings
 
 **User Tasks:**
-Create `~/.boss/tasks.yaml` for custom periodic tasks that run alongside built-in monitors.
+Create `~/.ai-assist/tasks.yaml` for custom periodic tasks that run alongside built-in monitors.
 
 **Example:**
 ```bash
-boss /monitor
+ai-assist /monitor
 ```
 
 ### `/query '<text>'`
@@ -66,8 +66,8 @@ Execute a single query and exit.
 
 **Example:**
 ```bash
-boss /query "Find all OCP 4.19 jobs that failed today"
-boss /query "What are the critical Jira tickets in CILAB?"
+ai-assist /query "Find all OCP 4.19 jobs that failed today"
+ai-assist /query "What are the critical Jira tickets in CILAB?"
 ```
 
 ### `/interactive`
@@ -75,9 +75,9 @@ Start an interactive chat session. This is the default mode if no command is spe
 
 **Example:**
 ```bash
-boss /interactive
+ai-assist /interactive
 # or simply
-boss
+ai-assist
 ```
 
 ### `/status`
@@ -85,7 +85,7 @@ Show state statistics including number of monitors, cached queries, and history 
 
 **Example:**
 ```bash
-boss /status
+ai-assist /status
 ```
 
 ### `/clear-cache`
@@ -93,7 +93,7 @@ Clear expired cache entries from the state directory.
 
 **Example:**
 ```bash
-boss /clear-cache
+ai-assist /clear-cache
 ```
 
 ## Knowledge Graph Commands
@@ -105,29 +105,29 @@ Show knowledge graph statistics including total entities, relationships, and bre
 
 **Example:**
 ```bash
-boss /kg-stats
+ai-assist /kg-stats
 ```
 
 ### `/kg-asof '<time>'`
-Show what BOSS knew at a specific point in time.
+Show what ai-assist knew at a specific point in time.
 
 **Time format:** ISO format like `YYYY-MM-DD HH:MM:SS`
 
 **Example:**
 ```bash
-boss /kg-asof '2026-02-04 14:00'
-boss /kg-asof '2026-02-01 09:00:00'
+ai-assist /kg-asof '2026-02-04 14:00'
+ai-assist /kg-asof '2026-02-01 09:00:00'
 ```
 
 ### `/kg-late [minutes]`
-Show entities that were discovered late (significant lag between when they occurred and when BOSS found out).
+Show entities that were discovered late (significant lag between when they occurred and when ai-assist found out).
 
 **Default:** 30 minutes
 
 **Example:**
 ```bash
-boss /kg-late         # Default 30 minutes
-boss /kg-late 60      # Show items discovered >60 minutes late
+ai-assist /kg-late         # Default 30 minutes
+ai-assist /kg-late 60      # Show items discovered >60 minutes late
 ```
 
 ### `/kg-changes [hours]`
@@ -137,8 +137,8 @@ Show what changed in the knowledge graph recently.
 
 **Example:**
 ```bash
-boss /kg-changes      # Last 1 hour
-boss /kg-changes 24   # Last 24 hours
+ai-assist /kg-changes      # Last 1 hour
+ai-assist /kg-changes 24   # Last 24 hours
 ```
 
 ### `/kg-show <entity-id>`
@@ -151,20 +151,20 @@ Show detailed information about a specific entity with full context.
 
 **Example:**
 ```bash
-boss /kg-show b43938f7-fa25-4ae5-b5a9-b606eb89477e  # DCI job
-boss /kg-show CILAB-1234                             # Jira ticket
+ai-assist /kg-show b43938f7-fa25-4ae5-b5a9-b606eb89477e  # DCI job
+ai-assist /kg-show CILAB-1234                             # Jira ticket
 ```
 
 ## Error Handling
 
-If you forget the `/` prefix, BOSS will remind you:
+If you forget the `/` prefix, ai-assist will remind you:
 
 ```bash
-$ boss status
+$ ai-assist status
 Error: Commands must start with /
 Did you mean: /status?
 
-Run 'boss /help' to see available commands
+Run 'ai-assist /help' to see available commands
 ```
 
 ## Environment Setup
@@ -175,4 +175,4 @@ Quick start:
 1. Copy `.env.example` to `.env`
 2. Set `ANTHROPIC_VERTEX_PROJECT_ID` or `ANTHROPIC_API_KEY`
 3. Configure DCI credentials (if using PyPI version)
-4. Run `boss /help` to verify setup
+4. Run `ai-assist /help` to verify setup

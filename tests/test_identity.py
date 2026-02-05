@@ -224,3 +224,151 @@ def test_get_identity_reload():
 
         # Verify reload works
         assert id2.user.name == "Different User"
+
+
+def test_user_context_in_system_prompt():
+    """Test that user context appears in system prompt"""
+    identity = Identity(
+        user=UserIdentity(
+            name="Fred Lepied",
+            context="I manage a team of 8 engineers working on OpenShift CI/CD."
+        )
+    )
+    prompt = identity.get_system_prompt()
+
+    assert "Context:" in prompt
+    assert "8 engineers" in prompt
+    assert "OpenShift CI/CD" in prompt
+
+
+def test_custom_personality_override():
+    """Test that custom personality overrides default"""
+    identity = Identity(
+        user=UserIdentity(name="Fred Lepied"),
+        assistant=AssistantIdentity(
+            nickname="Nexus",
+            personality="You are Nexus, Fred's technical advisor specializing in CI/CD and distributed systems."
+        )
+    )
+    prompt = identity.get_system_prompt()
+
+    # Should use custom personality
+    assert "technical advisor" in prompt
+    assert "CI/CD and distributed systems" in prompt
+
+
+def test_verbosity_preferences():
+    """Test verbosity preference in system prompt"""
+    # Concise
+    identity = Identity(
+        preferences=CommunicationPreferences(verbosity="concise")
+    )
+    assert "concise" in identity.get_system_prompt().lower()
+
+    # Detailed
+    identity = Identity(
+        preferences=CommunicationPreferences(verbosity="detailed")
+    )
+    assert "detailed" in identity.get_system_prompt().lower()
+
+    # Verbose
+    identity = Identity(
+        preferences=CommunicationPreferences(verbosity="verbose")
+    )
+    assert "verbose" in identity.get_system_prompt().lower() or "comprehensive" in identity.get_system_prompt().lower()
+
+
+def test_emoji_usage_preferences():
+    """Test emoji usage preference in system prompt"""
+    # None
+    identity = Identity(
+        preferences=CommunicationPreferences(emoji_usage="none")
+    )
+    assert "not use emojis" in identity.get_system_prompt().lower()
+
+    # Minimal
+    identity = Identity(
+        preferences=CommunicationPreferences(emoji_usage="minimal")
+    )
+    assert "sparingly" in identity.get_system_prompt().lower()
+
+    # Moderate
+    identity = Identity(
+        preferences=CommunicationPreferences(emoji_usage="moderate")
+    )
+    prompt = identity.get_system_prompt().lower()
+    assert "moderate" in prompt or "occasionally" in prompt
+
+    # Liberal
+    identity = Identity(
+        preferences=CommunicationPreferences(emoji_usage="liberal")
+    )
+    assert "engaging" in identity.get_system_prompt().lower()
+
+
+def test_combined_enhanced_features():
+    """Test all enhanced features together"""
+    identity = Identity(
+        user=UserIdentity(
+            name="Fred Lepied",
+            role="Engineering Manager",
+            organization="Red Hat",
+            context="Managing 8 engineers on OpenShift CI/CD. Team includes seniors Sarah and Marcus."
+        ),
+        assistant=AssistantIdentity(
+            nickname="Nexus",
+            personality="You are Nexus, a management assistant for engineering teams."
+        ),
+        preferences=CommunicationPreferences(
+            formality="professional",
+            verbosity="detailed",
+            emoji_usage="minimal"
+        )
+    )
+
+    prompt = identity.get_system_prompt()
+
+    # Custom personality used
+    assert "management assistant" in prompt
+
+    # Context included
+    assert "Context:" in prompt
+    assert "8 engineers" in prompt
+    assert "Sarah and Marcus" in prompt
+
+    # Preferences applied
+    assert "detailed" in prompt.lower()
+    assert "sparingly" in prompt.lower()
+
+
+def test_save_and_load_enhanced_identity():
+    """Test persistence of enhanced identity"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "identity.yaml"
+
+        # Create enhanced identity
+        original = Identity(
+            user=UserIdentity(
+                name="Fred Lepied",
+                role="Engineering Manager",
+                context="Team of 8 engineers on OpenShift."
+            ),
+            assistant=AssistantIdentity(
+                nickname="Nexus",
+                personality="Custom personality here."
+            ),
+            preferences=CommunicationPreferences(
+                formality="casual",
+                verbosity="verbose",
+                emoji_usage="liberal"
+            )
+        )
+        original.save_to_file(path)
+
+        # Load and verify
+        loaded = Identity.load_from_file(path)
+
+        assert loaded.user.context == "Team of 8 engineers on OpenShift."
+        assert loaded.assistant.personality == "Custom personality here."
+        assert loaded.preferences.verbosity == "verbose"
+        assert loaded.preferences.emoji_usage == "liberal"

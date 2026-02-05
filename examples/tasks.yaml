@@ -1,7 +1,7 @@
-# Example user-defined tasks for BOSS
+# Example user-defined tasks for ai-assist
 #
-# Place this file at ~/.boss/tasks.yaml to define custom periodic tasks.
-# Tasks will run automatically when you start BOSS in monitor mode.
+# Place this file at ~/.ai_assist/tasks.yaml to define custom periodic tasks.
+# Tasks will run automatically when you start ai-assist in monitor mode.
 
 tasks:
   # Task with conditions and actions

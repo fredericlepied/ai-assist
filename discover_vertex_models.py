@@ -5,10 +5,10 @@ import sys
 import os
 from pathlib import Path
 
-# Add boss to path
+# Add ai_assist to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from boss.config import get_config
+from ai_assist.config import get_config
 
 
 def test_models():
@@ -96,7 +96,7 @@ def test_models():
             print(f"   • {model}")
 
         print(f"\n💡 To use one of these models, update your .env file:")
-        print(f"   BOSS_MODEL={available_models[0]}")
+        print(f"   AI_ASSIST_MODEL={available_models[0]}")
 
         return 0
     else:

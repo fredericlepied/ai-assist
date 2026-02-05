@@ -1,4 +1,4 @@
-"""Self-introspection tools for BOSS agent
+"""Self-introspection tools for ai-assist agent
 
 These tools allow the agent to search its own knowledge graph and conversation memory,
 enabling intelligent decisions about when to use cached data vs fresh API calls.

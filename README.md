@@ -1,4 +1,4 @@
-# BOSS - AI Assistant for Managers
+# ai-assist - AI Assistant for Managers
 
 An intelligent AI assistant powered by Claude and MCP (Model Context Protocol) that helps managers monitor Jira projects and DCI (Distributed CI) jobs with periodic automated checks and interactive querying.
 
@@ -37,7 +37,7 @@ An intelligent AI assistant powered by Claude and MCP (Model Context Protocol) t
 1. Clone the repository:
 ```bash
 git clone <your-repo-url>
-cd boss
+cd ai-assist
 ```
 
 2. Install dependencies using uv (recommended) or pip:
@@ -74,7 +74,7 @@ DCI_API_SECRET=your_dci_api_secret         # From your DCI admin
 
 ## Configuration
 
-BOSS uses YAML files for configuration, making it easy to customize without editing code.
+ai-assist uses YAML files for configuration, making it easy to customize without editing code.
 
 ### Environment Variables (.env)
 
@@ -98,9 +98,9 @@ JIRA_URL=https://issues.redhat.com
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
 ```
 
-### MCP Servers Configuration (~/.boss/mcp_servers.yaml)
+### MCP Servers Configuration (~/.ai-assist/mcp_servers.yaml)
 
-Configure MCP servers in `~/.boss/mcp_servers.yaml`:
+Configure MCP servers in `~/.ai-assist/mcp_servers.yaml`:
 
 ```yaml
 servers:
@@ -119,9 +119,9 @@ servers:
   # Reports MCP Server (for markdown report management)
   reports:
     command: "uvx"
-    args: ["--from", "boss-reports-mcp-server", "boss-reports-mcp-server"]
+    args: ["--from", "ai-assist-reports-mcp-server", "ai-assist-reports-mcp-server"]
     env:
-      BOSS_REPORTS_DIR: "${HOME}/boss/reports"
+      AI_ASSIST_REPORTS_DIR: "${HOME}/ai-assist/reports"
 
   # Add custom servers
   # my-server:
@@ -131,11 +131,11 @@ servers:
   #     API_KEY: "${MY_API_KEY}"
 ```
 
-Copy from `.boss/mcp_servers.yaml.example` to get started.
+Copy from `.ai-assist/mcp_servers.yaml.example` to get started.
 
-### Monitors Configuration (~/.boss/monitors.yaml)
+### Monitors Configuration (~/.ai-assist/monitors.yaml)
 
-Configure monitoring tasks in `~/.boss/monitors.yaml`:
+Configure monitoring tasks in `~/.ai-assist/monitors.yaml`:
 
 ```yaml
 monitors:
@@ -170,13 +170,13 @@ monitors:
         limit: 20
 ```
 
-Copy from `.boss/monitors.yaml.example` to get started.
+Copy from `.ai-assist/monitors.yaml.example` to get started.
 
 ### Getting API Credentials
 
 **Anthropic Authentication (REQUIRED - Choose ONE method):**
 
-BOSS requires Anthropic API access to power the AI assistant. Choose the method that fits your situation:
+ai-assist requires Anthropic API access to power the AI assistant. Choose the method that fits your situation:
 
 **Method 1: Vertex AI (Google Cloud)** - Recommended for enterprise/company use
 
@@ -230,7 +230,7 @@ The issue is likely the model name format. Vertex AI uses **@ symbol** for model
 
 Update your `.env` file:
 ```bash
-BOSS_MODEL=claude-sonnet-4-5@20250929
+AI_ASSIST_MODEL=claude-sonnet-4-5@20250929
 ```
 
 **Available Models**
@@ -256,9 +256,9 @@ Contact your GCP administrator if you don't have permissions.
 Start an interactive chat session with the assistant:
 
 ```bash
-boss /interactive
+ai-assist /interactive
 # or simply
-boss
+ai-assist
 ```
 
 **Modern TUI Features**:
@@ -267,9 +267,9 @@ boss
 - 📚 **Command History**: Navigate with Up/Down arrows, persistent across sessions
 - ⌨️ **Tab Completion**: Auto-complete slash commands (try typing `/st` and press Tab)
 - 🔍 **History Search**: Ctrl-R for reverse search through your conversation history
-- 🧠 **Conversation Memory**: BOSS remembers your conversation! (NEW!)
+- 🧠 **Conversation Memory**: ai-assist remembers your conversation! (NEW!)
   - Natural follow-up questions work perfectly
-  - "What are the latest DCI failures?" → "Why did they fail?" ← BOSS knows what "they" refers to!
+  - "What are the latest DCI failures?" → "Why did they fail?" ← ai-assist knows what "they" refers to!
   - Remembers up to 10 recent exchanges for context
   - Use `/clear` to start a fresh conversation
 - 🔍 **Knowledge Graph Context**: Automatic prompt enrichment with historical data! (NEW!)
@@ -277,13 +277,13 @@ boss
   - Recognizes time references ("yesterday", "last week") and includes recent failures
   - Shows what context was added: "🔍 Knowledge graph context: Jira ticket CILAB-123, 5 recent failures"
   - Zero configuration - works automatically with data from monitors
-- 💾 **Auto-Learning from Interactions**: BOSS learns from every query! (NEW!)
+- 💾 **Auto-Learning from Interactions**: ai-assist learns from every query! (NEW!)
   - Tool results automatically saved to knowledge graph
   - Future queries can use cached data (faster, fewer API calls)
   - See feedback: "💾 Saved 5 entities to knowledge graph"
   - Toggle with `/kg-save on` or `/kg-save off`
   - Enabled by default for seamless experience
-- 💬 **Real-time Feedback**: Live spinner showing what BOSS is doing:
+- 💬 **Real-time Feedback**: Live spinner showing what ai-assist is doing:
   - 🤔 Analyzing your question
   - 💭 Thinking (with turn counter)
   - 🔧 Using tools (shows which tool is executing)
@@ -308,14 +308,14 @@ boss
 - Press **Tab** to auto-complete slash commands
 - Use **Up/Down** arrows to navigate command history
 - Press **Ctrl-R** to search through your history
-- History is saved at `~/.boss/interactive_history.txt`
+- History is saved at `~/.ai-assist/interactive_history.txt`
 - Responses are automatically formatted as Markdown
 
 **Fallback Mode**:
-If TUI libraries are not available, BOSS will automatically fall back to basic mode. You can also force basic mode with:
+If TUI libraries are not available, ai-assist will automatically fall back to basic mode. You can also force basic mode with:
 ```bash
-export BOSS_INTERACTIVE_MODE=basic
-boss /interactive
+export AI_ASSIST_INTERACTIVE_MODE=basic
+ai-assist /interactive
 ```
 
 Example queries:
@@ -328,28 +328,28 @@ Example queries:
 Run periodic monitoring tasks:
 
 ```bash
-boss /monitor
+ai-assist /monitor
 ```
 
 This will:
 - Check configured Jira projects every 5 minutes (default)
 - Check DCI jobs every 5 minutes (default)
 - **Store all findings in the temporal knowledge graph** (automatic)
-- Run user-defined tasks from `~/.boss/tasks.yaml` (if configured)
+- Run user-defined tasks from `~/.ai-assist/tasks.yaml` (if configured)
 - Report findings to console or configured notification channel
 
 **Knowledge Graph Integration:**
 All DCI jobs and Jira tickets are automatically stored in the temporal knowledge graph, allowing you to:
-- Query historical data (`boss /kg-asof '2026-02-04 14:00'`)
-- Track changes over time (`boss /kg-changes 24`)
-- Find late discoveries (`boss /kg-late 60`)
-- View entity details (`boss /kg-show <id>`)
+- Query historical data (`ai-assist /kg-asof '2026-02-04 14:00'`)
+- Track changes over time (`ai-assist /kg-changes 24`)
+- Find late discoveries (`ai-assist /kg-late 60`)
+- View entity details (`ai-assist /kg-show <id>`)
 
 See [KNOWLEDGE_GRAPH_INTEGRATION.md](KNOWLEDGE_GRAPH_INTEGRATION.md) for details.
 
 ### User-Defined Tasks
 
-Create custom periodic tasks without writing code! Define tasks in `~/.boss/tasks.yaml`:
+Create custom periodic tasks without writing code! Define tasks in `~/.ai-assist/tasks.yaml`:
 
 ```yaml
 tasks:
@@ -386,7 +386,7 @@ See [TASKS.md](TASKS.md) for complete documentation and examples.
 Run a single query and exit:
 
 ```bash
-boss /query "What are the top 5 failing DCI jobs today?"
+ai-assist /query "What are the top 5 failing DCI jobs today?"
 ```
 
 ### State Management
@@ -395,10 +395,10 @@ View and manage persistent state:
 
 ```bash
 # View state statistics
-boss /status
+ai-assist /status
 
 # Clear expired cache
-boss /clear-cache
+ai-assist /clear-cache
 ```
 
 In interactive mode, you can use special commands:
@@ -431,7 +431,7 @@ The assistant has access to tools from the **dci-mcp-server**, which provides:
 - `list_google_docs` - List your Google Docs
 - `find_folder_by_name` - Find folders in Google Drive
 
-### Report Management Tools (via boss-reports-mcp-server)
+### Report Management Tools (via ai-assist-reports-mcp-server)
 - `write_report` - Create or overwrite a markdown report file
 - `append_to_report` - Add content to existing report (creates if doesn't exist)
 - `read_report` - Read a report's current content
@@ -439,14 +439,14 @@ The assistant has access to tools from the **dci-mcp-server**, which provides:
 - `delete_report` - Delete a report file
 
 **Report Storage:**
-Reports are stored as markdown files in `~/boss/reports/` by default (configurable via `BOSS_REPORTS_DIR`).
+Reports are stored as markdown files in `~/ai-assist/reports/` by default (configurable via `AI_ASSIST_REPORTS_DIR`).
 
 **Example Usage:**
 ```bash
 # Interactive mode
-boss /interactive
+ai-assist /interactive
 You: Generate a DCI failures summary and save to 'dci-summary' report
-BOSS: *analyzes* → *calls write_report* → Report saved!
+ai-assist: *analyzes* → *calls write_report* → Report saved!
 
 # Tasks
 tasks:
@@ -461,23 +461,23 @@ tasks:
 
 ```bash
 # Find recent OpenShift failures
-boss /query "Find all OCP 4.19 jobs that failed in the last 3 days"
+ai-assist /query "Find all OCP 4.19 jobs that failed in the last 3 days"
 
 # Check Jira status
-boss /query "What are the critical bugs in CILAB project?"
+ai-assist /query "What are the critical bugs in CILAB project?"
 
 # Analyze patterns
-boss /query "What are the common failure patterns in daily DCI jobs?"
+ai-assist /query "What are the common failure patterns in daily DCI jobs?"
 
 # Generate reports
-boss /query "Create a summary report of this week's DCI failures and save it"
+ai-assist /query "Create a summary report of this week's DCI failures and save it"
 ```
 
 ## Project Structure
 
 ```
-boss/
-├── boss/
+ai_assist/
+├── ai_assist/
 │   ├── __init__.py
 │   ├── main.py          # Entry point and CLI
 │   ├── config.py        # Configuration management
@@ -492,7 +492,7 @@ boss/
 
 ## State Management
 
-BOSS maintains persistent state to avoid redundant queries and track monitoring history:
+ai-assist maintains persistent state to avoid redundant queries and track monitoring history:
 
 - **Monitor State**: Tracks last check times and seen items for each monitor
 - **Query Cache**: Caches query results with configurable TTL (default: 5 minutes)
@@ -500,9 +500,9 @@ BOSS maintains persistent state to avoid redundant queries and track monitoring 
 - **Conversation Context**: Saves interactive session context
 - **Knowledge Graph**: Temporal database of all entities and relationships (NEW!)
 
-State is stored in `~/.boss/`:
+State is stored in `~/.ai-assist/`:
 ```
-~/.boss/
+~/.ai-assist/
 ├── state/
 │   ├── jira_monitor.json        # Jira monitor state
 │   ├── dci_monitor.json         # DCI monitor state
@@ -521,17 +521,17 @@ The knowledge graph stores:
 
 Query the knowledge graph:
 ```bash
-boss /kg-stats              # View statistics
-boss /kg-changes 24         # Changes in last 24 hours
-boss /kg-asof '2026-02-04'  # Historical state
-boss /kg-show <id>          # Entity details
+ai-assist /kg-stats              # View statistics
+ai-assist /kg-changes 24         # Changes in last 24 hours
+ai-assist /kg-asof '2026-02-04'  # Historical state
+ai-assist /kg-show <id>          # Entity details
 ```
 
 ## Development
 
 ### Adding New MCP Servers
 
-Add servers to `~/.boss/mcp_servers.yaml` - no code changes required:
+Add servers to `~/.ai-assist/mcp_servers.yaml` - no code changes required:
 
 ```yaml
 servers:
@@ -546,7 +546,7 @@ All tools from the new server will automatically be available to the AI assistan
 
 ### Custom Monitoring Tasks
 
-Add monitors to `~/.boss/monitors.yaml` - no code changes required:
+Add monitors to `~/.ai-assist/monitors.yaml` - no code changes required:
 
 ```yaml
 monitors:
@@ -559,7 +559,7 @@ monitors:
       entity_type: "my_entity"
 ```
 
-See example files in `.boss/` directory for templates.
+See example files in `.ai-assist/` directory for templates.
 
 ## Requirements
 

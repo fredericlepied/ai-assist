@@ -1,21 +1,21 @@
 # AGENTS.md - Development Guide for AI Agents and Developers
 
-This document provides guidance for AI agents and developers working on the BOSS project. It outlines the project architecture, development principles, and best practices.
+This document provides guidance for AI agents and developers working on the ai-assist project. It outlines the project architecture, development principles, and best practices.
 
 ## Project Overview
 
-**BOSS** (AI Assistant for Managers) is an intelligent assistant that helps managers monitor and analyze Jira projects and DCI (Distributed CI) jobs through natural language interaction.
+**ai-assist** (AI Assistant for Managers) is an intelligent assistant that helps managers monitor and analyze Jira projects and DCI (Distributed CI) jobs through natural language interaction.
 
 ### Core Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    BOSS CLI Interface                    │
+│                    ai-assist CLI Interface                    │
 │         (Interactive / Monitor / Query modes)            │
 └───────────────────────┬─────────────────────────────────┘
                         │
 ┌───────────────────────▼─────────────────────────────────┐
-│                    BossAgent                             │
+│                    AiAssistAgent                             │
 │  - Manages conversation with Claude                      │
 │  - Routes tool calls to MCP servers                      │
 │  - Handles multi-turn interactions                       │
@@ -34,11 +34,11 @@ This document provides guidance for AI agents and developers working on the BOSS
 
 ### Key Components
 
-1. **boss/main.py**: CLI entry point, handles user interaction modes
-2. **boss/agent.py**: MCP agent implementation, manages Claude conversations and tool execution
-3. **boss/config.py**: Configuration management using Pydantic models
-4. **boss/monitors.py**: Periodic monitoring tasks for Jira and DCI
-5. **boss/state.py**: State management, caching, and history tracking
+1. **ai_assist/main.py**: CLI entry point, handles user interaction modes
+2. **ai_assist/agent.py**: MCP agent implementation, manages Claude conversations and tool execution
+3. **ai_assist/config.py**: Configuration management using Pydantic models
+4. **ai_assist/monitors.py**: Periodic monitoring tasks for Jira and DCI
+5. **ai_assist/state.py**: State management, caching, and history tracking
 
 ## Documentation
 
@@ -54,7 +54,7 @@ Use comments only to document something unusual.
 
 **Philosophy**: Write tests before implementation to ensure correctness and maintainability.
 
-#### Testing Strategy for BOSS
+#### Testing Strategy for ai-assist
 
 ```python
 # Example test structure (to be implemented)
@@ -62,11 +62,11 @@ Use comments only to document something unusual.
 # tests/test_agent.py
 async def test_agent_connects_to_mcp_servers():
     """Test that agent successfully connects to configured MCP servers"""
-    config = BossConfig(
+    config = AiAssistConfig(
         anthropic_api_key="test-key",
         mcp_servers={"test": MCPServerConfig(command="echo", args=["test"])}
     )
-    agent = BossAgent(config)
+    agent = AiAssistAgent(config)
     await agent.connect_to_servers()
     assert "test" in agent.sessions
 
@@ -109,21 +109,21 @@ async def test_dci_monitor_reports_failures():
 # Running tests (when implemented)
 pytest tests/
 pytest tests/test_agent.py -v
-pytest tests/ --cov=boss --cov-report=html
+pytest tests/ --cov=ai_assist --cov-report=html
 ```
 
 ### 2. DRY - Don't Repeat Yourself
 
 **Philosophy**: Avoid code duplication by creating reusable abstractions.
 
-#### DRY Patterns in BOSS
+#### DRY Patterns in ai-assist
 
 **✓ Good: Reusable Configuration**
 ```python
-# boss/config.py - Single source of truth for configuration
-class BossConfig(BaseModel):
+# ai_assist/config.py - Single source of truth for configuration
+class AiAssistConfig(BaseModel):
     @classmethod
-    def from_env(cls) -> "BossConfig":
+    def from_env(cls) -> "AiAssistConfig":
         """Load configuration from environment"""
         # Configuration logic in one place
 ```
@@ -137,7 +137,7 @@ dci_client = os.getenv("DCI_CLIENT_ID")
 
 **✓ Good: Centralized Tool Execution**
 ```python
-# boss/agent.py - Single method for all tool execution
+# ai_assist/agent.py - Single method for all tool execution
 async def _execute_tool(self, tool_name: str, arguments: dict) -> str:
     """Execute any tool on any MCP server"""
     # Parse server and tool
@@ -168,7 +168,7 @@ async def execute_jira_tool(...):
 
 A "tracer bullet" is a minimal end-to-end implementation that proves the architecture works. Like tracer ammunition that shows the bullet's path, this approach shows that data flows correctly through the system.
 
-#### BOSS Tracer Bullets
+#### ai-assist Tracer Bullets
 
 **Tracer Bullet 1: Basic Query Flow** ✓ Implemented
 ```
@@ -193,12 +193,12 @@ Example: Adding Slack Notifications
 
 **Phase 1: Tracer Bullet (Minimal End-to-End)**
 ```python
-# boss/notifications.py
+# ai_assist/notifications.py
 class SlackNotifier:
     async def send(self, message: str):
         print(f"[Slack] {message}")  # Console output first
 
-# boss/monitors.py
+# ai_assist/monitors.py
 def _report_results(self, monitor_name: str, results: list[dict]):
     notifier = SlackNotifier()
     await notifier.send(f"{monitor_name}: {len(results)} updates")
@@ -238,7 +238,7 @@ class SlackNotifier:
 #### Code Organization
 
 ```
-boss/
+ai_assist/
 ├── __init__.py          # Package info only
 ├── main.py             # CLI and user interaction
 ├── agent.py            # Core agent logic
@@ -340,11 +340,11 @@ mcp_servers={
 # 2. Test (tests/test_github_integration.py)
 async def test_github_server_connection():
     config = get_test_config_with_github()
-    agent = BossAgent(config)
+    agent = AiAssistAgent(config)
     await agent.connect_to_servers()
     assert "github" in agent.sessions
 
-# 3. Add monitor (boss/monitors.py)
+# 3. Add monitor (ai_assist/monitors.py)
 class GitHubMonitor:
     async def check(self):
         """Check for PR updates"""
@@ -363,7 +363,7 @@ class GitHubMonitor:
 ### Enable Verbose Logging
 
 ```python
-# boss/agent.py
+# ai_assist/agent.py
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
@@ -376,10 +376,10 @@ logger.debug(f"Executing tool: {tool_name} with args: {arguments}")
 
 ```python
 # Test config loading
-python -c "from boss.config import get_config; print(get_config())"
+python -c "from ai_assist.config import get_config; print(get_config())"
 
 # Test agent connection
-python -c "import asyncio; from boss.agent import BossAgent; from boss.config import get_config; asyncio.run(BossAgent(get_config()).connect_to_servers())"
+python -c "import asyncio; from ai_assist.agent import AiAssistAgent; from ai_assist.config import get_config; asyncio.run(AiAssistAgent(get_config()).connect_to_servers())"
 ```
 
 ### Mock MCP Servers for Testing
@@ -399,7 +399,7 @@ def mock_mcp_session():
 
 ## State Management Pattern
 
-BOSS uses persistent state to avoid redundant queries and maintain context:
+ai-assist uses persistent state to avoid redundant queries and maintain context:
 
 ```python
 # Check cache before querying
@@ -508,7 +508,7 @@ class MyConfig(BaseModel):
 
 ## Contributing
 
-When contributing to BOSS:
+When contributing to ai-assist:
 
 1. Follow TDD: Write tests first
 2. Apply DRY: Avoid duplication
@@ -519,7 +519,7 @@ When contributing to BOSS:
 
 ## Questions for AI Agents
 
-When working on BOSS, ask yourself:
+When working on ai-assist, ask yourself:
 
 - [ ] Does this change have tests? (TDD)
 - [ ] Am I repeating existing code? (DRY)

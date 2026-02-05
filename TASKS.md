@@ -1,10 +1,10 @@
 # User-Defined Periodic Tasks
 
-BOSS supports user-defined periodic tasks through a simple YAML configuration file. This allows you to create custom monitoring and automation workflows without writing code.
+ai-assist supports user-defined periodic tasks through a simple YAML configuration file. This allows you to create custom monitoring and automation workflows without writing code.
 
 ## Quick Start
 
-1. Create `~/.boss/tasks.yaml`:
+1. Create `~/.ai-assist/tasks.yaml`:
 
 ```yaml
 tasks:
@@ -13,10 +13,10 @@ tasks:
     prompt: "Check for DCI failures in the last hour"
 ```
 
-2. Start BOSS in monitoring mode:
+2. Start ai-assist in monitoring mode:
 
 ```bash
-boss monitor
+ai-assist monitor
 ```
 
 Your task will run every 5 minutes automatically!
@@ -56,7 +56,7 @@ tasks:
 
 ## Interval Format
 
-BOSS supports two types of scheduling:
+ai-assist supports two types of scheduling:
 
 ### 1. Simple Intervals
 
@@ -100,7 +100,7 @@ Run tasks at specific times on specific days:
 
 ## Writing Effective Prompts
 
-The prompt is a natural language instruction for the BOSS agent. You can use any capability the agent has access to through MCP tools.
+The prompt is a natural language instruction for the ai-assist agent. You can use any capability the agent has access to through MCP tools.
 
 ### Examples
 
@@ -171,7 +171,7 @@ conditions:
 
 ### Metadata Extraction
 
-BOSS automatically extracts values from agent responses for use in conditions:
+ai-assist automatically extracts values from agent responses for use in conditions:
 
 **Patterns Recognized:**
 
@@ -217,7 +217,7 @@ Supports placeholders:
 
 #### 2. log - Write to Log File
 
-Write a message to a log file in `~/.boss/logs/`.
+Write a message to a log file in `~/.ai-assist/logs/`.
 
 ```yaml
 then:
@@ -376,39 +376,39 @@ tasks:
 
 ## Hot Reload
 
-BOSS automatically detects changes to `tasks.yaml` and reloads tasks without requiring a restart.
+ai-assist automatically detects changes to `tasks.yaml` and reloads tasks without requiring a restart.
 
-1. Edit `~/.boss/tasks.yaml` while BOSS is running
+1. Edit `~/.ai-assist/tasks.yaml` while ai-assist is running
 2. Save the file
-3. Within 5 seconds, BOSS will:
+3. Within 5 seconds, ai-assist will:
    - Detect the change
    - Validate the new configuration
    - Reload tasks
    - Continue monitoring with updated definitions
 
-If there's an error in the new configuration, BOSS will:
+If there's an error in the new configuration, ai-assist will:
 - Print an error message
 - Keep running with the previous configuration
 - Not crash or stop monitoring
 
 ## File Location
 
-Tasks are loaded from: `~/.boss/tasks.yaml`
+Tasks are loaded from: `~/.ai-assist/tasks.yaml`
 
-If this file doesn't exist, BOSS will run without user-defined tasks (only built-in monitors).
+If this file doesn't exist, ai-assist will run without user-defined tasks (only built-in monitors).
 
 ## State and History
 
 Each task maintains:
 
 - **State**: Last run time, success/failure status, extracted metadata
-  - Location: `~/.boss/state/task_<task_name>.json`
+  - Location: `~/.ai-assist/state/task_<task_name>.json`
 
 - **History**: Log of past executions
-  - Location: `~/.boss/state/history/task_<task_name>.jsonl`
+  - Location: `~/.ai-assist/state/history/task_<task_name>.jsonl`
 
 - **Logs**: Custom log files (if using log action)
-  - Location: `~/.boss/logs/<filename>`
+  - Location: `~/.ai-assist/logs/<filename>`
 
 ## Best Practices
 
@@ -487,8 +487,8 @@ tasks:
 
 1. Check that `enabled: true` (or omitted, as true is default)
 2. Verify YAML syntax is valid
-3. Check BOSS logs for errors
-4. Ensure `~/.boss/tasks.yaml` exists and is readable
+3. Check ai-assist logs for errors
+4. Ensure `~/.ai-assist/tasks.yaml` exists and is readable
 
 ### Conditions Not Triggering
 
@@ -502,7 +502,7 @@ tasks:
 1. Ensure file is saved
 2. Wait up to 5 seconds for detection
 3. Check for YAML syntax errors (prevents reload)
-4. Verify file path is `~/.boss/tasks.yaml`
+4. Verify file path is `~/.ai-assist/tasks.yaml`
 
 ### Actions Not Executing
 
@@ -587,6 +587,6 @@ Benefits:
 
 ## See Also
 
-- [QUICKSTART.md](QUICKSTART.md) - Getting started with BOSS
+- [QUICKSTART.md](QUICKSTART.md) - Getting started with ai-assist
 - [README.md](README.md) - Overview and installation
 - [examples/tasks.yaml](examples/tasks.yaml) - Example task definitions

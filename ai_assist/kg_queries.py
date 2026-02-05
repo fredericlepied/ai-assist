@@ -16,7 +16,7 @@ class KnowledgeGraphQueries:
         time: datetime,
         entity_type: Optional[str] = None
     ) -> list[dict[str, Any]]:
-        """Query what BOSS knew at a specific time
+        """Query what ai-assist knew at a specific time
 
         Args:
             time: The transaction time to query

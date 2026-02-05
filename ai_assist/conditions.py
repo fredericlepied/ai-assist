@@ -185,7 +185,7 @@ class ActionExecutor:
 
         message = self._replace_placeholders(message, context)
 
-        log_dir = Path.home() / ".boss" / "logs"
+        log_dir = Path.home() / ".ai-assist" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
         log_file = log_dir / log_file_name

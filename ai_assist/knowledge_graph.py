@@ -18,8 +18,8 @@ class Entity:
         entity_type: Type of entity (e.g., 'dci_job', 'jira_ticket', 'component')
         valid_from: When the fact became true in reality
         valid_to: When the fact stopped being true (None if still valid)
-        tx_from: When BOSS learned about the fact
-        tx_to: When BOSS stopped believing the fact (None if current belief)
+        tx_from: When ai-assist learned about the fact
+        tx_to: When ai-assist stopped believing the fact (None if current belief)
         data: Flexible JSON data for the entity
     """
     id: str
@@ -67,8 +67,8 @@ class Relationship:
         target_id: ID of the target entity
         valid_from: When the relationship became true
         valid_to: When the relationship stopped being true (None if still valid)
-        tx_from: When BOSS learned about the relationship
-        tx_to: When BOSS stopped believing it (None if current belief)
+        tx_from: When ai-assist learned about the relationship
+        tx_to: When ai-assist stopped believing it (None if current belief)
         properties: Additional properties for the relationship
     """
     id: str
@@ -217,10 +217,10 @@ class KnowledgeGraph:
             entity_type: Type of entity (e.g., 'dci_job', 'jira_ticket')
             data: Entity data as a dictionary
             valid_from: When the fact became true in reality
-            tx_from: When BOSS learned about it (defaults to now)
+            tx_from: When ai-assist learned about it (defaults to now)
             entity_id: Optional entity ID (generated if not provided)
             valid_to: When the fact stopped being true (None if still valid)
-            tx_to: When BOSS stopped believing it (None if current belief)
+            tx_to: When ai-assist stopped believing it (None if current belief)
 
         Returns:
             The created Entity
@@ -272,7 +272,7 @@ class KnowledgeGraph:
         Args:
             entity_id: ID of the entity to update
             valid_to: Set when the fact stopped being true
-            tx_to: Set when BOSS stopped believing it
+            tx_to: Set when ai-assist stopped believing it
 
         Returns:
             The updated Entity or None if not found
@@ -325,11 +325,11 @@ class KnowledgeGraph:
             source_id: Source entity ID
             target_id: Target entity ID
             valid_from: When the relationship became true
-            tx_from: When BOSS learned about it (defaults to now)
+            tx_from: When ai-assist learned about it (defaults to now)
             properties: Additional properties
             rel_id: Optional relationship ID (generated if not provided)
             valid_to: When the relationship stopped being true
-            tx_to: When BOSS stopped believing it
+            tx_to: When ai-assist stopped believing it
 
         Returns:
             The created Relationship
@@ -383,7 +383,7 @@ class KnowledgeGraph:
     ) -> list[Entity]:
         """Query entities as they were known at a specific transaction time
 
-        This answers: "What did BOSS know at time X?"
+        This answers: "What did ai-assist know at time X?"
 
         Args:
             tx_time: The transaction time to query
@@ -391,7 +391,7 @@ class KnowledgeGraph:
             limit: Optional limit on number of results
 
         Returns:
-            List of entities that BOSS believed at tx_time
+            List of entities that ai-assist believed at tx_time
         """
         cursor = self.conn.cursor()
 

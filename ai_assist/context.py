@@ -208,7 +208,7 @@ class KnowledgeGraphContext:
             time_ref = refs["time_refs"][0]
             since_time = self.parse_time_reference(time_ref)
 
-            # Query current DCI jobs (what BOSS knows now)
+            # Query current DCI jobs (what ai-assist knows now)
             all_current_jobs = self.knowledge_graph.query_as_of(
                 datetime.now(),
                 entity_type="dci_job",

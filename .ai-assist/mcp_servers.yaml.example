@@ -1,5 +1,5 @@
-# MCP Server Configuration for BOSS
-# Copy this file to ~/.boss/mcp_servers.yaml and customize
+# MCP Server Configuration for ai-assist
+# Copy this file to ~/.ai-assist/mcp_servers.yaml and customize
 
 servers:
   # DCI MCP Server - Production version from PyPI
@@ -27,9 +27,9 @@ servers:
   # Uncomment to enable report generation and management
   # reports:
   #   command: "uvx"
-  #   args: ["--from", "boss-reports-mcp-server", "boss-reports-mcp-server"]
+  #   args: ["--from", "ai-assist-reports-mcp-server", "ai-assist-reports-mcp-server"]
   #   env:
-  #     BOSS_REPORTS_DIR: "${HOME}/boss/reports"
+  #     AI_ASSIST_REPORTS_DIR: "${HOME}/ai-assist/reports"
 
   # Add your custom MCP servers here
   # my-custom-server:

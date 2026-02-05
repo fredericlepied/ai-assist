@@ -91,7 +91,7 @@ def test_update_entity_temporal_bounds(kg):
 
 
 def test_query_as_of(kg):
-    """Test querying what BOSS knew at a specific transaction time"""
+    """Test querying what ai-assist knew at a specific transaction time"""
     # Insert entity at tx_time = 11:00
     kg.insert_entity(
         entity_type="dci_job",

@@ -284,7 +284,7 @@ async def test_progress_feedback_callback():
     assert result == "Test response"
     # Check that response was output
     output_text = output.getvalue()
-    assert "Test response" in output_text or "BOSS" in output_text
+    assert "Test response" in output_text
 
 
 @pytest.mark.asyncio

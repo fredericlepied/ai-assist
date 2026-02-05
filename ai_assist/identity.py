@@ -13,16 +13,20 @@ class UserIdentity(BaseModel):
     role: str = "Manager"
     organization: Optional[str] = None
     timezone: Optional[str] = None
+    context: Optional[str] = None  # Detailed work context (team structure, priorities, etc.)
 
 
 class AssistantIdentity(BaseModel):
     """Assistant identity information"""
     nickname: str = "Nexus"
+    personality: Optional[str] = None  # Custom personality override
 
 
 class CommunicationPreferences(BaseModel):
     """Communication style preferences"""
     formality: str = "professional"  # professional, casual, friendly
+    verbosity: str = "concise"  # concise, detailed, verbose
+    emoji_usage: str = "moderate"  # none, minimal, moderate, liberal
 
 
 class Identity(BaseModel):
@@ -89,27 +93,54 @@ class Identity(BaseModel):
         Returns:
             System prompt string that introduces the assistant
         """
-        parts = [f"You are {self.assistant.nickname}, an AI assistant"]
+        # If custom personality is provided, use it as the base
+        if self.assistant.personality:
+            prompt = self.assistant.personality
+        else:
+            # Generate default personality
+            parts = [f"You are {self.assistant.nickname}, an AI assistant"]
 
-        if self.user.name != "there":
-            # Personalized introduction
-            parts.append(f"helping {self.user.name}")
+            if self.user.name != "there":
+                # Personalized introduction
+                parts.append(f"helping {self.user.name}")
 
-            if self.user.role:
-                parts[-1] += f", a {self.user.role}"
+                if self.user.role:
+                    parts[-1] += f", a {self.user.role}"
 
-            if self.user.organization:
-                parts[-1] += f" at {self.user.organization}"
+                if self.user.organization:
+                    parts[-1] += f" at {self.user.organization}"
 
-        prompt = " ".join(parts) + "."
+            prompt = " ".join(parts) + "."
 
-        # Add communication style
-        if self.preferences.formality == "professional":
-            prompt += " You maintain a professional tone."
-        elif self.preferences.formality == "casual":
-            prompt += " You communicate in a casual, friendly manner."
-        elif self.preferences.formality == "friendly":
-            prompt += " You are warm and approachable in your communication."
+            # Add communication style
+            if self.preferences.formality == "professional":
+                prompt += " You maintain a professional tone."
+            elif self.preferences.formality == "casual":
+                prompt += " You communicate in a casual, friendly manner."
+            elif self.preferences.formality == "friendly":
+                prompt += " You are warm and approachable in your communication."
+
+        # Add user context (team structure, priorities, etc.)
+        if self.user.context:
+            prompt += f"\n\nContext: {self.user.context}"
+
+        # Add verbosity preference
+        if self.preferences.verbosity == "concise":
+            prompt += " Be concise and to the point."
+        elif self.preferences.verbosity == "detailed":
+            prompt += " Provide detailed explanations when appropriate."
+        elif self.preferences.verbosity == "verbose":
+            prompt += " Provide comprehensive, thorough explanations."
+
+        # Add emoji usage preference
+        if self.preferences.emoji_usage == "none":
+            prompt += " Do not use emojis."
+        elif self.preferences.emoji_usage == "minimal":
+            prompt += " Use emojis sparingly, only when they add clarity."
+        elif self.preferences.emoji_usage == "moderate":
+            prompt += " Use emojis occasionally to enhance communication."
+        elif self.preferences.emoji_usage == "liberal":
+            prompt += " Feel free to use emojis to make communication more engaging."
 
         return prompt
 

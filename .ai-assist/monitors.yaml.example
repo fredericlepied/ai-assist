@@ -1,5 +1,5 @@
-# Monitor Configuration for BOSS
-# Copy this file to ~/.boss/monitors.yaml and customize
+# Monitor Configuration for ai-assist
+# Copy this file to ~/.ai-assist/monitors.yaml and customize
 
 monitors:
   - name: "Jira Project Monitor"

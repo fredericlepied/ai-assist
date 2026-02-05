@@ -391,7 +391,7 @@ ai-assist automatically saves tool results to the knowledge graph:
 - Just press Enter to submit single-line queries
 - For multi-line input (paste code, etc.), use Esc-Enter to add newlines
 - Tab completion works for all `/` commands
-- History is saved across sessions at `~/.boss/interactive_history.txt`
+- History is saved across sessions at `~/.ai-assist/interactive_history.txt`
 - Responses are formatted as Markdown when possible
 - ai-assist remembers up to 10 recent exchanges for context
 """

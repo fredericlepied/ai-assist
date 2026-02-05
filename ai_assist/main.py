@@ -321,13 +321,28 @@ def identity_show_command():
         print(f"Organization: {identity.user.organization}")
     if identity.user.timezone:
         print(f"Timezone: {identity.user.timezone}")
+    if identity.user.context:
+        print(f"\nUser Context:")
+        print(f"  {identity.user.context[:200]}..." if len(identity.user.context) > 200 else f"  {identity.user.context}")
 
-    print(f"\nAssistant Nickname: {identity.assistant.nickname}")
-    print(f"Formality: {identity.preferences.formality}")
+    print(f"\nAssistant:")
+    print(f"  Nickname: {identity.assistant.nickname}")
+    if identity.assistant.personality:
+        print(f"  Custom Personality: Yes")
+
+    print(f"\nPreferences:")
+    print(f"  Formality: {identity.preferences.formality}")
+    print(f"  Verbosity: {identity.preferences.verbosity}")
+    print(f"  Emoji Usage: {identity.preferences.emoji_usage}")
 
     print("\nSystem Prompt Preview:")
     print("-" * 50)
-    print(identity.get_system_prompt())
+    prompt = identity.get_system_prompt()
+    # Truncate if too long for display
+    if len(prompt) > 500:
+        print(prompt[:500] + "...")
+    else:
+        print(prompt)
     print()
 
 

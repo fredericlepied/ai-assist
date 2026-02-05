@@ -1,8 +1,8 @@
-# Vertex AI Setup for BOSS
+# Vertex AI Setup for ai-assist
 
 ## Quick Start
 
-If you have Claude Code working via Vertex AI, you can use the same credentials with BOSS.
+If you have Claude Code working via Vertex AI, you can use the same credentials with ai-assist.
 
 ### 1. Set Environment Variables
 
@@ -15,7 +15,7 @@ export ANTHROPIC_VERTEX_PROJECT_ID='your-gcp-project-id'
 
 ```bash
 # Use @ format for model names (IMPORTANT!)
-BOSS_MODEL=claude-sonnet-4-5@20250929
+AI_ASSIST_MODEL=claude-sonnet-4-5@20250929
 
 # DCI credentials
 DCI_CLIENT_ID=your_dci_client_id
@@ -31,7 +31,7 @@ gcloud auth application-default login
 ### 4. Test It
 
 ```bash
-uv run boss query "What is 2+2?"
+uv run ai-assist query "What is 2+2?"
 ```
 
 You should see:
@@ -77,7 +77,7 @@ Publisher Model `projects/.../models/claude-sonnet-4-5-20250929` was not found
 **Solution:**
 Update your model name to use @ format instead of dashes:
 ```bash
-BOSS_MODEL=claude-sonnet-4-5@20250929
+AI_ASSIST_MODEL=claude-sonnet-4-5@20250929
 ```
 
 ### Error: Vertex AI API Not Enabled
@@ -162,7 +162,7 @@ ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project-id
 ANTHROPIC_VERTEX_REGION=us-east5
 
 # Model configuration (use @ format!)
-BOSS_MODEL=claude-sonnet-4-5@20250929
+AI_ASSIST_MODEL=claude-sonnet-4-5@20250929
 
 # DCI credentials
 DCI_CLIENT_ID=your_dci_client_id
@@ -189,7 +189,7 @@ bash check_vertex_setup.sh
 uv run python discover_vertex_models.py
 
 # Quick test
-uv run boss query "What is 2+2?"
+uv run ai-assist query "What is 2+2?"
 ```
 
 ## Success Indicators
@@ -201,4 +201,4 @@ Using Vertex AI: project=your-project-id (default region)
 [Your query response here]
 ```
 
-If you see this, congratulations! BOSS is successfully using Vertex AI.
+If you see this, congratulations! ai-assist is successfully using Vertex AI.
