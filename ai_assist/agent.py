@@ -9,6 +9,7 @@ from anthropic import Anthropic, AnthropicVertex
 from .config import AiAssistConfig, MCPServerConfig
 from .mcp_stdio_fix import stdio_client_fixed
 from .introspection_tools import IntrospectionTools
+from .report_tools import ReportTools
 from .identity import get_identity
 
 if TYPE_CHECKING:
@@ -29,6 +30,9 @@ class AiAssistAgent:
 
         # Initialize introspection tools for self-awareness
         self.introspection_tools = IntrospectionTools(knowledge_graph=knowledge_graph)
+
+        # Initialize internal report tools
+        self.report_tools = ReportTools()
 
         if config.use_vertex:
             vertex_kwargs = {"project_id": config.vertex_project_id}
@@ -78,6 +82,12 @@ class AiAssistAgent:
         if introspection_tool_defs:
             self.available_tools.extend(introspection_tool_defs)
             print(f"✓ Added {len(introspection_tool_defs)} introspection tools (self-awareness)")
+
+        # Add internal report tools
+        report_tool_defs = self.report_tools.get_tool_definitions()
+        if report_tool_defs:
+            self.available_tools.extend(report_tool_defs)
+            print(f"✓ Added {len(report_tool_defs)} internal report tools")
 
     async def _run_server(self, name: str, config: MCPServerConfig):
         """Run an MCP server connection (as a background task)"""
@@ -339,7 +349,7 @@ class AiAssistAgent:
         yield {"type": "error", "message": "Maximum turns reached without final answer"}
 
     async def _execute_tool(self, tool_name: str, arguments: dict) -> str:
-        """Execute a tool call on the appropriate MCP server or introspection tool"""
+        """Execute a tool call on the appropriate MCP server, introspection, or internal tool"""
         parts = tool_name.split("__", 1)
         if len(parts) != 2:
             return f"Error: Invalid tool name format: {tool_name}"
@@ -367,6 +377,28 @@ class AiAssistAgent:
                 return result_text
             except Exception as e:
                 return f"Error executing introspection tool {original_tool_name}: {str(e)}"
+
+        # Handle internal tools (report management, etc.)
+        if server_name == "internal":
+            try:
+                result_text = await self.report_tools.execute_tool(
+                    original_tool_name,
+                    arguments
+                )
+
+                # Track internal tool call
+                self.last_tool_calls.append({
+                    "tool_name": tool_name,
+                    "server_name": server_name,
+                    "original_tool_name": original_tool_name,
+                    "arguments": arguments,
+                    "result": result_text,
+                    "timestamp": datetime.now()
+                })
+
+                return result_text
+            except Exception as e:
+                return f"Error executing internal tool {original_tool_name}: {str(e)}"
 
         # Handle regular MCP server tools
         if server_name not in self.sessions:

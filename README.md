@@ -116,12 +116,7 @@ servers:
       JIRA_URL: "${JIRA_URL}"
       MCP_SHOW_BANNER: "false"
 
-  # Reports MCP Server (for markdown report management)
-  reports:
-    command: "uvx"
-    args: ["--from", "ai-assist-reports-mcp-server", "ai-assist-reports-mcp-server"]
-    env:
-      AI_ASSIST_REPORTS_DIR: "${HOME}/ai-assist/reports"
+  # Note: Report management is built-in as internal tools (no MCP server needed)
 
   # Add custom servers
   # my-server:
@@ -431,7 +426,7 @@ The assistant has access to tools from the **dci-mcp-server**, which provides:
 - `list_google_docs` - List your Google Docs
 - `find_folder_by_name` - Find folders in Google Drive
 
-### Report Management Tools (via ai-assist-reports-mcp-server)
+### Report Management Tools (built-in internal tools)
 - `write_report` - Create or overwrite a markdown report file
 - `append_to_report` - Add content to existing report (creates if doesn't exist)
 - `read_report` - Read a report's current content
@@ -439,7 +434,9 @@ The assistant has access to tools from the **dci-mcp-server**, which provides:
 - `delete_report` - Delete a report file
 
 **Report Storage:**
-Reports are stored as markdown files in `~/ai-assist/reports/` by default (configurable via `AI_ASSIST_REPORTS_DIR`).
+Reports are stored as markdown files in `~/ai-assist/reports/` by default (configurable via `AI_ASSIST_REPORTS_DIR` environment variable).
+
+**Note:** Report management tools are now built directly into ai-assist as internal tools, not as a separate MCP server. This makes them faster and simpler to use.
 
 **Example Usage:**
 ```bash
