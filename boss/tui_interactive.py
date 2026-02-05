@@ -17,10 +17,34 @@ from rich.table import Table
 from .agent import BossAgent
 from .state import StateManager
 from .tui import BossCompleter
+from .context import ConversationMemory, KnowledgeGraphContext
+from .knowledge_graph import KnowledgeGraph
 
 
-async def query_with_feedback(agent: BossAgent, prompt: str, console: Console) -> str:
-    """Query the agent with real-time feedback and streaming display"""
+async def query_with_feedback(
+    agent: BossAgent,
+    prompt: str,
+    console: Console,
+    conversation_memory: ConversationMemory = None,
+    kg_context: KnowledgeGraphContext = None
+) -> str:
+    """Query the agent with real-time feedback and streaming display
+
+    Args:
+        agent: The BossAgent instance
+        prompt: User's current question
+        console: Rich console for output
+        conversation_memory: Optional conversation history for context
+        kg_context: Optional knowledge graph context for prompt enrichment
+
+    Returns:
+        The assistant's response text
+    """
+    # Enrich prompt with knowledge graph context if available
+    original_prompt = prompt
+    context_summary = []
+    if kg_context:
+        prompt, context_summary = kg_context.enrich_prompt(prompt)
     # State to track progress
     feedback_state = {
         "status": "Starting...",
@@ -64,8 +88,30 @@ async def query_with_feedback(agent: BossAgent, prompt: str, console: Console) -
     response_started = False
 
     try:
-        # Use streaming query
-        async for chunk in agent.query_streaming(prompt, progress_callback=progress_callback):
+        # Show knowledge graph context if any was added
+        if context_summary:
+            context_text = ", ".join(context_summary)
+            console.print(f"[dim]🔍 Knowledge graph context: {context_text}[/dim]")
+
+        # Build messages list with conversation history
+        if conversation_memory:
+            # Get conversation history and add current prompt
+            messages = conversation_memory.to_messages()
+            messages.append({"role": "user", "content": prompt})
+
+            # Show context indicator if we have history
+            if len(conversation_memory) > 0:
+                console.print(f"[dim]💬 Using context from {len(conversation_memory)} previous exchange(s)[/dim]")
+        else:
+            # No conversation memory - just use prompt
+            messages = None
+
+        # Use streaming query with conversation context
+        async for chunk in agent.query_streaming(
+            prompt=prompt if messages is None else None,
+            messages=messages,
+            progress_callback=progress_callback
+        ):
             # Handle text chunks
             if isinstance(chunk, str):
                 # First text chunk - stop spinner and start showing response
@@ -117,6 +163,14 @@ async def query_with_feedback(agent: BossAgent, prompt: str, console: Console) -
         if not response_started:
             pass  # Already stopped above or never started
 
+        # Show KG save feedback if entities were saved
+        kg_saved_count = agent.get_last_kg_saved_count()
+        if kg_saved_count > 0:
+            console.print(f"[dim]💾 Saved {kg_saved_count} entit{'y' if kg_saved_count == 1 else 'ies'} to knowledge graph[/dim]")
+
+        # Clear tool calls for next query
+        agent.clear_tool_calls()
+
     return full_response
 
 
@@ -151,13 +205,27 @@ async def tui_interactive_mode(agent: BossAgent, state_manager: StateManager):
         "[bold cyan]BOSS - AI Assistant for Managers[/bold cyan]\n\n"
         "Type your questions or commands.\n"
         "Commands: [yellow]/status[/yellow], [yellow]/history[/yellow], "
-        "[yellow]/clear-cache[/yellow], [yellow]/help[/yellow]\n"
+        "[yellow]/clear-cache[/yellow], [yellow]/kg-save[/yellow], [yellow]/help[/yellow]\n"
         "Type [yellow]/exit[/yellow] or [yellow]/quit[/yellow] to exit\n\n"
+        "[dim]🧠 Auto-learning enabled - Tool results saved to knowledge graph[/dim]\n"
         "[dim]Press Enter to submit • Esc-Enter or Ctrl-J for multi-line input • Tab for completion[/dim]",
         border_style="cyan"
     ))
 
-    conversation_context = []
+    # Initialize conversation memory for context-aware responses
+    conversation_memory = ConversationMemory(max_exchanges=10)
+    conversation_context = []  # For state manager persistence
+
+    # Enable agent introspection of conversation memory
+    agent.set_conversation_memory(conversation_memory)
+
+    # Initialize knowledge graph context for prompt enrichment
+    try:
+        kg = KnowledgeGraph()
+        kg_context = KnowledgeGraphContext(kg)
+    except Exception:
+        # If KG fails to load, disable enrichment
+        kg_context = KnowledgeGraphContext(None)
 
     while True:
         try:
@@ -192,17 +260,47 @@ async def tui_interactive_mode(agent: BossAgent, state_manager: StateManager):
                 await handle_help_command(console)
                 continue
 
+            if user_input.lower() == "/clear":
+                conversation_memory.clear()
+                console.print("\n[green]✓ Conversation memory cleared[/green]\n")
+                continue
+
+            if user_input.lower().startswith("/kg-save"):
+                parts = user_input.split()
+                if len(parts) > 1:
+                    if parts[1].lower() in ["on", "true", "1", "yes"]:
+                        agent.kg_save_enabled = True
+                        console.print("\n[green]✓ Knowledge graph auto-save enabled[/green]\n")
+                    elif parts[1].lower() in ["off", "false", "0", "no"]:
+                        agent.kg_save_enabled = False
+                        console.print("\n[yellow]Knowledge graph auto-save disabled[/yellow]\n")
+                    else:
+                        console.print("\n[red]Usage: /kg-save [on|off][/red]\n")
+                else:
+                    status = "enabled" if agent.kg_save_enabled else "disabled"
+                    console.print(f"\n[cyan]Knowledge graph auto-save is currently {status}[/cyan]\n")
+                continue
+
             # Regular query
             try:
                 # Show feedback while processing and stream response
-                response = await query_with_feedback(agent, user_input, console)
+                response = await query_with_feedback(
+                    agent,
+                    user_input,
+                    console,
+                    conversation_memory=conversation_memory,
+                    kg_context=kg_context
+                )
 
                 # Response is already printed via streaming
                 # Just add final newline if not already there
                 if response and not response.endswith('\n'):
                     console.print()
 
-                # Track conversation
+                # Add to conversation memory for context
+                conversation_memory.add_exchange(user_input, response)
+
+                # Track conversation in context list for state manager
                 conversation_context.append({
                     "user": user_input,
                     "assistant": response,
@@ -258,8 +356,23 @@ async def handle_help_command(console: Console):
 - `/status` - Show state statistics
 - `/history` - Show recent monitoring history
 - `/clear-cache` - Clear expired cache
+- `/clear` - Clear conversation memory (start fresh)
+- `/kg-save [on|off]` - Toggle knowledge graph auto-save (NEW!)
 - `/exit` or `/quit` - Exit interactive mode
 - `/help` - Show this help
+
+## Conversation Memory 💬
+BOSS now remembers your conversation! Follow-up questions work naturally:
+- "What are the latest DCI failures?" → BOSS answers
+- "Why did they fail?" → BOSS knows what "they" refers to!
+- Use `/clear` to start a fresh conversation
+
+## Knowledge Graph Learning 🧠
+BOSS automatically saves tool results to the knowledge graph:
+- When you query Jira or DCI, entities are saved
+- Future queries can use cached data (faster!)
+- See feedback: "💾 Saved 5 entities to knowledge graph"
+- Toggle with `/kg-save on` or `/kg-save off`
 
 ## Keyboard Shortcuts
 - `Enter` - Submit your input
@@ -276,6 +389,7 @@ async def handle_help_command(console: Console):
 - Tab completion works for all `/` commands
 - History is saved across sessions at `~/.boss/interactive_history.txt`
 - Responses are formatted as Markdown when possible
+- BOSS remembers up to 10 recent exchanges for context
 """
     console.print(Markdown(help_text))
     console.print()

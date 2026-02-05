@@ -267,6 +267,22 @@ boss
 - 📚 **Command History**: Navigate with Up/Down arrows, persistent across sessions
 - ⌨️ **Tab Completion**: Auto-complete slash commands (try typing `/st` and press Tab)
 - 🔍 **History Search**: Ctrl-R for reverse search through your conversation history
+- 🧠 **Conversation Memory**: BOSS remembers your conversation! (NEW!)
+  - Natural follow-up questions work perfectly
+  - "What are the latest DCI failures?" → "Why did they fail?" ← BOSS knows what "they" refers to!
+  - Remembers up to 10 recent exchanges for context
+  - Use `/clear` to start a fresh conversation
+- 🔍 **Knowledge Graph Context**: Automatic prompt enrichment with historical data! (NEW!)
+  - Auto-detects Jira ticket references (CILAB-123) and adds ticket context
+  - Recognizes time references ("yesterday", "last week") and includes recent failures
+  - Shows what context was added: "🔍 Knowledge graph context: Jira ticket CILAB-123, 5 recent failures"
+  - Zero configuration - works automatically with data from monitors
+- 💾 **Auto-Learning from Interactions**: BOSS learns from every query! (NEW!)
+  - Tool results automatically saved to knowledge graph
+  - Future queries can use cached data (faster, fewer API calls)
+  - See feedback: "💾 Saved 5 entities to knowledge graph"
+  - Toggle with `/kg-save on` or `/kg-save off`
+  - Enabled by default for seamless experience
 - 💬 **Real-time Feedback**: Live spinner showing what BOSS is doing:
   - 🤔 Analyzing your question
   - 💭 Thinking (with turn counter)
@@ -281,6 +297,8 @@ boss
 - `/status` - Show state statistics
 - `/history` - Show recent monitoring history
 - `/clear-cache` - Clear expired cache
+- `/clear` - Clear conversation memory (start fresh conversation)
+- `/kg-save [on|off]` - Toggle knowledge graph auto-save (NEW!)
 - `/help` - Show help message
 - `/exit` or `/quit` - Exit interactive mode
 

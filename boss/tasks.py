@@ -18,15 +18,6 @@ class TaskDefinition:
     enabled: bool = True
     conditions: list[dict] = field(default_factory=list)
 
-
-@dataclass
-class MonitorDefinition(TaskDefinition):
-    """Definition for a monitoring task with KG integration
-
-    Extends TaskDefinition with knowledge graph configuration
-    """
-    knowledge_graph: Optional[dict] = None
-
     @property
     def interval_seconds(self) -> int:
         """Convert interval string to seconds (for simple intervals)"""
@@ -54,6 +45,15 @@ class MonitorDefinition(TaskDefinition):
                 self.interval_seconds
         except ValueError as e:
             raise ValueError(f"Invalid interval '{self.interval}': {e}")
+
+
+@dataclass
+class MonitorDefinition(TaskDefinition):
+    """Definition for a monitoring task with KG integration
+
+    Extends TaskDefinition with knowledge graph configuration
+    """
+    knowledge_graph: Optional[dict] = None
 
 
 class TaskLoader:

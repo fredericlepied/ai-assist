@@ -1,18 +1,30 @@
 """MCP Agent for BOSS"""
 
 import asyncio
-from typing import Optional
+import json
+from datetime import datetime
+from typing import Optional, TYPE_CHECKING
 from mcp import ClientSession, StdioServerParameters
 from anthropic import Anthropic, AnthropicVertex
 from .config import BossConfig, MCPServerConfig
 from .mcp_stdio_fix import stdio_client_fixed
+from .introspection_tools import IntrospectionTools
+
+if TYPE_CHECKING:
+    from .knowledge_graph import KnowledgeGraph
+    from .context import ConversationMemory
 
 
 class BossAgent:
     """AI Agent with MCP capabilities"""
 
-    def __init__(self, config: BossConfig):
+    def __init__(self, config: BossConfig, knowledge_graph: Optional["KnowledgeGraph"] = None):
         self.config = config
+        self.knowledge_graph = knowledge_graph
+        self.kg_save_enabled = True  # Can be toggled by user
+
+        # Initialize introspection tools for self-awareness
+        self.introspection_tools = IntrospectionTools(knowledge_graph=knowledge_graph)
 
         if config.use_vertex:
             vertex_kwargs = {"project_id": config.vertex_project_id}
@@ -56,6 +68,12 @@ class BossAgent:
                 print(f"✗ Failed to connect to {server_name}: {e}")
                 import traceback
                 traceback.print_exc()
+
+        # Add introspection tools for self-awareness
+        introspection_tool_defs = self.introspection_tools.get_tool_definitions()
+        if introspection_tool_defs:
+            self.available_tools.extend(introspection_tool_defs)
+            print(f"✓ Added {len(introspection_tool_defs)} introspection tools (self-awareness)")
 
     async def _run_server(self, name: str, config: MCPServerConfig):
         """Run an MCP server connection (as a background task)"""
@@ -111,16 +129,35 @@ class BossAgent:
             import traceback
             traceback.print_exc()
 
-    async def query(self, prompt: str, max_turns: int = 10, progress_callback=None) -> str:
-        """Query the agent with a prompt
+    async def query(
+        self,
+        prompt: str = None,
+        messages: list[dict] = None,
+        max_turns: int = 10,
+        progress_callback=None
+    ) -> str:
+        """Query the agent with a prompt or message history
 
         Args:
-            prompt: The user's question/prompt
+            prompt: The user's question/prompt (if no messages provided)
+            messages: Full message history in Claude format (optional).
+                     If provided, this is used instead of prompt.
+                     Format: [{"role": "user", "content": "..."}, ...]
             max_turns: Maximum number of agentic turns
             progress_callback: Optional callback function for progress updates
                               Called with (status: str, turn: int, max_turns: int, tool_name: str | None)
+
+        Returns:
+            The assistant's response text
         """
-        messages = [{"role": "user", "content": prompt}]
+        # Build messages list
+        if messages is None:
+            if prompt is None:
+                raise ValueError("Either prompt or messages must be provided")
+            messages = [{"role": "user", "content": prompt}]
+        else:
+            # Use provided messages
+            messages = messages.copy()  # Don't modify caller's list
 
         # Filter out custom internal fields from tools before sending to API
         api_tools = [
@@ -178,11 +215,19 @@ class BossAgent:
 
         return "Maximum turns reached without final answer"
 
-    async def query_streaming(self, prompt: str, max_turns: int = 10, progress_callback=None):
+    async def query_streaming(
+        self,
+        prompt: str = None,
+        messages: list[dict] = None,
+        max_turns: int = 10,
+        progress_callback=None
+    ):
         """Query the agent with streaming response
 
         Args:
-            prompt: The user's question/prompt
+            prompt: The user's question/prompt (if no messages provided)
+            messages: Full message history in Claude format (optional).
+                     If provided, this is used instead of prompt.
             max_turns: Maximum number of agentic turns
             progress_callback: Optional callback for progress updates
 
@@ -191,7 +236,14 @@ class BossAgent:
             dict: Tool call information {"type": "tool_use", "name": str, "id": str, "input": dict}
             dict: Final result {"type": "done", "turns": int}
         """
-        messages = [{"role": "user", "content": prompt}]
+        # Build messages list
+        if messages is None:
+            if prompt is None:
+                raise ValueError("Either prompt or messages must be provided")
+            messages = [{"role": "user", "content": prompt}]
+        else:
+            # Use provided messages
+            messages = messages.copy()  # Don't modify caller's list
 
         # Filter out custom internal fields from tools before sending to API
         api_tools = [
@@ -281,13 +333,36 @@ class BossAgent:
         yield {"type": "error", "message": "Maximum turns reached without final answer"}
 
     async def _execute_tool(self, tool_name: str, arguments: dict) -> str:
-        """Execute a tool call on the appropriate MCP server"""
+        """Execute a tool call on the appropriate MCP server or introspection tool"""
         parts = tool_name.split("__", 1)
         if len(parts) != 2:
             return f"Error: Invalid tool name format: {tool_name}"
 
         server_name, original_tool_name = parts
 
+        # Handle introspection tools (self-awareness)
+        if server_name == "introspection":
+            try:
+                result_text = await self.introspection_tools.execute_tool(
+                    original_tool_name,
+                    arguments
+                )
+
+                # Track introspection tool call
+                self.last_tool_calls.append({
+                    "tool_name": tool_name,
+                    "server_name": server_name,
+                    "original_tool_name": original_tool_name,
+                    "arguments": arguments,
+                    "result": result_text,
+                    "timestamp": datetime.now()
+                })
+
+                return result_text
+            except Exception as e:
+                return f"Error executing introspection tool {original_tool_name}: {str(e)}"
+
+        # Handle regular MCP server tools
         if server_name not in self.sessions:
             return f"Error: Server {server_name} not connected"
 
@@ -296,14 +371,207 @@ class BossAgent:
         try:
             result = await session.call_tool(original_tool_name, arguments)
 
+            result_text = ""
             if result.content:
-                return "\n".join([
+                result_text = "\n".join([
                     item.text if hasattr(item, "text") else str(item)
                     for item in result.content
                 ])
-            return "Tool executed successfully with no output"
+            else:
+                result_text = "Tool executed successfully with no output"
+
+            # Store tool call for potential KG storage
+            self.last_tool_calls.append({
+                "tool_name": tool_name,
+                "server_name": server_name,
+                "original_tool_name": original_tool_name,
+                "arguments": arguments,
+                "result": result_text,
+                "timestamp": datetime.now()
+            })
+
+            # Optionally save to knowledge graph
+            if self.knowledge_graph and self.kg_save_enabled:
+                await self._save_tool_result_to_kg(
+                    tool_name,
+                    original_tool_name,
+                    arguments,
+                    result_text
+                )
+
+            return result_text
         except Exception as e:
             return f"Error executing tool {original_tool_name}: {str(e)}"
+
+    async def _save_tool_result_to_kg(
+        self,
+        tool_name: str,
+        original_tool_name: str,
+        arguments: dict,
+        result_text: str
+    ):
+        """Save tool result to knowledge graph if it contains entities
+
+        Supports:
+        - search_dci_jobs -> dci_job entities
+        - search_jira_tickets -> jira_ticket entities
+        - get_jira_ticket -> jira_ticket entity
+        """
+        # Double-check kg_save_enabled (defensive programming)
+        if not self.kg_save_enabled:
+            return
+
+        if not result_text or "Error" in result_text:
+            return
+
+        try:
+            # Parse JSON result
+            try:
+                data = json.loads(result_text)
+            except json.JSONDecodeError:
+                # Not JSON, skip
+                return
+
+            tx_time = datetime.now()
+
+            # Determine entity type from tool name
+            entity_type = None
+            entities = []
+
+            if "jira" in original_tool_name.lower():
+                entity_type = "jira_ticket"
+                # Handle different response formats
+                if isinstance(data, list):
+                    entities = data
+                elif isinstance(data, dict):
+                    if "issues" in data:
+                        entities = data["issues"]
+                    elif "key" in data:
+                        # Single ticket
+                        entities = [data]
+
+            elif "dci" in original_tool_name.lower() and "job" in original_tool_name.lower():
+                entity_type = "dci_job"
+                # Handle different response formats
+                if isinstance(data, list):
+                    entities = data
+                elif isinstance(data, dict):
+                    if "hits" in data:
+                        entities = data["hits"]
+                    elif "jobs" in data:
+                        entities = data["jobs"]
+                    elif "id" in data:
+                        # Single job
+                        entities = [data]
+
+            if not entity_type or not entities:
+                return
+
+            # Store entities
+            saved_count = 0
+            for entity_data in entities[:20]:  # Limit to 20 entities per call
+                entity_id = entity_data.get("id") or entity_data.get("key")
+                if not entity_id:
+                    continue
+
+                # Parse valid_from timestamp
+                created_str = entity_data.get("created_at") or entity_data.get("fields", {}).get("created", "")
+                try:
+                    valid_from = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    valid_from = tx_time
+
+                # Prepare entity data based on type
+                if entity_type == "jira_ticket":
+                    stored_data = {
+                        "key": entity_data.get("key"),
+                        "project": entity_data.get("fields", {}).get("project", {}).get("key"),
+                        "summary": entity_data.get("fields", {}).get("summary"),
+                        "status": entity_data.get("fields", {}).get("status", {}).get("name"),
+                        "priority": entity_data.get("fields", {}).get("priority", {}).get("name"),
+                        "assignee": entity_data.get("fields", {}).get("assignee", {}).get("displayName")
+                                   if entity_data.get("fields", {}).get("assignee") else None,
+                    }
+                elif entity_type == "dci_job":
+                    stored_data = {
+                        "job_id": entity_id,
+                        "status": entity_data.get("status", "unknown"),
+                        "remoteci_id": entity_data.get("remoteci_id"),
+                        "topic_id": entity_data.get("topic_id"),
+                        "state": entity_data.get("state"),
+                    }
+
+                    # Store components as separate entities
+                    for component in entity_data.get("components", []):
+                        comp_id = component.get("id")
+                        if comp_id:
+                            try:
+                                self.knowledge_graph.insert_entity(
+                                    entity_type="dci_component",
+                                    entity_id=comp_id,
+                                    valid_from=valid_from,
+                                    tx_from=tx_time,
+                                    data={
+                                        "type": component.get("type"),
+                                        "version": component.get("version"),
+                                        "name": component.get("name"),
+                                    }
+                                )
+                            except Exception:
+                                pass  # Entity might already exist
+
+                            # Create relationship
+                            self.knowledge_graph.insert_relationship(
+                                rel_type="job_uses_component",
+                                source_id=entity_id,
+                                target_id=comp_id,
+                                valid_from=valid_from,
+                                tx_from=tx_time,
+                                properties={}
+                            )
+                else:
+                    stored_data = entity_data
+
+                # Insert entity
+                try:
+                    self.knowledge_graph.insert_entity(
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        valid_from=valid_from,
+                        tx_from=tx_time,
+                        data=stored_data
+                    )
+                    saved_count += 1
+                except Exception:
+                    # Entity might already exist, that's ok
+                    pass
+
+            # Track how many we saved
+            if saved_count > 0:
+                self.last_tool_calls[-1]["kg_saved_count"] = saved_count
+
+        except Exception as e:
+            # Silently fail - KG storage is best-effort
+            pass
+
+    def get_last_kg_saved_count(self) -> int:
+        """Get the number of entities saved to KG in the last tool calls"""
+        total = 0
+        for call in self.last_tool_calls:
+            total += call.get("kg_saved_count", 0)
+        return total
+
+    def clear_tool_calls(self):
+        """Clear tracked tool calls"""
+        self.last_tool_calls = []
+
+    def set_conversation_memory(self, conversation_memory: Optional["ConversationMemory"]):
+        """Set conversation memory for introspection tools
+
+        Args:
+            conversation_memory: ConversationMemory instance to enable conversation search
+        """
+        self.introspection_tools.conversation_memory = conversation_memory
 
     async def close(self):
         """Close all MCP server connections"""

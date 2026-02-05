@@ -117,11 +117,14 @@ def test_completion_help_command():
 
 
 def test_completion_clear_cache_command():
-    """Test completion for clear-cache command"""
+    """Test completion for clear commands"""
     completer = BossCompleter()
 
     document = Document("/clear", cursor_position=6)
     completions = list(completer.get_completions(document, None))
 
-    assert len(completions) == 1
-    assert completions[0].text == "/clear-cache"
+    # Should have both /clear and /clear-cache
+    assert len(completions) == 2
+    completion_texts = {c.text for c in completions}
+    assert "/clear" in completion_texts
+    assert "/clear-cache" in completion_texts

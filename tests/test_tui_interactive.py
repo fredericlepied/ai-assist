@@ -20,7 +20,7 @@ def mock_agent():
     agent.query = AsyncMock(return_value="Test response")
 
     # Mock streaming query to yield text and done signal
-    async def mock_query_streaming(prompt, progress_callback=None):
+    async def mock_query_streaming(prompt=None, messages=None, progress_callback=None):
         if progress_callback:
             progress_callback("thinking", 0, 10, None)
             progress_callback("calling_claude", 1, 10, None)
@@ -29,6 +29,12 @@ def mock_agent():
         yield {"type": "done", "turns": 1}
 
     agent.query_streaming = mock_query_streaming
+
+    # Mock new KG-related methods
+    agent.get_last_kg_saved_count = MagicMock(return_value=0)
+    agent.clear_tool_calls = MagicMock()
+    agent.kg_save_enabled = True
+
     return agent
 
 
@@ -132,12 +138,21 @@ async def test_multiline_input_handling(mock_state_manager):
     agent = AsyncMock(spec=BossAgent)
     streaming_called = []
 
-    async def mock_streaming(prompt, progress_callback=None):
-        streaming_called.append(prompt)
-        yield "Response to: " + prompt
+    async def mock_streaming(prompt=None, messages=None, progress_callback=None):
+        # Track what was called (either prompt or last message)
+        if messages:
+            streaming_called.append(messages[-1]["content"])
+        else:
+            streaming_called.append(prompt)
+
+        response_text = messages[-1]["content"] if messages else prompt
+        yield "Response to: " + response_text
         yield {"type": "done", "turns": 1}
 
     agent.query_streaming = mock_streaming
+    agent.get_last_kg_saved_count = MagicMock(return_value=0)
+    agent.clear_tool_calls = MagicMock()
+    agent.kg_save_enabled = True
 
     with patch('boss.tui_interactive.PromptSession') as mock_session_class:
         # Simulate multi-line input then exit
@@ -179,11 +194,14 @@ async def test_conversation_tracking(mock_state_manager):
     # Create mock agent with streaming
     agent = AsyncMock(spec=BossAgent)
 
-    async def mock_streaming(prompt, progress_callback=None):
+    async def mock_streaming(prompt=None, messages=None, progress_callback=None):
         yield "Test response"
         yield {"type": "done", "turns": 1}
 
     agent.query_streaming = mock_streaming
+    agent.get_last_kg_saved_count = MagicMock(return_value=0)
+    agent.clear_tool_calls = MagicMock()
+    agent.kg_save_enabled = True
 
     with patch('boss.tui_interactive.PromptSession') as mock_session_class:
         mock_session = AsyncMock()
@@ -246,7 +264,7 @@ async def test_progress_feedback_callback():
     # Create a mock agent with streaming
     mock_agent = AsyncMock(spec=BossAgent)
 
-    async def mock_streaming(prompt, progress_callback=None):
+    async def mock_streaming(prompt=None, messages=None, progress_callback=None):
         # Simulate calling the callback
         if progress_callback:
             progress_callback("thinking", 0, 10, None)
@@ -257,6 +275,9 @@ async def test_progress_feedback_callback():
         yield {"type": "done", "turns": 1}
 
     mock_agent.query_streaming = mock_streaming
+    mock_agent.get_last_kg_saved_count = MagicMock(return_value=0)
+    mock_agent.clear_tool_calls = MagicMock()
+    mock_agent.kg_save_enabled = True
 
     result = await query_with_feedback(mock_agent, "test prompt", console)
 
@@ -272,7 +293,7 @@ async def test_feedback_with_tool_calls(mock_state_manager):
     # Create mock agent with streaming and tool calls
     agent = AsyncMock(spec=BossAgent)
 
-    async def mock_streaming_with_tools(prompt, progress_callback=None):
+    async def mock_streaming_with_tools(prompt=None, messages=None, progress_callback=None):
         if progress_callback:
             progress_callback("thinking", 0, 10, None)
             progress_callback("calling_claude", 1, 10, None)
@@ -285,6 +306,9 @@ async def test_feedback_with_tool_calls(mock_state_manager):
         yield {"type": "done", "turns": 2}
 
     agent.query_streaming = mock_streaming_with_tools
+    agent.get_last_kg_saved_count = MagicMock(return_value=0)
+    agent.clear_tool_calls = MagicMock()
+    agent.kg_save_enabled = True
 
     with patch('boss.tui_interactive.PromptSession') as mock_session_class:
         mock_session = AsyncMock()

@@ -351,8 +351,8 @@ async def main_async():
     state_manager = StateManager()
     knowledge_graph = KnowledgeGraph()
 
-    # Only initialize agent if needed
-    agent = BossAgent(config) if needs_agent else None
+    # Only initialize agent if needed (with knowledge graph for interactive learning)
+    agent = BossAgent(config, knowledge_graph=knowledge_graph) if needs_agent else None
 
     try:
         if agent:
