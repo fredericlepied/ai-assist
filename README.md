@@ -261,6 +261,37 @@ boss /interactive
 boss
 ```
 
+**Modern TUI Features**:
+- 🎨 **Rich Formatting**: Beautiful markdown rendering with syntax highlighting
+- 📝 **Multi-line Editing**: Press Enter to submit, Esc-Enter or Ctrl-J for multi-line input
+- 📚 **Command History**: Navigate with Up/Down arrows, persistent across sessions
+- ⌨️ **Tab Completion**: Auto-complete slash commands (try typing `/st` and press Tab)
+- 🔍 **History Search**: Ctrl-R for reverse search through your conversation history
+- 💬 **Real-time Feedback**: See what the assistant is doing while processing queries
+
+**Built-in Commands**:
+- `/status` - Show state statistics
+- `/history` - Show recent monitoring history
+- `/clear-cache` - Clear expired cache
+- `/help` - Show help message
+- `/exit` or `/quit` - Exit interactive mode
+
+**Tips**:
+- Press **Enter** to submit your input (normal behavior)
+- Press **Esc-Enter** or **Ctrl-J** to add newlines for multi-line input
+- Press **Tab** to auto-complete slash commands
+- Use **Up/Down** arrows to navigate command history
+- Press **Ctrl-R** to search through your history
+- History is saved at `~/.boss/interactive_history.txt`
+- Responses are automatically formatted as Markdown
+
+**Fallback Mode**:
+If TUI libraries are not available, BOSS will automatically fall back to basic mode. You can also force basic mode with:
+```bash
+export BOSS_INTERACTIVE_MODE=basic
+boss /interactive
+```
+
 Example queries:
 - "What are the latest failing DCI jobs?"
 - "Show me critical Jira tickets in the CILAB project"

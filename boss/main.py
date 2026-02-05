@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -13,13 +14,52 @@ from .knowledge_graph import KnowledgeGraph
 from .kg_queries import KnowledgeGraphQueries
 
 
-async def interactive_mode(agent: BossAgent, state_manager: StateManager):
-    """Run in interactive mode"""
+def should_use_tui():
+    """Auto-detect TUI capability"""
+    import sys
+
+    # Check if terminal
+    if not sys.stdin.isatty():
+        return False
+
+    # Check environment variable
+    mode = os.getenv("BOSS_INTERACTIVE_MODE", "tui").lower()
+    if mode == "basic":
+        return False
+
+    # Check libraries available
+    try:
+        import prompt_toolkit
+        import rich
+        return True
+    except ImportError:
+        return False
+
+
+async def interactive_mode(agent: BossAgent, state_manager: StateManager, use_tui: bool = None):
+    """Run in interactive mode with TUI or basic fallback"""
+    if use_tui is None:
+        use_tui = should_use_tui()
+
+    if use_tui:
+        try:
+            from .tui_interactive import tui_interactive_mode
+            await tui_interactive_mode(agent, state_manager)
+        except ImportError:
+            print("TUI libraries not available, using basic mode")
+            print("Install with: pip install 'boss[dev]' prompt-toolkit rich")
+            await basic_interactive_mode(agent, state_manager)
+    else:
+        await basic_interactive_mode(agent, state_manager)
+
+
+async def basic_interactive_mode(agent: BossAgent, state_manager: StateManager):
+    """Original simple interactive mode (fallback)"""
     print("\n" + "="*60)
     print("BOSS - AI Assistant for Managers")
     print("="*60)
     print("\nType your questions or commands.")
-    print("Commands: /status, /history, /clear-cache")
+    print("Commands: /status, /history, /clear-cache, /help")
     print("Type /exit or /quit to exit\n")
 
     conversation_context = []
@@ -32,7 +72,6 @@ async def interactive_mode(agent: BossAgent, state_manager: StateManager):
                 continue
 
             if user_input.lower() in ["/exit", "/quit"]:
-                # Save conversation context
                 state_manager.save_conversation_context(
                     "last_interactive_session",
                     {"messages": conversation_context}
@@ -60,6 +99,18 @@ async def interactive_mode(agent: BossAgent, state_manager: StateManager):
             if user_input.lower() == "/clear-cache":
                 removed = state_manager.cleanup_expired_cache()
                 print(f"\nCleared {removed} cache entries\n")
+                continue
+
+            if user_input.lower() == "/help":
+                print("\nBOSS Interactive Mode Help")
+                print("="*60)
+                print("Commands:")
+                print("  /status      - Show state statistics")
+                print("  /history     - Show recent monitoring history")
+                print("  /clear-cache - Clear expired cache")
+                print("  /exit, /quit - Exit interactive mode")
+                print("  /help        - Show this help")
+                print()
                 continue
 
             print("\nBOSS: ", end="", flush=True)
