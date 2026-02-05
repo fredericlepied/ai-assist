@@ -1,0 +1,272 @@
+"""Tests for schedule loader"""
+
+import pytest
+import json
+import tempfile
+from pathlib import Path
+from ai_assist.schedule_loader import ScheduleLoader
+from ai_assist.tasks import MonitorDefinition, TaskDefinition
+
+
+@pytest.fixture
+def temp_json_file():
+    """Create a temporary JSON file"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir) / "schedules.json"
+
+
+@pytest.fixture
+def sample_schedules():
+    """Sample schedule data"""
+    return {
+        "version": "1.0",
+        "monitors": [
+            {
+                "name": "Test Monitor",
+                "prompt": "Check for failures",
+                "interval": "5m",
+                "description": "Test monitor",
+                "enabled": True,
+                "conditions": [],
+                "knowledge_graph": {"enabled": True}
+            }
+        ],
+        "tasks": [
+            {
+                "name": "Daily Report",
+                "prompt": "Generate report",
+                "interval": "morning on weekdays",
+                "description": "Daily summary",
+                "enabled": True,
+                "conditions": []
+            }
+        ]
+    }
+
+
+class TestScheduleLoader:
+    """Tests for ScheduleLoader class"""
+
+    def test_initialization(self, temp_json_file):
+        """Test that ScheduleLoader initializes correctly"""
+        loader = ScheduleLoader(temp_json_file)
+        assert loader.json_file == temp_json_file
+
+    def test_load_monitors_from_json(self, temp_json_file, sample_schedules):
+        """Test loading monitors from JSON file"""
+        temp_json_file.write_text(json.dumps(sample_schedules))
+
+        loader = ScheduleLoader(temp_json_file)
+        monitors = loader.load_monitors()
+
+        assert len(monitors) == 1
+        assert isinstance(monitors[0], MonitorDefinition)
+        assert monitors[0].name == "Test Monitor"
+        assert monitors[0].interval == "5m"
+        assert monitors[0].knowledge_graph == {"enabled": True}
+
+    def test_load_tasks_from_json(self, temp_json_file, sample_schedules):
+        """Test loading tasks from JSON file"""
+        temp_json_file.write_text(json.dumps(sample_schedules))
+
+        loader = ScheduleLoader(temp_json_file)
+        tasks = loader.load_tasks()
+
+        assert len(tasks) == 1
+        assert isinstance(tasks[0], TaskDefinition)
+        assert tasks[0].name == "Daily Report"
+        assert tasks[0].interval == "morning on weekdays"
+
+    def test_load_from_empty_json(self, temp_json_file):
+        """Test loading from empty JSON file"""
+        temp_json_file.write_text(json.dumps({"version": "1.0"}))
+
+        loader = ScheduleLoader(temp_json_file)
+        monitors = loader.load_monitors()
+        tasks = loader.load_tasks()
+
+        assert len(monitors) == 0
+        assert len(tasks) == 0
+
+    def test_load_from_missing_file(self, temp_json_file):
+        """Test loading from non-existent file"""
+        loader = ScheduleLoader(temp_json_file)
+        monitors = loader.load_monitors()
+        tasks = loader.load_tasks()
+
+        assert len(monitors) == 0
+        assert len(tasks) == 0
+
+    def test_load_with_invalid_monitor(self, temp_json_file, capsys):
+        """Test that invalid monitors are skipped with warning"""
+        data = {
+            "version": "1.0",
+            "monitors": [
+                {
+                    "name": "Valid Monitor",
+                    "prompt": "Test",
+                    "interval": "5m"
+                },
+                {
+                    "name": "Invalid Monitor",
+                    "prompt": "Test",
+                    "interval": "invalid"  # Invalid interval
+                }
+            ],
+            "tasks": []
+        }
+        temp_json_file.write_text(json.dumps(data))
+
+        loader = ScheduleLoader(temp_json_file)
+        monitors = loader.load_monitors()
+
+        # Should load only the valid monitor
+        assert len(monitors) == 1
+        assert monitors[0].name == "Valid Monitor"
+
+        # Should print warning about invalid monitor
+        captured = capsys.readouterr()
+        assert "Invalid Monitor" in captured.out or "Skipping invalid monitor" in captured.out
+
+    def test_load_with_missing_required_fields(self, temp_json_file, capsys):
+        """Test that monitors with missing required fields are skipped"""
+        data = {
+            "version": "1.0",
+            "monitors": [
+                {
+                    "name": "Incomplete Monitor",
+                    # Missing prompt and interval
+                }
+            ],
+            "tasks": []
+        }
+        temp_json_file.write_text(json.dumps(data))
+
+        loader = ScheduleLoader(temp_json_file)
+        monitors = loader.load_monitors()
+
+        assert len(monitors) == 0
+        captured = capsys.readouterr()
+        assert "Incomplete Monitor" in captured.out or "Skipping invalid monitor" in captured.out
+
+    def test_load_with_corrupted_json(self, temp_json_file, capsys):
+        """Test handling of corrupted JSON file"""
+        temp_json_file.write_text("{invalid json")
+
+        loader = ScheduleLoader(temp_json_file)
+        monitors = loader.load_monitors()
+        tasks = loader.load_tasks()
+
+        assert len(monitors) == 0
+        assert len(tasks) == 0
+
+        captured = capsys.readouterr()
+        assert "Failed to parse" in captured.out or "Error" in captured.out
+
+    def test_enabled_and_disabled_schedules(self, temp_json_file):
+        """Test loading both enabled and disabled schedules"""
+        data = {
+            "version": "1.0",
+            "monitors": [
+                {
+                    "name": "Enabled Monitor",
+                    "prompt": "Test",
+                    "interval": "5m",
+                    "enabled": True
+                },
+                {
+                    "name": "Disabled Monitor",
+                    "prompt": "Test",
+                    "interval": "10m",
+                    "enabled": False
+                }
+            ],
+            "tasks": []
+        }
+        temp_json_file.write_text(json.dumps(data))
+
+        loader = ScheduleLoader(temp_json_file)
+        monitors = loader.load_monitors()
+
+        # Both should be loaded (filtering happens in scheduler)
+        assert len(monitors) == 2
+        assert monitors[0].enabled is True
+        assert monitors[1].enabled is False
+
+    def test_time_based_schedules(self, temp_json_file):
+        """Test loading time-based schedules"""
+        data = {
+            "version": "1.0",
+            "monitors": [],
+            "tasks": [
+                {
+                    "name": "Morning Task",
+                    "prompt": "Morning report",
+                    "interval": "morning on weekdays"
+                },
+                {
+                    "name": "Specific Time Task",
+                    "prompt": "Run at 9am",
+                    "interval": "9:00 on monday,friday"
+                }
+            ]
+        }
+        temp_json_file.write_text(json.dumps(data))
+
+        loader = ScheduleLoader(temp_json_file)
+        tasks = loader.load_tasks()
+
+        assert len(tasks) == 2
+        assert tasks[0].is_time_based is True
+        assert tasks[1].is_time_based is True
+
+    def test_conditions_and_knowledge_graph(self, temp_json_file):
+        """Test loading schedules with conditions and knowledge graph"""
+        data = {
+            "version": "1.0",
+            "monitors": [
+                {
+                    "name": "KG Monitor",
+                    "prompt": "Test",
+                    "interval": "5m",
+                    "conditions": [
+                        {"type": "cache", "key": "test", "max_age": "1h"}
+                    ],
+                    "knowledge_graph": {
+                        "enabled": True,
+                        "save_results": True
+                    }
+                }
+            ],
+            "tasks": []
+        }
+        temp_json_file.write_text(json.dumps(data))
+
+        loader = ScheduleLoader(temp_json_file)
+        monitors = loader.load_monitors()
+
+        assert len(monitors) == 1
+        assert len(monitors[0].conditions) == 1
+        assert monitors[0].knowledge_graph["enabled"] is True
+
+    def test_multiple_monitors_and_tasks(self, temp_json_file):
+        """Test loading multiple monitors and tasks"""
+        data = {
+            "version": "1.0",
+            "monitors": [
+                {"name": f"Monitor {i}", "prompt": "Test", "interval": f"{i}m"}
+                for i in range(1, 6)
+            ],
+            "tasks": [
+                {"name": f"Task {i}", "prompt": "Test", "interval": f"{i}h"}
+                for i in range(1, 4)
+            ]
+        }
+        temp_json_file.write_text(json.dumps(data))
+
+        loader = ScheduleLoader(temp_json_file)
+        monitors = loader.load_monitors()
+        tasks = loader.load_tasks()
+
+        assert len(monitors) == 5
+        assert len(tasks) == 3

@@ -10,6 +10,7 @@ from .config import AiAssistConfig, MCPServerConfig
 from .mcp_stdio_fix import stdio_client_fixed
 from .introspection_tools import IntrospectionTools
 from .report_tools import ReportTools
+from .schedule_tools import ScheduleTools
 from .identity import get_identity
 
 if TYPE_CHECKING:
@@ -33,6 +34,9 @@ class AiAssistAgent:
 
         # Initialize internal report tools
         self.report_tools = ReportTools()
+
+        # Initialize internal schedule management tools
+        self.schedule_tools = ScheduleTools()
 
         if config.use_vertex:
             vertex_kwargs = {"project_id": config.vertex_project_id}
@@ -88,6 +92,12 @@ class AiAssistAgent:
         if report_tool_defs:
             self.available_tools.extend(report_tool_defs)
             print(f"✓ Added {len(report_tool_defs)} internal report tools")
+
+        # Add internal schedule management tools
+        schedule_tool_defs = self.schedule_tools.get_tool_definitions()
+        if schedule_tool_defs:
+            self.available_tools.extend(schedule_tool_defs)
+            print(f"✓ Added {len(schedule_tool_defs)} schedule management tools")
 
     async def _run_server(self, name: str, config: MCPServerConfig):
         """Run an MCP server connection (as a background task)"""
@@ -378,13 +388,27 @@ class AiAssistAgent:
             except Exception as e:
                 return f"Error executing introspection tool {original_tool_name}: {str(e)}"
 
-        # Handle internal tools (report management, etc.)
+        # Handle internal tools (report management, schedule management, etc.)
         if server_name == "internal":
             try:
-                result_text = await self.report_tools.execute_tool(
-                    original_tool_name,
-                    arguments
-                )
+                # Route to appropriate internal tool handler
+                schedule_tools = [
+                    "create_monitor", "create_task", "list_schedules",
+                    "update_schedule", "delete_schedule", "enable_schedule",
+                    "get_schedule_status"
+                ]
+
+                if original_tool_name in schedule_tools:
+                    result_text = await self.schedule_tools.execute_tool(
+                        original_tool_name,
+                        arguments
+                    )
+                else:
+                    # Default to report tools
+                    result_text = await self.report_tools.execute_tool(
+                        original_tool_name,
+                        arguments
+                    )
 
                 # Track internal tool call
                 self.last_tool_calls.append({

@@ -11,6 +11,7 @@ from .tasks import TaskLoader
 from .task_runner import TaskRunner
 from .task_watcher import TaskFileWatcher
 from .monitor_runner import MonitorRunner
+from .schedule_loader import ScheduleLoader
 
 
 class MonitoringScheduler:
@@ -22,32 +23,37 @@ class MonitoringScheduler:
         config,
         state_manager: StateManager,
         knowledge_graph: Optional[KnowledgeGraph] = None,
-        monitor_file: Optional[Path] = None,
-        task_file: Optional[Path] = None
+        schedule_file: Optional[Path] = None
     ):
         self.agent = agent
         self.config = config
         self.state_manager = state_manager
         self.knowledge_graph = knowledge_graph
-        self.monitor_file = monitor_file
-        self.task_file = task_file
+
+        # Use schedule_file or default location
+        if schedule_file:
+            self.schedule_file = schedule_file
+        else:
+            self.schedule_file = Path.home() / ".ai-assist" / "schedules.json"
+
+        self.loader = ScheduleLoader(self.schedule_file)
         self.monitors: list[MonitorRunner] = []
         self.user_tasks: list[TaskRunner] = []
         self.monitor_handles: list[asyncio.Task] = []
         self.user_task_handles: list[asyncio.Task] = []
         self.running = False
 
-        if monitor_file and monitor_file.exists():
-            self.monitors = self._load_monitors(monitor_file)
+        # Load initial schedules
+        self.monitors = self._load_monitors()
+        self.user_tasks = self._load_user_tasks()
 
-        if task_file and task_file.exists():
-            self.user_tasks = self._load_user_tasks(task_file)
+    def _load_monitors(self) -> list[MonitorRunner]:
+        """Load monitors from JSON file"""
+        if not self.loader:
+            return []
 
-    def _load_monitors(self, monitor_file: Path) -> list[MonitorRunner]:
-        """Load monitors from YAML file"""
         try:
-            loader = TaskLoader()
-            monitor_defs = loader.load_monitors_from_yaml(monitor_file)
+            monitor_defs = self.loader.load_monitors()
 
             runners = []
             for monitor_def in monitor_defs:
@@ -65,14 +71,16 @@ class MonitoringScheduler:
 
             return runners
         except Exception as e:
-            print(f"Error loading monitors from {monitor_file}: {e}")
+            print(f"Error loading monitors from {self.schedule_file}: {e}")
             return []
 
-    def _load_user_tasks(self, task_file: Path) -> list[TaskRunner]:
-        """Load user-defined tasks from YAML file"""
+    def _load_user_tasks(self) -> list[TaskRunner]:
+        """Load user-defined tasks from JSON file"""
+        if not self.loader:
+            return []
+
         try:
-            loader = TaskLoader()
-            task_defs = loader.load_from_yaml(task_file)
+            task_defs = self.loader.load_tasks()
 
             runners = []
             for task_def in task_defs:
@@ -85,30 +93,51 @@ class MonitoringScheduler:
 
             return runners
         except Exception as e:
-            print(f"Error loading tasks from {task_file}: {e}")
+            print(f"Error loading tasks from {self.schedule_file}: {e}")
             return []
 
-    async def reload_tasks(self):
-        """Reload task definitions from YAML file"""
-        if not self.task_file:
-            return
 
+    async def reload_schedules(self):
+        """Reload all schedules from JSON file (hot reload)"""
         print("\n" + "="*60)
-        print("Reloading task definitions...")
+        print("Reloading schedules...")
         print("="*60)
 
         try:
-            new_tasks = self._load_user_tasks(self.task_file)
+            # Load new schedules
+            new_monitors = self._load_monitors()
+            new_tasks = self._load_user_tasks()
 
-            for task_handle in self.user_task_handles:
-                task_handle.cancel()
+            # Cancel all existing tasks
+            all_handles = self.monitor_handles + self.user_task_handles
+            for handle in all_handles:
+                handle.cancel()
 
-            if self.user_task_handles:
-                await asyncio.gather(*self.user_task_handles, return_exceptions=True)
+            if all_handles:
+                await asyncio.gather(*all_handles, return_exceptions=True)
 
+            # Clear old handles
+            self.monitor_handles.clear()
             self.user_task_handles.clear()
+
+            # Update schedules
+            self.monitors = new_monitors
             self.user_tasks = new_tasks
 
+            # Restart monitor tasks
+            for monitor in self.monitors:
+                interval = 0 if monitor.monitor_def.is_time_based else monitor.monitor_def.interval_seconds
+                task_handle = asyncio.create_task(
+                    self._schedule_task(
+                        monitor.monitor_def.name,
+                        monitor.run,
+                        interval,
+                        task_def=monitor.monitor_def
+                    )
+                )
+                self.monitor_handles.append(task_handle)
+
+            # Restart user tasks
             for task_runner in self.user_tasks:
                 interval = 0 if task_runner.task_def.is_time_based else task_runner.task_def.interval_seconds
                 task_handle = asyncio.create_task(
@@ -121,13 +150,14 @@ class MonitoringScheduler:
                 )
                 self.user_task_handles.append(task_handle)
 
-            print(f"✓ Reloaded {len(new_tasks)} task(s)")
+            print(f"✓ Reloaded {len(new_monitors)} monitor(s) and {len(new_tasks)} task(s)")
             print("="*60 + "\n")
 
         except Exception as e:
-            print(f"✗ Failed to reload tasks: {e}")
-            print("Keeping existing tasks")
+            print(f"✗ Failed to reload schedules: {e}")
+            print("Keeping existing schedules")
             print("="*60 + "\n")
+
 
     async def start(self):
         """Start the monitoring loop"""
@@ -155,7 +185,7 @@ class MonitoringScheduler:
             self.monitor_handles.append(task_handle)
 
         if self.monitors:
-            print(f"Scheduled {len(self.monitors)} monitors from YAML")
+            print(f"Scheduled {len(self.monitors)} monitors")
 
         for task_runner in self.user_tasks:
             interval = 0 if task_runner.task_def.is_time_based else task_runner.task_def.interval_seconds
@@ -173,10 +203,11 @@ class MonitoringScheduler:
         if self.user_tasks:
             print(f"Scheduled {len(self.user_tasks)} user-defined tasks")
 
-        if self.task_file:
-            watcher = TaskFileWatcher(self.task_file, self.reload_tasks)
+        # Watch schedules.json for changes
+        if self.schedule_file and self.schedule_file.exists():
+            watcher = TaskFileWatcher(self.schedule_file, self.reload_schedules)
             tasks.append(asyncio.create_task(watcher.watch()))
-            print(f"Watching {self.task_file} for changes...")
+            print(f"Watching {self.schedule_file} for changes...")
 
         await asyncio.gather(*tasks)
 

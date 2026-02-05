@@ -148,16 +148,14 @@ async def monitoring_mode(
     knowledge_graph: KnowledgeGraph
 ):
     """Run in monitoring mode"""
-    monitor_file = Path.home() / ".ai-assist" / "monitors.yaml"
-    task_file = Path.home() / ".ai-assist" / "tasks.yaml"
+    schedule_file = Path.home() / ".ai-assist" / "schedules.json"
 
     scheduler = MonitoringScheduler(
         agent,
         config,
         state_manager,
         knowledge_graph,
-        monitor_file=monitor_file if monitor_file.exists() else None,
-        task_file=task_file if task_file.exists() else None
+        schedule_file=schedule_file
     )
 
     try:

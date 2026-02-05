@@ -1,4 +1,4 @@
-"""File watcher for hot-reloading task definitions"""
+"""File watcher for hot-reloading schedule definitions"""
 
 import asyncio
 from pathlib import Path
@@ -6,13 +6,13 @@ from typing import Callable, Optional
 
 
 class TaskFileWatcher:
-    """Watch a task file for changes and trigger reload"""
+    """Watch a file for changes and trigger reload"""
 
     def __init__(self, task_file: Path, callback: Callable):
         """Initialize file watcher
 
         Args:
-            task_file: Path to the tasks.yaml file to watch
+            task_file: Path to the file to watch (e.g., schedules.json)
             callback: Async function to call when file changes
         """
         self.task_file = task_file

@@ -7,8 +7,8 @@ An intelligent AI assistant powered by Claude and MCP (Model Context Protocol) t
 - 🤖 **AI-Powered Assistant**: Uses Claude Sonnet 4.5 for intelligent analysis and responses
 - 🔌 **MCP Integration**: Connects to MCP servers for DCI and Jira tools
 - 📊 **Periodic Monitoring**: Automated scheduled checks for Jira and DCI updates
-- 📝 **User-Defined Tasks**: Create custom periodic tasks via YAML configuration (NEW!)
-- 🔄 **Hot Reload**: Update task definitions without restarting
+- 📝 **Schedule Management**: Create and manage monitors/tasks via AI interaction
+- 🔄 **Hot Reload**: Schedule changes take effect immediately without restarting
 - ⚡ **Conditional Actions**: Trigger notifications and actions based on results
 - 💬 **Interactive Mode**: Chat with the assistant to query information
 - 🎯 **Targeted Queries**: Run one-off queries for specific information
@@ -126,44 +126,9 @@ servers:
 
 Copy from `.ai-assist/mcp_servers.yaml.example` to get started.
 
-### Monitors Configuration (~/.ai-assist/monitors.yaml)
+### Creating Schedules
 
-Configure monitoring tasks in `~/.ai-assist/monitors.yaml`:
-
-```yaml
-monitors:
-  - name: "Jira Project Monitor"
-    interval: 5m
-    enabled: true
-    prompt: |
-      Search Jira tickets in projects: CILAB, CNF
-      Query: updated >= -1d ORDER BY updated DESC
-    knowledge_graph:
-      enabled: true
-      mcp_tool: "dci__search_jira_tickets"
-      entity_type: "jira_ticket"
-      parse_json: true
-      tool_args:
-        jql: "project in (CILAB, CNF) AND updated >= -1d"
-        max_results: 20
-
-  - name: "DCI Failures Monitor"
-    interval: 5m
-    enabled: true
-    prompt: |
-      Search DCI jobs with status failure or error in last 24 hours.
-      Provide concise summary.
-    knowledge_graph:
-      enabled: true
-      mcp_tool: "dci__search_dci_jobs"
-      entity_type: "dci_job"
-      parse_json: true
-      tool_args:
-        query: "((status in ['failure', 'error']) and (created_at >= '2026-02-03'))"
-        limit: 20
-```
-
-Copy from `.ai-assist/monitors.yaml.example` to get started.
+Use schedule management tools in interactive mode to create monitors and tasks. See "Schedule Management Tools" section below for details.
 
 ### Getting API Credentials
 
@@ -325,11 +290,10 @@ ai-assist /monitor
 ```
 
 This will:
-- Check configured Jira projects every 5 minutes (default)
-- Check DCI jobs every 5 minutes (default)
+- Run all monitors and tasks from `~/.ai-assist/schedules.json`
 - **Store all findings in the temporal knowledge graph** (automatic)
-- Run user-defined tasks from `~/.ai-assist/tasks.yaml` (if configured)
 - Report findings to console or configured notification channel
+- Hot-reload when schedules.json changes
 
 **Knowledge Graph Integration:**
 All DCI jobs and Jira tickets are automatically stored in the temporal knowledge graph, allowing you to:
@@ -340,39 +304,6 @@ All DCI jobs and Jira tickets are automatically stored in the temporal knowledge
 
 See [KNOWLEDGE_GRAPH_INTEGRATION.md](KNOWLEDGE_GRAPH_INTEGRATION.md) for details.
 
-### User-Defined Tasks
-
-Create custom periodic tasks without writing code! Define tasks in `~/.ai-assist/tasks.yaml`:
-
-```yaml
-tasks:
-  # Simple interval-based task
-  - name: "Critical Failures Monitor"
-    interval: 10m
-    prompt: |
-      Search for DCI jobs with status failure or error in the last hour.
-      Provide a summary with job IDs and issues.
-    conditions:
-      - if: "failures > 0"
-        then:
-          action: notify
-          message: "⚠️ Found {failures} critical failures!"
-
-  # Time-based task (NEW!)
-  - name: "Morning Standup"
-    interval: "morning on weekdays"  # 9:00 AM Mon-Fri
-    prompt: "Check for overnight issues and urgent items"
-```
-
-**Features:**
-- ✅ Simple YAML configuration
-- ✅ Any interval (30s, 5m, 1h, 24h, etc.)
-- ✅ Natural language prompts
-- ✅ Conditional actions (notify, log, create docs)
-- ✅ Hot reload - changes take effect within 5 seconds
-- ✅ Automatic metadata extraction from results
-
-See [TASKS.md](TASKS.md) for complete documentation and examples.
 
 ### One-off Query
 
@@ -402,27 +333,7 @@ In interactive mode, you can use special commands:
 
 ## Available Tools
 
-The assistant has access to tools from the **dci-mcp-server**, which provides:
-
-### DCI Tools
-- `search_dci_jobs` - Search DCI jobs with advanced query language
-- `query_dci_components` - Lookup DCI components (OpenShift releases, etc.)
-- `query_dci_teams` - Query DCI teams
-- `query_dci_remotecis` - Query DCI remote CI labs
-- `download_dci_file` - Download job artifacts and files
-- `today` / `now` - Get current date/time for queries
-
-### Jira Tools (via dci-mcp-server)
-- `search_jira_tickets` - Search tickets with JQL queries
-- `get_jira_ticket` - Get detailed ticket info with comments and changelog
-- `get_jira_project_info` - Get project information
-
-### Google Docs Tools (via dci-mcp-server)
-- `create_google_doc_from_markdown` - Create Google Docs from markdown
-- `create_google_doc_from_file` - Convert markdown files to Google Docs
-- `convert_dci_report_to_google_doc` - Convert DCI reports to Google Docs
-- `list_google_docs` - List your Google Docs
-- `find_folder_by_name` - Find folders in Google Drive
+The assistant has access to these tools:
 
 ### Report Management Tools (built-in internal tools)
 - `write_report` - Create or overwrite a markdown report file
@@ -434,9 +345,38 @@ The assistant has access to tools from the **dci-mcp-server**, which provides:
 **Report Storage:**
 Reports are stored as markdown files in `~/ai-assist/reports/` by default (configurable via `AI_ASSIST_REPORTS_DIR` environment variable).
 
-**Note:** Report management tools are now built directly into ai-assist as internal tools, not as a separate MCP server. This makes them faster and simpler to use.
+### Schedule Management Tools (built-in internal tools)
+
+Manage monitors and tasks dynamically via AI interaction:
+
+- `create_monitor` - Create new monitor with knowledge graph support
+- `create_task` - Create new periodic task
+- `list_schedules` - List all monitors and tasks
+- `update_schedule` - Update existing schedule properties
+- `delete_schedule` - Remove a schedule
+- `enable_schedule` - Enable/disable a schedule
+- `get_schedule_status` - View schedule details
+
+**Schedule Storage:**
+Schedules are stored in `~/.ai-assist/schedules.json` and hot-reload automatically when `/monitor` is running.
 
 **Example Usage:**
+```bash
+# Interactive mode
+ai-assist /interactive
+You: Create a monitor to check for failed DCI jobs every 5 minutes
+ai-assist: *creates monitor* → Saved to schedules.json
+
+You: List my schedules
+ai-assist: *shows all monitors and tasks*
+
+# Start monitoring
+ai-assist /monitor
+# Your new schedule runs automatically
+```
+
+
+**Example Report Usage:**
 ```bash
 # Interactive mode
 ai-assist /interactive
@@ -541,16 +481,12 @@ All tools from the new server will automatically be available to the AI assistan
 
 ### Custom Monitoring Tasks
 
-Add monitors to `~/.ai-assist/monitors.yaml` - no code changes required:
+Create monitors via interactive mode using schedule management tools:
 
-```yaml
-monitors:
-  - name: "My Custom Monitor"
-    interval: 10m
-    prompt: "Your monitoring query here"
-    knowledge_graph:
-      enabled: true
-      mcp_tool: "server__tool_name"
+```bash
+ai-assist /interactive
+You: Create a monitor called "My Custom Monitor" that checks every 10 minutes
+ai-assist: *creates monitor* → Monitor 'My Custom Monitor' created successfully
       entity_type: "my_entity"
 ```
 
@@ -560,8 +496,6 @@ See example files in `.ai-assist/` directory for templates.
 
 - Python 3.12+
 - Anthropic API key
-- DCI credentials (optional, for DCI monitoring)
-- Jira API token (optional, for Jira monitoring)
 
 ## License
 
