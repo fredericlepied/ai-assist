@@ -74,33 +74,96 @@ DCI_API_SECRET=your_dci_api_secret         # From your DCI admin
 
 ## Configuration
 
-Create a `.env` file with the following variables:
+BOSS uses YAML files for configuration, making it easy to customize without editing code.
+
+### Environment Variables (.env)
+
+Create a `.env` file with authentication credentials:
 
 ```bash
-# Required
+# Required: Anthropic API access (choose ONE method)
+# Method 1: Vertex AI (Google Cloud - enterprise)
+ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project-id
+# ANTHROPIC_VERTEX_REGION=us-east5  # Optional
+
+# Method 2: Direct API Key (personal/free tier)
 ANTHROPIC_API_KEY=your_api_key_here
 
-# DCI MCP Server Configuration
-# The dci-mcp-server provides access to DCI, Jira, and Google Docs tools
-
-# DCI API Credentials (required for DCI tools)
+# API credentials (used by MCP servers if not in YAML)
 DCI_CLIENT_ID=your_dci_client_id
 DCI_API_SECRET=your_dci_api_secret
 DCI_CS_URL=https://api.distributed-ci.io
-
-# Jira API Credentials (optional, for Jira tools)
 JIRA_API_TOKEN=your_jira_token
 JIRA_URL=https://issues.redhat.com
-
-# Google Docs (optional, for Google Docs tools)
-# GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
-
-# Monitoring Settings
-JIRA_CHECK_INTERVAL=300  # seconds
-DCI_CHECK_INTERVAL=300   # seconds
-JIRA_PROJECTS=CILAB,OCP  # comma-separated
-DCI_QUERIES=((status in ['failure', 'error']) and (tags in ['daily']))  # pipe-separated
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
 ```
+
+### MCP Servers Configuration (~/.boss/mcp_servers.yaml)
+
+Configure MCP servers in `~/.boss/mcp_servers.yaml`:
+
+```yaml
+servers:
+  # DCI MCP Server
+  dci:
+    command: "uvx"
+    args: ["--from", "dci-mcp-server", "dci-mcp-server"]
+    env:
+      DCI_CLIENT_ID: "${DCI_CLIENT_ID}"
+      DCI_API_SECRET: "${DCI_API_SECRET}"
+      DCI_CS_URL: "${DCI_CS_URL}"
+      JIRA_API_TOKEN: "${JIRA_API_TOKEN}"
+      JIRA_URL: "${JIRA_URL}"
+      MCP_SHOW_BANNER: "false"
+
+  # Add custom servers
+  # my-server:
+  #   command: "node"
+  #   args: ["./server.js"]
+  #   env:
+  #     API_KEY: "${MY_API_KEY}"
+```
+
+Copy from `.boss/mcp_servers.yaml.example` to get started.
+
+### Monitors Configuration (~/.boss/monitors.yaml)
+
+Configure monitoring tasks in `~/.boss/monitors.yaml`:
+
+```yaml
+monitors:
+  - name: "Jira Project Monitor"
+    interval: 5m
+    enabled: true
+    prompt: |
+      Search Jira tickets in projects: CILAB, CNF
+      Query: updated >= -1d ORDER BY updated DESC
+    knowledge_graph:
+      enabled: true
+      mcp_tool: "dci__search_jira_tickets"
+      entity_type: "jira_ticket"
+      parse_json: true
+      tool_args:
+        jql: "project in (CILAB, CNF) AND updated >= -1d"
+        max_results: 20
+
+  - name: "DCI Failures Monitor"
+    interval: 5m
+    enabled: true
+    prompt: |
+      Search DCI jobs with status failure or error in last 24 hours.
+      Provide concise summary.
+    knowledge_graph:
+      enabled: true
+      mcp_tool: "dci__search_dci_jobs"
+      entity_type: "dci_job"
+      parse_json: true
+      tool_args:
+        query: "((status in ['failure', 'error']) and (created_at >= '2026-02-03'))"
+        limit: 20
+```
+
+Copy from `.boss/monitors.yaml.example` to get started.
 
 ### Getting API Credentials
 
@@ -378,34 +441,35 @@ boss /kg-show <id>          # Entity details
 
 ### Adding New MCP Servers
 
-Edit `boss/config.py` in the `from_env()` method to add new MCP servers:
+Add servers to `~/.boss/mcp_servers.yaml` - no code changes required:
 
-```python
-mcp_servers={
-    "dci": MCPServerConfig(...),  # existing
-    "your_server": MCPServerConfig(
-        command="uvx",
-        args=["--from", "your-mcp-server", "your-mcp-server"],
-        env={"YOUR_API_KEY": os.getenv("YOUR_API_KEY", "")}
-    ),
-}
+```yaml
+servers:
+  my-custom-server:
+    command: "uvx"
+    args: ["--from", "my-mcp-server", "my-mcp-server"]
+    env:
+      API_KEY: "${MY_API_KEY}"
 ```
 
 All tools from the new server will automatically be available to the AI assistant.
 
 ### Custom Monitoring Tasks
 
-Add new monitors in `boss/monitors.py`:
+Add monitors to `~/.boss/monitors.yaml` - no code changes required:
 
-```python
-class CustomMonitor:
-    def __init__(self, agent: BossAgent):
-        self.agent = agent
-
-    async def check(self):
-        # Your monitoring logic
-        pass
+```yaml
+monitors:
+  - name: "My Custom Monitor"
+    interval: 10m
+    prompt: "Your monitoring query here"
+    knowledge_graph:
+      enabled: true
+      mcp_tool: "server__tool_name"
+      entity_type: "my_entity"
 ```
+
+See example files in `.boss/` directory for templates.
 
 ## Requirements
 

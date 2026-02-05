@@ -1,0 +1,62 @@
+# Monitor Configuration for BOSS
+# Copy this file to ~/.boss/monitors.yaml and customize
+
+monitors:
+  - name: "Jira Project Monitor"
+    description: "Monitor Jira projects for updates"
+    interval: 5m
+    enabled: true
+    prompt: |
+      Search Jira tickets in projects: CILAB, CNF
+      Query: updated >= -1d ORDER BY updated DESC
+
+      Provide:
+      1. List of ticket keys
+      2. Number of tickets found
+      3. Critical or high priority tickets
+      4. Tickets needing attention
+
+    # Knowledge graph configuration (optional)
+    knowledge_graph:
+      enabled: true
+      mcp_tool: "dci__search_jira_tickets"  # Format: server__tool
+      entity_type: "jira_ticket"
+      parse_json: true
+      tool_args:
+        jql: "project in (CILAB, CNF) AND updated >= -1d ORDER BY updated DESC"
+        max_results: 20
+
+  - name: "DCI Failures Monitor"
+    description: "Monitor DCI job failures"
+    interval: 5m
+    enabled: true
+    prompt: |
+      Search DCI jobs with status failure or error in last 24 hours.
+      Limit to 20 most recent jobs.
+
+      Provide concise summary:
+      1. Total failures
+      2. Most recent 5 job IDs
+      3. Key failure patterns
+      4. Urgent items
+
+    knowledge_graph:
+      enabled: true
+      mcp_tool: "dci__search_dci_jobs"
+      entity_type: "dci_job"
+      parse_json: true
+      tool_args:
+        query: "((status in ['failure', 'error']) and (created_at >= '2026-02-03'))"
+        limit: 20
+        sort: "-created_at"
+
+  # Example: Custom monitor without knowledge graph
+  - name: "Daily Summary"
+    description: "Generate daily summary report"
+    interval: "9:00 on weekdays"
+    enabled: false
+    prompt: |
+      Generate a daily summary:
+      1. Recent Jira updates
+      2. DCI job failures
+      3. Items needing attention

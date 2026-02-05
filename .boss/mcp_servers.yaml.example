@@ -1,0 +1,31 @@
+# MCP Server Configuration for BOSS
+# Copy this file to ~/.boss/mcp_servers.yaml and customize
+
+servers:
+  # DCI MCP Server - Production version from PyPI
+  dci:
+    command: "uvx"
+    args: ["--from", "dci-mcp-server", "dci-mcp-server"]
+    env:
+      DCI_CLIENT_ID: "${DCI_CLIENT_ID}"
+      DCI_API_SECRET: "${DCI_API_SECRET}"
+      DCI_CS_URL: "${DCI_CS_URL}"
+      JIRA_API_TOKEN: "${JIRA_API_TOKEN}"
+      JIRA_URL: "${JIRA_URL}"
+      GOOGLE_APPLICATION_CREDENTIALS: "${GOOGLE_APPLICATION_CREDENTIALS}"
+      MCP_SHOW_BANNER: "false"
+
+  # DCI MCP Server - Local development version
+  dci-local:
+    enabled: false
+    command: "/home/user/work/dci-mcp-server/.venv/bin/python"
+    args: ["/home/user/work/dci-mcp-server/main.py"]
+    env:
+      MCP_SHOW_BANNER: "false"
+
+  # Add your custom MCP servers here
+  # my-custom-server:
+  #   command: "node"
+  #   args: ["./my-server.js"]
+  #   env:
+  #     API_KEY: "${MY_API_KEY}"

@@ -18,6 +18,15 @@ class TaskDefinition:
     enabled: bool = True
     conditions: list[dict] = field(default_factory=list)
 
+
+@dataclass
+class MonitorDefinition(TaskDefinition):
+    """Definition for a monitoring task with KG integration
+
+    Extends TaskDefinition with knowledge graph configuration
+    """
+    knowledge_graph: Optional[dict] = None
+
     @property
     def interval_seconds(self) -> int:
         """Convert interval string to seconds (for simple intervals)"""
@@ -274,3 +283,37 @@ class TaskLoader:
             raise ValueError(f"YAML parsing error: {e}")
         except KeyError as e:
             raise ValueError(f"Missing required field in task definition: {e}")
+
+    def load_monitors_from_yaml(self, path: Path) -> list[MonitorDefinition]:
+        """Load monitor definitions from YAML file"""
+        if not path.exists():
+            return []
+
+        try:
+            with open(path) as f:
+                data = yaml.safe_load(f)
+
+            if not data or "monitors" not in data:
+                return []
+
+            monitors = []
+            for monitor_data in data["monitors"]:
+                monitor = MonitorDefinition(
+                    name=monitor_data["name"],
+                    prompt=monitor_data["prompt"],
+                    interval=monitor_data["interval"],
+                    description=monitor_data.get("description"),
+                    enabled=monitor_data.get("enabled", True),
+                    conditions=monitor_data.get("conditions", []),
+                    knowledge_graph=monitor_data.get("knowledge_graph")
+                )
+
+                monitor.validate()
+                monitors.append(monitor)
+
+            return monitors
+
+        except yaml.YAMLError as e:
+            raise ValueError(f"YAML parsing error: {e}")
+        except KeyError as e:
+            raise ValueError(f"Missing required field in monitor definition: {e}")

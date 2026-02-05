@@ -88,7 +88,7 @@ async def monitoring_mode(
     knowledge_graph: KnowledgeGraph
 ):
     """Run in monitoring mode"""
-    # Look for tasks.yaml in ~/.boss/
+    monitor_file = Path.home() / ".boss" / "monitors.yaml"
     task_file = Path.home() / ".boss" / "tasks.yaml"
 
     scheduler = MonitoringScheduler(
@@ -96,6 +96,7 @@ async def monitoring_mode(
         config,
         state_manager,
         knowledge_graph,
+        monitor_file=monitor_file if monitor_file.exists() else None,
         task_file=task_file if task_file.exists() else None
     )
 
