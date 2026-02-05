@@ -9,6 +9,7 @@ from anthropic import Anthropic, AnthropicVertex
 from .config import AiAssistConfig, MCPServerConfig
 from .mcp_stdio_fix import stdio_client_fixed
 from .introspection_tools import IntrospectionTools
+from .identity import get_identity
 
 if TYPE_CHECKING:
     from .knowledge_graph import KnowledgeGraph
@@ -22,6 +23,9 @@ class AiAssistAgent:
         self.config = config
         self.knowledge_graph = knowledge_graph
         self.kg_save_enabled = True  # Can be toggled by user
+
+        # Load identity for personalized interactions
+        self.identity = get_identity()
 
         # Initialize introspection tools for self-awareness
         self.introspection_tools = IntrospectionTools(knowledge_graph=knowledge_graph)
@@ -179,6 +183,7 @@ class AiAssistAgent:
             response = self.anthropic.messages.create(
                 model=self.config.model,
                 max_tokens=4096,
+                system=self.identity.get_system_prompt(),
                 tools=api_tools,
                 messages=messages,
             )
@@ -266,6 +271,7 @@ class AiAssistAgent:
             with self.anthropic.messages.stream(
                 model=self.config.model,
                 max_tokens=4096,
+                system=self.identity.get_system_prompt(),
                 tools=api_tools,
                 messages=messages,
             ) as stream:

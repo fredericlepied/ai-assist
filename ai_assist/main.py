@@ -12,6 +12,7 @@ from .monitors import MonitoringScheduler
 from .state import StateManager
 from .knowledge_graph import KnowledgeGraph
 from .kg_queries import KnowledgeGraphQueries
+from .identity import Identity, UserIdentity, AssistantIdentity, get_identity
 
 
 def should_use_tui():
@@ -55,8 +56,10 @@ async def interactive_mode(agent: AiAssistAgent, state_manager: StateManager, us
 
 async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManager):
     """Original simple interactive mode (fallback)"""
+    identity = get_identity()
+
     print("\n" + "="*60)
-    print("ai-assist - AI Assistant for Managers")
+    print(f"ai-assist - {identity.get_greeting()}")
     print("="*60)
     print("\nType your questions or commands.")
     print("Commands: /status, /history, /clear-cache, /help")
@@ -113,7 +116,7 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
                 print()
                 continue
 
-            print("\nAssistant: ", end="", flush=True)
+            print(f"\n{identity.assistant.nickname}: ", end="", flush=True)
             response = await agent.query(user_input)
             print(response)
             print()
@@ -306,6 +309,56 @@ def kg_show_command(kg: KnowledgeGraph, entity_id: str):
     print()
 
 
+def identity_show_command():
+    """Show current identity configuration"""
+    identity = get_identity()
+
+    print("\nCurrent Identity:")
+    print("=" * 50)
+    print(f"User: {identity.user.name}")
+    print(f"Role: {identity.user.role}")
+    if identity.user.organization:
+        print(f"Organization: {identity.user.organization}")
+    if identity.user.timezone:
+        print(f"Timezone: {identity.user.timezone}")
+
+    print(f"\nAssistant Nickname: {identity.assistant.nickname}")
+    print(f"Formality: {identity.preferences.formality}")
+
+    print("\nSystem Prompt Preview:")
+    print("-" * 50)
+    print(identity.get_system_prompt())
+    print()
+
+
+def identity_init_command():
+    """Initialize identity interactively"""
+    print("\nInitialize ai-assist Identity")
+    print("=" * 50)
+
+    # Gather information
+    name = input("Your name: ").strip() or "there"
+    role = input("Your role/title [Manager]: ").strip() or "Manager"
+    organization = input("Organization (optional): ").strip() or None
+    nickname = input("Assistant nickname [Nexus]: ").strip() or "Nexus"
+
+    # Create identity
+    identity = Identity(
+        user=UserIdentity(
+            name=name,
+            role=role,
+            organization=organization
+        ),
+        assistant=AssistantIdentity(nickname=nickname)
+    )
+
+    # Save
+    identity.save_to_file()
+    print(f"\n✓ Identity saved to {Path.home() / '.ai-assist' / 'identity.yaml'}")
+    print(f"\n{identity.get_greeting()}")
+    print()
+
+
 async def main_async():
     """Async main function"""
     config = get_config()
@@ -323,7 +376,8 @@ async def main_async():
         command = command[1:]  # Remove leading /
 
     kg_commands = ["kg-stats", "kg-asof", "kg-late", "kg-changes", "kg-show"]
-    no_agent_commands = kg_commands + ["help"]
+    identity_commands = ["identity-show", "identity-init"]
+    no_agent_commands = kg_commands + identity_commands + ["help"]
     needs_agent = command not in no_agent_commands
 
     if needs_agent and not config.anthropic_api_key and not config.vertex_project_id:
@@ -370,6 +424,8 @@ async def main_async():
                 print("  /interactive       - Interactive mode")
                 print("  /status            - Show state statistics")
                 print("  /clear-cache       - Clear expired cache")
+                print("  /identity-show     - Show current identity configuration")
+                print("  /identity-init     - Initialize identity interactively")
                 print("  /kg-stats          - Show knowledge graph statistics")
                 print("  /kg-asof '<time>'  - What ai-assist knew at a specific time")
                 print("  /kg-late [min]     - Show late discoveries (default: 30 min)")
@@ -398,6 +454,11 @@ async def main_async():
             elif command == "clear-cache":
                 removed = state_manager.cleanup_expired_cache()
                 print(f"Cleared {removed} expired cache entries")
+            # Identity commands
+            elif command == "identity-show":
+                identity_show_command()
+            elif command == "identity-init":
+                identity_init_command()
             # Knowledge graph commands
             elif command == "kg-stats":
                 kg_stats_command(knowledge_graph)

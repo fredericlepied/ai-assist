@@ -19,6 +19,7 @@ from .state import StateManager
 from .tui import AiAssistCompleter
 from .context import ConversationMemory, KnowledgeGraphContext
 from .knowledge_graph import KnowledgeGraph
+from .identity import get_identity
 
 
 async def query_with_feedback(
@@ -40,6 +41,8 @@ async def query_with_feedback(
     Returns:
         The assistant's response text
     """
+    identity = get_identity()
+
     # Enrich prompt with knowledge graph context if available
     original_prompt = prompt
     context_summary = []
@@ -117,7 +120,7 @@ async def query_with_feedback(
                 # First text chunk - stop spinner and start showing response
                 if not response_started:
                     live.stop()
-                    console.print("\n[bold cyan]ai-assist:[/bold cyan] ", end="")
+                    console.print(f"\n[bold cyan]{identity.assistant.nickname}:[/bold cyan] ", end="")
                     response_started = True
 
                 # Print chunk immediately
@@ -177,9 +180,10 @@ async def query_with_feedback(
 async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager):
     """Run interactive mode with TUI enhancements"""
     console = Console()
+    identity = get_identity()
 
     # Setup history file
-    history_file = Path.home() / ".boss" / "interactive_history.txt"
+    history_file = Path.home() / ".ai-assist" / "interactive_history.txt"
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Create key bindings for better UX
@@ -202,7 +206,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
     # Display welcome banner
     console.print(Panel.fit(
-        "[bold cyan]ai-assist - AI Assistant for Managers[/bold cyan]\n\n"
+        f"[bold cyan]ai-assist - {identity.get_greeting()}[/bold cyan]\n\n"
         "Type your questions or commands.\n"
         "Commands: [yellow]/status[/yellow], [yellow]/history[/yellow], "
         "[yellow]/clear-cache[/yellow], [yellow]/kg-save[/yellow], [yellow]/help[/yellow]\n"
