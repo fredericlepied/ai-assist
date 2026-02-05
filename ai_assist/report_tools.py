@@ -16,10 +16,12 @@ class ReportTools:
             reports_dir: Directory to store reports (defaults to ~/ai-assist/reports)
         """
         if reports_dir is None:
-            reports_dir = Path(os.getenv(
-                "AI_ASSIST_REPORTS_DIR",
-                Path.home() / "ai-assist" / "reports"
-            ))
+            env_dir = os.getenv("AI_ASSIST_REPORTS_DIR")
+            if env_dir:
+                # Expand ~ in the path from environment variable
+                reports_dir = Path(os.path.expanduser(env_dir))
+            else:
+                reports_dir = Path.home() / "ai-assist" / "reports"
 
         self.reports_dir = Path(reports_dir)
         self.reports_dir.mkdir(parents=True, exist_ok=True)

@@ -116,8 +116,6 @@ servers:
       JIRA_URL: "${JIRA_URL}"
       MCP_SHOW_BANNER: "false"
 
-  # Note: Report management is built-in as internal tools (no MCP server needed)
-
   # Add custom servers
   # my-server:
   #   command: "node"

@@ -20,6 +20,7 @@ from .tui import AiAssistCompleter
 from .context import ConversationMemory, KnowledgeGraphContext
 from .knowledge_graph import KnowledgeGraph
 from .identity import get_identity
+from .commands import is_valid_interactive_command, get_command_suggestion
 
 
 async def query_with_feedback(
@@ -283,6 +284,12 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                 else:
                     status = "enabled" if agent.kg_save_enabled else "disabled"
                     console.print(f"\n[cyan]Knowledge graph auto-save is currently {status}[/cyan]\n")
+                continue
+
+            # Validate command before sending to agent
+            if not is_valid_interactive_command(user_input):
+                error_msg = get_command_suggestion(user_input, is_interactive=True)
+                console.print(f"\n[red]{error_msg}[/red]\n")
                 continue
 
             # Regular query

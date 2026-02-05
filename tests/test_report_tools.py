@@ -28,6 +28,22 @@ class TestReportTools:
         assert report_tools.reports_dir == temp_reports
         assert temp_reports.exists()
 
+    def test_tilde_expansion_in_env_var(self, monkeypatch, tmp_path):
+        """Test that tilde in AI_ASSIST_REPORTS_DIR is properly expanded"""
+        import os
+        # Set env var with tilde
+        test_dir = tmp_path / "test-reports"
+        monkeypatch.setenv("AI_ASSIST_REPORTS_DIR", f"~/{test_dir.name}")
+
+        # Create ReportTools - it should expand the tilde
+        rt = ReportTools()
+
+        # Path should be absolute and not contain literal ~
+        assert rt.reports_dir.is_absolute()
+        assert '~' not in str(rt.reports_dir)
+        # Should have expanded to home directory
+        assert str(rt.reports_dir).startswith(str(Path.home()))
+
     def test_get_tool_definitions(self, report_tools):
         """Test that tool definitions are returned"""
         tools = report_tools.get_tool_definitions()

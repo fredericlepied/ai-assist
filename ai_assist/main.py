@@ -13,6 +13,7 @@ from .state import StateManager
 from .knowledge_graph import KnowledgeGraph
 from .kg_queries import KnowledgeGraphQueries
 from .identity import Identity, UserIdentity, AssistantIdentity, get_identity
+from .commands import is_valid_interactive_command, get_command_suggestion, is_valid_cli_command
 
 
 def should_use_tui():
@@ -114,6 +115,11 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
                 print("  /exit, /quit - Exit interactive mode")
                 print("  /help        - Show this help")
                 print()
+                continue
+
+            # Validate command before sending to agent
+            if not is_valid_interactive_command(user_input):
+                print(f"\n{get_command_suggestion(user_input, is_interactive=True)}\n")
                 continue
 
             print(f"\n{identity.assistant.nickname}: ", end="", flush=True)
@@ -390,9 +396,17 @@ async def main_async():
     if command:
         command = command[1:]  # Remove leading /
 
+    # Validate command early - before initializing agent
+    if command and not is_valid_cli_command(command):
+        print(get_command_suggestion(f"/{command}", is_interactive=False))
+        sys.exit(1)
+
+    # Define which commands need the agent
     kg_commands = ["kg-stats", "kg-asof", "kg-late", "kg-changes", "kg-show"]
     identity_commands = ["identity-show", "identity-init"]
-    no_agent_commands = kg_commands + identity_commands + ["help"]
+    state_commands = ["status", "clear-cache"]
+    no_agent_commands = kg_commands + identity_commands + state_commands + ["help"]
+
     needs_agent = command not in no_agent_commands
 
     if needs_agent and not config.anthropic_api_key and not config.vertex_project_id:
@@ -495,10 +509,7 @@ async def main_async():
                     sys.exit(1)
                 entity_id = sys.argv[2]
                 kg_show_command(knowledge_graph, entity_id)
-            else:
-                print(f"Unknown command: /{command}")
-                print("\nRun 'ai-assist /help' to see available commands")
-                sys.exit(1)
+            # Note: Unknown commands are caught earlier, before agent initialization
         else:
             # Default to interactive mode
             await interactive_mode(agent, state_manager)
