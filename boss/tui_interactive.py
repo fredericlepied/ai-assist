@@ -20,13 +20,14 @@ from .tui import BossCompleter
 
 
 async def query_with_feedback(agent: BossAgent, prompt: str, console: Console) -> str:
-    """Query the agent with real-time feedback display"""
+    """Query the agent with real-time feedback and streaming display"""
     # State to track progress
     feedback_state = {
         "status": "Starting...",
         "turn": 0,
         "max_turns": 10,
-        "tool": None
+        "tool": None,
+        "streaming": False
     }
 
     def progress_callback(status: str, turn: int, max_turns: int, tool_name: str | None):
@@ -37,27 +38,86 @@ async def query_with_feedback(agent: BossAgent, prompt: str, console: Console) -
 
         if status == "thinking":
             feedback_state["status"] = "🤔 Analyzing your question..."
+            feedback_state["streaming"] = False
         elif status == "calling_claude":
             feedback_state["status"] = f"💭 Thinking... (Turn {turn}/{max_turns})"
+            feedback_state["streaming"] = False
         elif status == "executing_tool":
             # Simplify tool names for display
             display_name = tool_name.replace("mcp__", "").replace("__", " → ").replace("_", " ")
             feedback_state["status"] = f"🔧 Using tool: {display_name}"
+            feedback_state["streaming"] = False
         elif status == "complete":
             feedback_state["status"] = "✨ Complete!"
+            feedback_state["streaming"] = False
 
     def create_feedback_display():
         """Create the feedback display"""
         spinner = Spinner("dots", text=feedback_state["status"], style="cyan")
         return spinner
 
-    # Use Live to show real-time feedback
-    with Live(create_feedback_display(), console=console, refresh_per_second=10) as live:
-        response = await agent.query(prompt, progress_callback=progress_callback)
-        # Update one last time
-        live.update(Text("✨ Complete!", style="green"))
+    # Show spinner initially
+    live = Live(create_feedback_display(), console=console, refresh_per_second=10)
+    live.start()
 
-    return response
+    full_response = ""
+    response_started = False
+
+    try:
+        # Use streaming query
+        async for chunk in agent.query_streaming(prompt, progress_callback=progress_callback):
+            # Handle text chunks
+            if isinstance(chunk, str):
+                # First text chunk - stop spinner and start showing response
+                if not response_started:
+                    live.stop()
+                    console.print("\n[bold cyan]BOSS:[/bold cyan] ", end="")
+                    response_started = True
+
+                # Print chunk immediately
+                console.print(chunk, end="")
+                full_response += chunk
+
+            # Handle tool use notifications
+            elif isinstance(chunk, dict):
+                if chunk.get("type") == "tool_use":
+                    # Show tool call inline
+                    if response_started:
+                        console.print()  # New line before tool notification
+                    tool_name = chunk["name"]
+                    display_name = tool_name.replace("mcp__", "").replace("__", " → ").replace("_", " ")
+                    console.print(f"\n[dim]🔧 {display_name}[/dim]", end="")
+                    if not response_started:
+                        live.update(create_feedback_display())  # Keep spinner going
+
+                elif chunk.get("type") == "done":
+                    # Query complete
+                    if response_started:
+                        console.print()  # Final newline
+                    break
+
+                elif chunk.get("type") == "error":
+                    if response_started:
+                        console.print()
+                    console.print(f"\n[red]{chunk.get('message')}[/red]")
+                    break
+
+    except Exception as e:
+        # Handle any streaming errors
+        if response_started:
+            console.print()
+        console.print(f"\n[red]Error: {e}[/red]")
+
+    finally:
+        # Ensure spinner is stopped
+        if live._started:
+            live.stop()
+
+        # If we never started response (no text chunks), stop the spinner
+        if not response_started:
+            pass  # Already stopped above or never started
+
+    return full_response
 
 
 async def tui_interactive_mode(agent: BossAgent, state_manager: StateManager):
@@ -134,17 +194,13 @@ async def tui_interactive_mode(agent: BossAgent, state_manager: StateManager):
 
             # Regular query
             try:
-                # Show feedback while processing
+                # Show feedback while processing and stream response
                 response = await query_with_feedback(agent, user_input, console)
 
-                # Render response
-                console.print("\n[bold cyan]BOSS:[/bold cyan] ", end="")
-                if any(marker in response for marker in ["```", "##", "**", "- ", "1. "]):
-                    console.print(Markdown(response))
-                else:
-                    console.print(response)
-
-                console.print()
+                # Response is already printed via streaming
+                # Just add final newline if not already there
+                if response and not response.endswith('\n'):
+                    console.print()
 
                 # Track conversation
                 conversation_context.append({
@@ -154,7 +210,7 @@ async def tui_interactive_mode(agent: BossAgent, state_manager: StateManager):
                 })
 
             except Exception as e:
-                console.print(f"[red]Error: {e}[/red]\n")
+                console.print(f"\n[red]Error: {e}[/red]\n")
 
         except (EOFError, KeyboardInterrupt):
             state_manager.save_conversation_context(

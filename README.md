@@ -272,6 +272,10 @@ boss
   - 💭 Thinking (with turn counter)
   - 🔧 Using tools (shows which tool is executing)
   - ✨ Complete!
+- ⚡ **Streaming Responses**: Text appears word-by-word as Claude generates it
+  - No more waiting for the full response
+  - See progress in real-time
+  - Tool calls shown inline during generation
 
 **Built-in Commands**:
 - `/status` - Show state statistics

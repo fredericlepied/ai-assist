@@ -178,6 +178,108 @@ class BossAgent:
 
         return "Maximum turns reached without final answer"
 
+    async def query_streaming(self, prompt: str, max_turns: int = 10, progress_callback=None):
+        """Query the agent with streaming response
+
+        Args:
+            prompt: The user's question/prompt
+            max_turns: Maximum number of agentic turns
+            progress_callback: Optional callback for progress updates
+
+        Yields:
+            str: Text chunks as they arrive
+            dict: Tool call information {"type": "tool_use", "name": str, "id": str, "input": dict}
+            dict: Final result {"type": "done", "turns": int}
+        """
+        messages = [{"role": "user", "content": prompt}]
+
+        # Filter out custom internal fields from tools before sending to API
+        api_tools = [
+            {
+                "name": tool["name"],
+                "description": tool["description"],
+                "input_schema": tool["input_schema"],
+            }
+            for tool in self.available_tools
+        ]
+
+        if progress_callback:
+            progress_callback("thinking", 0, max_turns, None)
+
+        for turn in range(max_turns):
+            if progress_callback:
+                progress_callback("calling_claude", turn + 1, max_turns, None)
+
+            # Use streaming API
+            with self.anthropic.messages.stream(
+                model=self.config.model,
+                max_tokens=4096,
+                tools=api_tools,
+                messages=messages,
+            ) as stream:
+                # Track content blocks
+                assistant_content = []
+                current_text = ""
+                tool_uses = []
+
+                for event in stream:
+                    # Content block delta - streaming text
+                    if event.type == "content_block_delta":
+                        if hasattr(event.delta, "text"):
+                            chunk = event.delta.text
+                            current_text += chunk
+                            yield chunk  # Stream text to user
+
+                    # Content block start - tool use
+                    elif event.type == "content_block_start":
+                        if hasattr(event.content_block, "type") and event.content_block.type == "tool_use":
+                            tool_info = {
+                                "type": "tool_use",
+                                "name": event.content_block.name,
+                                "id": event.content_block.id,
+                                "input": {}
+                            }
+                            tool_uses.append(tool_info)
+                            yield tool_info  # Notify about tool use
+
+                    # Input JSON delta for tool
+                    elif event.type == "content_block_delta":
+                        if hasattr(event.delta, "partial_json"):
+                            # Tool input is being streamed
+                            pass  # We'll get the full input later
+
+                # Get final message from stream
+                final_message = stream.get_final_message()
+                messages.append({"role": "assistant", "content": final_message.content})
+
+                # Execute any tools
+                tool_results = []
+                for block in final_message.content:
+                    if block.type == "tool_use":
+                        if progress_callback:
+                            progress_callback("executing_tool", turn + 1, max_turns, block.name)
+
+                        result = await self._execute_tool(block.name, block.input)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result,
+                        })
+
+                # If no tool calls, we're done
+                if not tool_results:
+                    if progress_callback:
+                        progress_callback("complete", turn + 1, max_turns, None)
+
+                    yield {"type": "done", "turns": turn + 1}
+                    return
+
+                # Continue with tool results
+                messages.append({"role": "user", "content": tool_results})
+
+        # Max turns reached
+        yield {"type": "error", "message": "Maximum turns reached without final answer"}
+
     async def _execute_tool(self, tool_name: str, arguments: dict) -> str:
         """Execute a tool call on the appropriate MCP server"""
         parts = tool_name.split("__", 1)
