@@ -116,6 +116,13 @@ servers:
       JIRA_URL: "${JIRA_URL}"
       MCP_SHOW_BANNER: "false"
 
+  # Reports MCP Server (for markdown report management)
+  reports:
+    command: "uvx"
+    args: ["--from", "boss-reports-mcp-server", "boss-reports-mcp-server"]
+    env:
+      BOSS_REPORTS_DIR: "${HOME}/boss/reports"
+
   # Add custom servers
   # my-server:
   #   command: "node"
@@ -366,6 +373,32 @@ The assistant has access to tools from the **dci-mcp-server**, which provides:
 - `convert_dci_report_to_google_doc` - Convert DCI reports to Google Docs
 - `list_google_docs` - List your Google Docs
 - `find_folder_by_name` - Find folders in Google Drive
+
+### Report Management Tools (via boss-reports-mcp-server)
+- `write_report` - Create or overwrite a markdown report file
+- `append_to_report` - Add content to existing report (creates if doesn't exist)
+- `read_report` - Read a report's current content
+- `list_reports` - List all available reports with metadata
+- `delete_report` - Delete a report file
+
+**Report Storage:**
+Reports are stored as markdown files in `~/boss/reports/` by default (configurable via `BOSS_REPORTS_DIR`).
+
+**Example Usage:**
+```bash
+# Interactive mode
+boss /interactive
+You: Generate a DCI failures summary and save to 'dci-summary' report
+BOSS: *analyzes* → *calls write_report* → Report saved!
+
+# Tasks
+tasks:
+  - name: "Weekly Report"
+    interval: "9:00 on monday"
+    prompt: |
+      Generate weekly DCI summary with failure trends.
+      Save to report named 'weekly-summary'.
+```
 
 ### Example Queries
 

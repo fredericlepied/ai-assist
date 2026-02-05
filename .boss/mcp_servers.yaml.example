@@ -23,6 +23,14 @@ servers:
     env:
       MCP_SHOW_BANNER: "false"
 
+  # Reports MCP Server - For markdown report management
+  # Uncomment to enable report generation and management
+  # reports:
+  #   command: "uvx"
+  #   args: ["--from", "boss-reports-mcp-server", "boss-reports-mcp-server"]
+  #   env:
+  #     BOSS_REPORTS_DIR: "${HOME}/boss/reports"
+
   # Add your custom MCP servers here
   # my-custom-server:
   #   command: "node"
