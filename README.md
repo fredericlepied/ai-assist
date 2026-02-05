@@ -267,7 +267,11 @@ boss
 - 📚 **Command History**: Navigate with Up/Down arrows, persistent across sessions
 - ⌨️ **Tab Completion**: Auto-complete slash commands (try typing `/st` and press Tab)
 - 🔍 **History Search**: Ctrl-R for reverse search through your conversation history
-- 💬 **Real-time Feedback**: See what the assistant is doing while processing queries
+- 💬 **Real-time Feedback**: Live spinner showing what BOSS is doing:
+  - 🤔 Analyzing your question
+  - 💭 Thinking (with turn counter)
+  - 🔧 Using tools (shows which tool is executing)
+  - ✨ Complete!
 
 **Built-in Commands**:
 - `/status` - Show state statistics

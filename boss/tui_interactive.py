@@ -10,10 +10,54 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
+from rich.live import Live
+from rich.spinner import Spinner
+from rich.table import Table
 
 from .agent import BossAgent
 from .state import StateManager
 from .tui import BossCompleter
+
+
+async def query_with_feedback(agent: BossAgent, prompt: str, console: Console) -> str:
+    """Query the agent with real-time feedback display"""
+    # State to track progress
+    feedback_state = {
+        "status": "Starting...",
+        "turn": 0,
+        "max_turns": 10,
+        "tool": None
+    }
+
+    def progress_callback(status: str, turn: int, max_turns: int, tool_name: str | None):
+        """Update feedback state"""
+        feedback_state["turn"] = turn
+        feedback_state["max_turns"] = max_turns
+        feedback_state["tool"] = tool_name
+
+        if status == "thinking":
+            feedback_state["status"] = "🤔 Analyzing your question..."
+        elif status == "calling_claude":
+            feedback_state["status"] = f"💭 Thinking... (Turn {turn}/{max_turns})"
+        elif status == "executing_tool":
+            # Simplify tool names for display
+            display_name = tool_name.replace("mcp__", "").replace("__", " → ").replace("_", " ")
+            feedback_state["status"] = f"🔧 Using tool: {display_name}"
+        elif status == "complete":
+            feedback_state["status"] = "✨ Complete!"
+
+    def create_feedback_display():
+        """Create the feedback display"""
+        spinner = Spinner("dots", text=feedback_state["status"], style="cyan")
+        return spinner
+
+    # Use Live to show real-time feedback
+    with Live(create_feedback_display(), console=console, refresh_per_second=10) as live:
+        response = await agent.query(prompt, progress_callback=progress_callback)
+        # Update one last time
+        live.update(Text("✨ Complete!", style="green"))
+
+    return response
 
 
 async def tui_interactive_mode(agent: BossAgent, state_manager: StateManager):
@@ -89,12 +133,12 @@ async def tui_interactive_mode(agent: BossAgent, state_manager: StateManager):
                 continue
 
             # Regular query
-            console.print("\n[bold cyan]BOSS:[/bold cyan] ", end="")
-
             try:
-                response = await agent.query(user_input)
+                # Show feedback while processing
+                response = await query_with_feedback(agent, user_input, console)
 
-                # Render response as markdown if it contains markdown syntax
+                # Render response
+                console.print("\n[bold cyan]BOSS:[/bold cyan] ", end="")
                 if any(marker in response for marker in ["```", "##", "**", "- ", "1. "]):
                     console.print(Markdown(response))
                 else:

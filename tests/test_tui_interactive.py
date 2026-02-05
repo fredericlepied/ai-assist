@@ -128,8 +128,11 @@ async def test_multiline_input_handling(mock_agent, mock_state_manager):
 
         await tui_interactive_mode(mock_agent, mock_state_manager)
 
-        # Verify agent was called with multi-line input
-        mock_agent.query.assert_called_once_with("Line 1\nLine 2\nLine 3")
+        # Verify agent was called with multi-line input (now with progress_callback)
+        mock_agent.query.assert_called_once()
+        call_args = mock_agent.query.call_args
+        assert call_args[0][0] == "Line 1\nLine 2\nLine 3"
+        assert "progress_callback" in call_args[1]  # Should have callback
 
 
 @pytest.mark.asyncio
@@ -199,3 +202,71 @@ async def test_eoferror_handling(mock_agent, mock_state_manager):
 
         # Should save conversation before exiting
         mock_state_manager.save_conversation_context.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_progress_feedback_callback():
+    """Test progress callback is invoked during query"""
+    from boss.tui_interactive import query_with_feedback
+    from rich.console import Console
+    from io import StringIO
+
+    output = StringIO()
+    console = Console(file=output, force_terminal=False)
+
+    # Create a mock agent that accepts progress_callback
+    mock_agent = AsyncMock(spec=BossAgent)
+
+    async def mock_query(prompt, progress_callback=None):
+        # Simulate calling the callback
+        if progress_callback:
+            progress_callback("thinking", 0, 10, None)
+            progress_callback("calling_claude", 1, 10, None)
+            progress_callback("executing_tool", 1, 10, "test_tool")
+            progress_callback("complete", 1, 10, None)
+        return "Test response"
+
+    mock_agent.query = mock_query
+
+    result = await query_with_feedback(mock_agent, "test prompt", console)
+
+    assert result == "Test response"
+    # Check that feedback was shown
+    output_text = output.getvalue()
+    assert "Complete" in output_text
+
+
+@pytest.mark.asyncio
+async def test_feedback_with_tool_calls(mock_agent, mock_state_manager):
+    """Test feedback shows tool calls"""
+    from unittest.mock import call
+
+    # Configure agent to simulate tool execution
+    async def mock_query_with_tools(prompt, progress_callback=None):
+        if progress_callback:
+            progress_callback("thinking", 0, 10, None)
+            progress_callback("calling_claude", 1, 10, None)
+            progress_callback("executing_tool", 1, 10, "mcp__dci__search_dci_jobs")
+            progress_callback("calling_claude", 2, 10, None)
+            progress_callback("complete", 2, 10, None)
+        return "Found 5 failed jobs"
+
+    mock_agent.query = mock_query_with_tools
+
+    with patch('boss.tui_interactive.PromptSession') as mock_session_class:
+        mock_session = AsyncMock()
+        mock_session.prompt_async = AsyncMock(side_effect=[
+            "Find failed jobs",
+            "/exit"
+        ])
+        mock_session_class.return_value = mock_session
+
+        await tui_interactive_mode(mock_agent, mock_state_manager)
+
+        # Verify conversation was tracked
+        mock_state_manager.save_conversation_context.assert_called()
+        call_args = mock_state_manager.save_conversation_context.call_args
+        messages = call_args[0][1]["messages"]
+        assert len(messages) == 1
+        assert messages[0]["user"] == "Find failed jobs"
+        assert messages[0]["assistant"] == "Found 5 failed jobs"

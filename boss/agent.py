@@ -111,8 +111,15 @@ class BossAgent:
             import traceback
             traceback.print_exc()
 
-    async def query(self, prompt: str, max_turns: int = 10) -> str:
-        """Query the agent with a prompt"""
+    async def query(self, prompt: str, max_turns: int = 10, progress_callback=None) -> str:
+        """Query the agent with a prompt
+
+        Args:
+            prompt: The user's question/prompt
+            max_turns: Maximum number of agentic turns
+            progress_callback: Optional callback function for progress updates
+                              Called with (status: str, turn: int, max_turns: int, tool_name: str | None)
+        """
         messages = [{"role": "user", "content": prompt}]
 
         # Filter out custom internal fields from tools before sending to API
@@ -125,7 +132,13 @@ class BossAgent:
             for tool in self.available_tools
         ]
 
+        if progress_callback:
+            progress_callback("thinking", 0, max_turns, None)
+
         for turn in range(max_turns):
+            if progress_callback:
+                progress_callback("calling_claude", turn + 1, max_turns, None)
+
             response = self.anthropic.messages.create(
                 model=self.config.model,
                 max_tokens=4096,
@@ -138,6 +151,9 @@ class BossAgent:
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
+                    if progress_callback:
+                        progress_callback("executing_tool", turn + 1, max_turns, block.name)
+
                     result = await self._execute_tool(
                         block.name,
                         block.input
@@ -149,6 +165,9 @@ class BossAgent:
                     })
 
             if not tool_results:
+                if progress_callback:
+                    progress_callback("complete", turn + 1, max_turns, None)
+
                 final_text = ""
                 for block in response.content:
                     if hasattr(block, "text"):
