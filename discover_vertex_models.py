@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Discover available Claude models in Vertex AI"""
+"""Test all known Claude models on Vertex AI"""
 
 import sys
-import os
 from pathlib import Path
 
 # Add ai_assist to path
@@ -10,9 +9,22 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from ai_assist.config import get_config
 
+# All known Claude models on Vertex AI (as of Feb 2026)
+KNOWN_MODELS = [
+    ("claude-opus-4-6@20250514", "Claude Opus 4.6 (newest, best for coding/agents)"),
+    ("claude-sonnet-4-5@20250929", "Claude Sonnet 4.5 (balanced, great for coding)"),
+    ("claude-haiku-4-5@20251001", "Claude Haiku 4.5 (efficient, fast)"),
+    ("claude-opus-4-1@20250805", "Claude Opus 4.1 (agentic search)"),
+    ("claude-opus-4@20250514", "Claude Opus 4"),
+    ("claude-sonnet-4@20250514", "Claude Sonnet 4"),
+    ("claude-3-7-sonnet@20250219", "Claude 3.7 Sonnet"),
+    ("claude-3-5-sonnet-v2@20241022", "Claude 3.5 Sonnet v2"),
+    ("claude-3-5-haiku@20241022", "Claude 3.5 Haiku"),
+]
+
 
 def test_models():
-    """Test different Claude model names on Vertex AI"""
+    """Test all known Claude models on Vertex AI"""
     config = get_config()
 
     if not config.use_vertex:
@@ -21,101 +33,84 @@ def test_models():
         return 1
 
     print("="*70)
-    print("Discovering Available Claude Models on Vertex AI")
+    print("Testing All Known Claude Models on Vertex AI")
     print("="*70)
     print(f"\nProject: {config.vertex_project_id}")
-    print(f"Region: {config.vertex_region or 'SDK default'}")
-
-    # Common Claude model names for Vertex AI
-    # NOTE: Vertex AI uses @ format for model names (e.g., claude-sonnet-4-5@20250929)
-    # NOT dash format (e.g., claude-sonnet-4-5-20250929)
-    model_names = [
-        # Claude Sonnet 4.5 (latest)
-        "claude-sonnet-4-5@20250929",
-
-        # Claude 3.5 Sonnet
-        "claude-3-5-sonnet@20240620",
-        "claude-3-5-sonnet-v2@20241022",
-
-        # Claude 3 Opus
-        "claude-3-opus@20240229",
-
-        # Claude 3 Sonnet
-        "claude-3-sonnet@20240229",
-
-        # Claude 3 Haiku
-        "claude-3-haiku@20240307",
-
-        # Try the one currently configured
-        config.model,
-    ]
-
-    print("\nTesting model availability...")
-    print("-"*70)
+    print(f"Region: {config.vertex_region or 'us-east5 (default)'}")
+    print(f"\nCurrently configured: {config.model}")
 
     from anthropic import AnthropicVertex
 
-    # Build vertex kwargs
     vertex_kwargs = {"project_id": config.vertex_project_id}
     if config.vertex_region:
         vertex_kwargs["region"] = config.vertex_region
 
     available_models = []
+    unavailable_models = []
 
-    for model_name in model_names:
+    print(f"\n🔍 Testing {len(KNOWN_MODELS)} known models...")
+    print("-"*70)
+
+    for model_id, description in KNOWN_MODELS:
         try:
-            print(f"\nTrying: {model_name}")
-            client = AnthropicVertex(**vertex_kwargs)
+            print(f"\n{model_id}")
+            print(f"  {description}")
 
-            # Try to send a minimal message to test if model exists
+            client = AnthropicVertex(**vertex_kwargs)
             response = client.messages.create(
-                model=model_name,
+                model=model_id,
                 max_tokens=10,
                 messages=[{"role": "user", "content": "Hi"}]
             )
 
-            print(f"  ✅ SUCCESS - Model is available!")
-            available_models.append(model_name)
+            print(f"  ✅ Available")
+            available_models.append((model_id, description))
 
         except Exception as e:
             error_str = str(e)
             if "404" in error_str or "NOT_FOUND" in error_str:
                 print(f"  ❌ Not found")
+                unavailable_models.append((model_id, "Not found"))
             elif "403" in error_str or "PERMISSION_DENIED" in error_str:
-                print(f"  ⚠️  Permission denied - model exists but access restricted")
+                print(f"  ⚠️  Permission denied")
+                unavailable_models.append((model_id, "Permission denied"))
             else:
-                print(f"  ❌ Error: {error_str[:100]}")
+                print(f"  ❌ Error: {error_str[:60]}")
+                unavailable_models.append((model_id, "Error"))
 
+    # Print summary
     print("\n" + "="*70)
     print("Summary")
     print("="*70)
 
     if available_models:
-        print(f"\n✅ Found {len(available_models)} available model(s):")
-        for model in available_models:
-            print(f"   • {model}")
+        print(f"\n✅ Available models ({len(available_models)}):")
+        for model_id, description in available_models:
+            print(f"   • {model_id}")
+            print(f"     {description}")
 
-        print(f"\n💡 To use one of these models, update your .env file:")
-        print(f"   AI_ASSIST_MODEL={available_models[0]}")
+        print(f"\n💡 To use a different model, update your .env file:")
+        print(f"   AI_ASSIST_MODEL={available_models[0][0]}")
 
-        return 0
-    else:
-        print("\n❌ No models found!")
-        print("\nPossible reasons:")
-        print("  1. Vertex AI API not enabled in your project")
-        print("  2. No access to Claude models in this project")
-        print("  3. Wrong region selected")
-        print("\nNext steps:")
-        print("  1. Check if Vertex AI API is enabled:")
-        print("     gcloud services list --enabled --project={config.vertex_project_id}")
-        print("  2. Check available regions:")
-        print("     Try setting ANTHROPIC_VERTEX_REGION to one of:")
-        print("     - us-east5")
-        print("     - us-central1")
-        print("     - europe-west1")
-        print("  3. Contact your GCP admin to enable Claude on Vertex AI")
+    if unavailable_models:
+        print(f"\n❌ Unavailable models ({len(unavailable_models)}):")
+        for model_id, reason in unavailable_models:
+            print(f"   • {model_id} ({reason})")
 
+    if not available_models:
+        print("\n❌ No models are accessible")
+        print("\n💡 Check:")
+        print("   • Vertex AI API enabled: gcloud services enable aiplatform.googleapis.com")
+        print("   • Authentication: gcloud auth application-default login")
+        print("   • Project has access to Claude models")
+        print("   • Try different regions (set ANTHROPIC_VERTEX_REGION)")
         return 1
+
+    print(f"\n📌 Currently configured: {config.model}")
+    if config.model not in [m[0] for m in available_models]:
+        print("   ⚠️  Your configured model is not in the available list!")
+
+    return 0
 
 
 if __name__ == "__main__":

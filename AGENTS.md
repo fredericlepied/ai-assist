@@ -255,6 +255,71 @@ tests/
 └── conftest.py         # Shared test fixtures
 ```
 
+#### Minimize Code Branches
+
+**Philosophy**: Keep code paths simple. Avoid fallbacks and conditional branches unless absolutely necessary.
+
+**Why:**
+- Fewer branches = fewer bugs
+- Easier to test (no need to test multiple paths)
+- Clearer code flow
+- Faster debugging
+
+**✓ Good: Fail fast with clear error**
+```python
+from google.cloud import aiplatform
+
+def discover_models():
+    # Initialize Vertex AI
+    aiplatform.init(project=project_id, location=region)
+
+    # Query for models
+    models = aiplatform.Model.list(filter='...')
+
+    return models
+```
+
+**✗ Bad: Fallback branches**
+```python
+def discover_models():
+    try:
+        from google.cloud import aiplatform
+        # Try API approach
+        models = aiplatform.Model.list(...)
+        return models
+    except ImportError:
+        # Fallback to hardcoded list
+        return test_known_models()
+    except Exception:
+        # Another fallback
+        return default_models()
+```
+
+**When to have branches:**
+- User-facing choices (interactive prompts, command flags)
+- Data-driven logic (different entity types, different formats)
+- NOT for: missing dependencies, API failures, "just in case" scenarios
+
+**Handle missing dependencies at install time:**
+```python
+# In pyproject.toml
+dependencies = [
+    "anthropic",
+    "google-cloud-aiplatform",  # Required, not optional
+]
+```
+
+**Handle errors clearly:**
+```python
+try:
+    models = aiplatform.Model.list(...)
+except Exception as e:
+    print(f"Error: Failed to discover models: {e}")
+    print("Make sure google-cloud-aiplatform is installed:")
+    print("  pip install google-cloud-aiplatform")
+    sys.exit(1)
+```
+
 #### Error Handling
 
 **Graceful Degradation**

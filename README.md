@@ -164,10 +164,12 @@ AI_ASSIST_MODEL=claude-sonnet-4-5@20250929
 
 **Available Models**
 
-To discover which models are available in your project:
+To test which Claude models are accessible in your project:
 ```bash
 uv run python discover_vertex_models.py
 ```
+
+This will test all known Claude models (Opus 4.6, Sonnet 4.5, Haiku 4.5, etc.) and show which ones you have access to.
 
 **Vertex AI API Not Enabled**
 
