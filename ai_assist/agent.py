@@ -15,6 +15,8 @@ from .introspection_tools import IntrospectionTools
 from .mcp_stdio_fix import stdio_client_fixed
 from .report_tools import ReportTools
 from .schedule_tools import ScheduleTools
+from .skills_loader import SkillsLoader
+from .skills_manager import SkillsManager
 
 if TYPE_CHECKING:
     from .context import ConversationMemory
@@ -43,6 +45,10 @@ class AiAssistAgent:
 
         # Initialize internal filesystem tools
         self.filesystem_tools = FilesystemTools()
+
+        # Initialize skills system
+        self.skills_loader = SkillsLoader()
+        self.skills_manager = SkillsManager(self.skills_loader)
 
         if config.use_vertex:
             vertex_kwargs = {"project_id": config.vertex_project_id}
@@ -112,6 +118,11 @@ class AiAssistAgent:
             self.available_tools.extend(filesystem_tool_defs)
             print(f"✓ Added {len(filesystem_tool_defs)} filesystem tools")
 
+        # Load installed skills
+        self.skills_manager.load_installed_skills()
+        if self.skills_manager.installed_skills:
+            print(f"✓ Loaded {len(self.skills_manager.installed_skills)} installed Agent Skills")
+
     async def _run_server(self, name: str, config: MCPServerConfig):
         """Run an MCP server connection (as a background task)"""
         try:
@@ -178,6 +189,23 @@ class AiAssistAgent:
 
             traceback.print_exc()
 
+    def _build_system_prompt(self) -> str:
+        """Build complete system prompt including identity and skills
+
+        Returns:
+            Complete system prompt string
+        """
+        # Start with identity prompt
+        identity_prompt = self.identity.get_system_prompt()
+
+        # Add skills section
+        skills_section = self.skills_manager.get_system_prompt_section()
+
+        if skills_section:
+            return f"{identity_prompt}\n\n{skills_section}"
+        else:
+            return identity_prompt
+
     async def query(
         self, prompt: str = None, messages: list[dict] = None, max_turns: int = 50, progress_callback=None
     ) -> str:
@@ -224,7 +252,7 @@ class AiAssistAgent:
             response = self.anthropic.messages.create(
                 model=self.config.model,
                 max_tokens=4096,
-                system=self.identity.get_system_prompt(),
+                system=self._build_system_prompt(),
                 tools=api_tools,
                 messages=messages,
             )
@@ -307,7 +335,7 @@ class AiAssistAgent:
             with self.anthropic.messages.stream(
                 model=self.config.model,
                 max_tokens=4096,
-                system=self.identity.get_system_prompt(),
+                system=self._build_system_prompt(),
                 tools=api_tools,
                 messages=messages,
             ) as stream:

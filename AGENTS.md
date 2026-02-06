@@ -380,6 +380,7 @@ async def query(self, prompt: str, max_turns: int = 10) -> str:
 4. **Iterate**: Enhance incrementally while keeping tests green
 5. **Refactor**: Apply DRY principle to eliminate duplication
 6. **Document**: Update README.md and AGENTS.md
+7. **Verify**: Run `pre-commit run -a` and ensure all checks pass before declaring the feature complete
 
 ### Adding a New MCP Server
 
@@ -594,6 +595,7 @@ When working on ai-assist, ask yourself:
 - [ ] Is the configuration centralized?
 - [ ] Does it follow existing patterns?
 - [ ] Is it documented?
+- [ ] Have I run `pre-commit run -a` and fixed all issues?
 
 ---
 

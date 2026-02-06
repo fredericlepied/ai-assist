@@ -37,6 +37,10 @@ def mock_agent():
     agent.clear_tool_calls = MagicMock()
     agent.kg_save_enabled = True
 
+    # Mock skills manager
+    agent.skills_manager = MagicMock()
+    agent.skills_manager.installed_skills = []
+
     return agent
 
 
@@ -159,6 +163,8 @@ async def test_multiline_input_handling(mock_state_manager):
     agent.get_last_kg_saved_count = MagicMock(return_value=0)
     agent.clear_tool_calls = MagicMock()
     agent.kg_save_enabled = True
+    agent.skills_manager = MagicMock()
+    agent.skills_manager.installed_skills = []
 
     with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         # Simulate multi-line input then exit
@@ -201,6 +207,8 @@ async def test_conversation_tracking(mock_state_manager):
     agent.get_last_kg_saved_count = MagicMock(return_value=0)
     agent.clear_tool_calls = MagicMock()
     agent.kg_save_enabled = True
+    agent.skills_manager = MagicMock()
+    agent.skills_manager.installed_skills = []
 
     with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
@@ -307,6 +315,8 @@ async def test_feedback_with_tool_calls(mock_state_manager):
     agent.get_last_kg_saved_count = MagicMock(return_value=0)
     agent.clear_tool_calls = MagicMock()
     agent.kg_save_enabled = True
+    agent.skills_manager = MagicMock()
+    agent.skills_manager.installed_skills = []
 
     with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()

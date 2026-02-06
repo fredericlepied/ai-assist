@@ -16,6 +16,9 @@ class AiAssistCompleter(Completer):
             "/kg-save",
             "/prompts",
             "/search",
+            "/skill/install",
+            "/skill/uninstall",
+            "/skill/list",
             "/exit",
             "/quit",
             "/help",
@@ -29,11 +32,45 @@ class AiAssistCompleter(Completer):
         if text.startswith("/"):
             word = text  # Keep the full text including /
 
+            # Special handling for skill commands with arguments (space-separated)
+            if text.startswith("/skill/uninstall ") and self.agent:
+                # Complete with installed skill names
+                prefix = text.split(" ", 1)[1] if " " in text else ""
+                for skill in self.agent.skills_manager.installed_skills:
+                    if skill.name.startswith(prefix.lower()):
+                        full_command = f"/skill/uninstall {skill.name}"
+                        yield Completion(
+                            full_command,
+                            start_position=-len(text),
+                            display=full_command,
+                            display_meta=f"{skill.source}",
+                        )
+                return  # Don't continue to other completions
+
+            if text.startswith("/skill/install "):
+                # Suggest example patterns
+                prefix = text.split(" ", 1)[1] if " " in text else ""
+                examples = [
+                    ("anthropics/skills/skills/pdf@main", "Official PDF skill from Anthropic"),
+                    ("anthropics/skills/skills/docx@main", "Official DOCX skill from Anthropic"),
+                    ("/path/to/skill@main", "Local skill path example"),
+                ]
+                for example, description in examples:
+                    if example.startswith(prefix):
+                        full_command = f"/skill/install {example}"
+                        yield Completion(
+                            full_command,
+                            start_position=-len(text),
+                            display=full_command,
+                            display_meta=description,
+                        )
+                return  # Don't continue to other completions
+
             # Check if this looks like a prompt command (has a slash in it)
             parts = word.lstrip("/").split("/")
 
             # Completing MCP prompts: /server/prompt
-            if len(parts) == 2 and self.agent:
+            if len(parts) == 2 and self.agent and parts[0] != "skill":
                 server_name, prompt_prefix = parts
 
                 # If we have prompts from this server
@@ -79,6 +116,9 @@ class AiAssistCompleter(Completer):
             "/kg-save": "Toggle knowledge graph auto-save",
             "/prompts": "List available MCP prompts",
             "/search": "Search conversation history",
+            "/skill/install": "Install an Agent Skill from git or local path",
+            "/skill/uninstall": "Uninstall an installed Agent Skill",
+            "/skill/list": "List all installed Agent Skills",
             "/exit": "Exit interactive mode",
             "/quit": "Exit interactive mode",
             "/help": "Show help message",

@@ -181,6 +181,64 @@ async def query_with_feedback(
     return full_response
 
 
+async def handle_skill_management_command(command: str, agent: AiAssistAgent, console: Console) -> bool:
+    """Handle /skill/* management commands
+
+    Returns True if command was handled
+    """
+    if not command.startswith("/skill/"):
+        return False
+
+    parts = command[7:].split(maxsplit=1)  # Remove '/skill/' prefix
+    if not parts:
+        console.print("[yellow]Usage: /skill/install <source>@<branch> or /skill/uninstall <name>[/yellow]")
+        return True
+
+    subcommand = parts[0]
+
+    if subcommand == "install":
+        if len(parts) < 2:
+            console.print("[yellow]Usage: /skill/install <source>@<branch>[/yellow]")
+            console.print("Examples:")
+            console.print("  /skill/install anthropics/skills/skills/pdf@main")
+            console.print("  /skill/install /home/user/skills/perso@main")
+            return True
+
+        source_spec = parts[1]
+        with console.status(f"Installing skill from {source_spec}..."):
+            result = agent.skills_manager.install_skill(source_spec)
+
+        if result.startswith("Error"):
+            console.print(f"[red]{result}[/red]")
+        else:
+            console.print(f"[green]{result}[/green]")
+        return True
+
+    elif subcommand == "uninstall":
+        if len(parts) < 2:
+            console.print("[yellow]Usage: /skill/uninstall <skill-name>[/yellow]")
+            return True
+
+        skill_name = parts[1]
+        result = agent.skills_manager.uninstall_skill(skill_name)
+
+        if result.startswith("Error"):
+            console.print(f"[red]{result}[/red]")
+        else:
+            console.print(f"[green]{result}[/green]")
+        return True
+
+    elif subcommand == "list":
+        result = agent.skills_manager.list_installed()
+        console.print(result)
+        return True
+
+    else:
+        console.print(f"[yellow]Unknown skill command: {subcommand}[/yellow]")
+        console.print("Available: /skill/install, /skill/uninstall, /skill/list")
+        return True
+
+
 async def handle_prompt_command(
     command: str, agent: AiAssistAgent, conversation_history: list, console: Console, prompt_session: PromptSession
 ) -> bool:
@@ -325,15 +383,23 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     )
 
     # Display welcome banner
+    skills_status = (
+        f"[dim]🚀 {len(agent.skills_manager.installed_skills)} Agent Skills loaded[/dim]\n"
+        if agent.skills_manager.installed_skills
+        else "[dim]💡 Install Agent Skills with /skill/install[/dim]\n"
+    )
+
     console.print(
         Panel.fit(
             f"[bold cyan]ai-assist - {identity.get_greeting()}[/bold cyan]\n\n"
             "Type your questions or commands.\n"
             "Commands: [yellow]/status[/yellow], [yellow]/history[/yellow], "
-            "[yellow]/clear-cache[/yellow], [yellow]/kg-save[/yellow], [yellow]/prompts[/yellow], [yellow]/help[/yellow]\n"
+            "[yellow]/clear-cache[/yellow], [yellow]/kg-save[/yellow], [yellow]/prompts[/yellow], "
+            "[yellow]/skill/list[/yellow], [yellow]/help[/yellow]\n"
             "Type [yellow]/exit[/yellow] or [yellow]/quit[/yellow] to exit\n\n"
             "[dim]🧠 Auto-learning enabled - Tool results saved to knowledge graph[/dim]\n"
             "[dim]🎯 MCP prompts available - Use /prompts to see them[/dim]\n"
+            f"{skills_status}"
             "[dim]Press Enter to submit • Esc-Enter or Ctrl-J for multi-line input • Tab for completion[/dim]",
             border_style="cyan",
         )
@@ -367,8 +433,12 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                 console.print("\n[cyan]Goodbye![/cyan]")
                 break
 
-            # Handle prompt slash commands: /server/prompt
+            # Handle slash commands
             if user_input.startswith("/"):
+                # Try skill management commands: /skill/install, /skill/uninstall, /skill/list
+                if await handle_skill_management_command(user_input, agent, console):
+                    continue
+
                 # Convert conversation_memory to messages for prompt injection
                 messages = conversation_memory.to_messages()
                 if await handle_prompt_command(user_input, agent, messages, console, session):
@@ -590,10 +660,23 @@ async def handle_help_command(console: Console):
 - `/clear-cache` - Clear expired cache
 - `/clear` - Clear conversation memory (start fresh)
 - `/kg-save [on|off]` - Toggle knowledge graph auto-save
-- `/prompts` - List available MCP prompts (NEW!)
-- `/server/prompt` - Load an MCP prompt (e.g., `/dci/rca`) (NEW!)
+- `/prompts` - List available MCP prompts
+- `/server/prompt` - Load an MCP prompt (e.g., `/dci/rca`)
+- `/skill/install <source>@<branch>` - Install an Agent Skill
+- `/skill/uninstall <name>` - Uninstall an Agent Skill
+- `/skill/list` - List installed Agent Skills
 - `/exit` or `/quit` - Exit interactive mode
 - `/help` - Show this help
+
+## Agent Skills 🚀
+Install specialized skills from git repositories or local paths:
+- Use `/skill/list` to see installed skills
+- Install with `/skill/install <source>@<branch>`
+  - Git: `/skill/install anthropics/skills/skills/pdf@main`
+  - Local: `/skill/install /path/to/skill@main`
+- Uninstall with `/skill/uninstall <skill-name>`
+- Skills are automatically loaded into system prompt
+- Follows agentskills.io specification
 
 ## MCP Prompts 🎯
 Load specialized prompts from MCP servers:

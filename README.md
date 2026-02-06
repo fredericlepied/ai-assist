@@ -16,6 +16,7 @@ Works with MCP servers like:
 - 🧠 **Knowledge Graph**: Temporal database tracking entities and changes
 - 📝 **Report Generation**: Create and manage markdown reports
 - ⚡ **Hot Reload**: Schedule changes take effect immediately
+- 🚀 **Agent Skills**: Install specialized skills following agentskills.io specification
 
 ## Quick Start
 
@@ -80,6 +81,9 @@ ai-assist
 - `/clear` - Clear conversation memory
 - `/kg-save [on|off]` - Toggle knowledge graph auto-save
 - `/prompts` - List available MCP prompts
+- `/skill/install <source>@<branch>` - Install an Agent Skill
+- `/skill/uninstall <name>` - Uninstall an Agent Skill
+- `/skill/list` - List installed Agent Skills
 - `/help` - Show help
 - `/exit` or `/quit` - Exit
 
@@ -101,6 +105,50 @@ Execute MCP server prompts directly with slash commands:
 ```
 
 MCP prompts can request arguments interactively and automatically execute with streaming results.
+
+### Agent Skills
+
+Install specialized skills following the [agentskills.io](https://agentskills.io) specification:
+
+```bash
+# In interactive mode
+/skill/install anthropics/skills/skills/pdf@main     # Install PDF skill from GitHub
+/skill/install /path/to/my-skill@main                # Install local skill
+/skill/list                                          # List installed skills
+/skill/uninstall pdf                                 # Uninstall skill
+```
+
+**What are Agent Skills?**
+- Specialized instructions for Claude following agentskills.io standard
+- Automatically loaded into system prompt (no activation needed)
+- Can include scripts, references, and assets
+- Persistent across sessions
+
+**Example skills:**
+- PDF processing (extract text, fill forms, merge)
+- DOCX manipulation
+- Custom workflow automation
+- Domain-specific expertise
+
+**Creating your own skills:**
+```bash
+mkdir -p my-skill
+cat > my-skill/SKILL.md << 'EOF'
+---
+name: my-skill
+description: My custom skill
+---
+
+# My Skill Instructions
+
+When the user asks for X, do Y...
+EOF
+
+ai-assist
+You> /skill/install /path/to/my-skill@main
+```
+
+📖 **Skill specification:** See [agentskills.io/specification](https://agentskills.io/specification)
 
 ### Monitoring Mode
 
