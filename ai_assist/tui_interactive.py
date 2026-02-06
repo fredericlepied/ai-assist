@@ -53,7 +53,7 @@ async def query_with_feedback(
     feedback_state = {
         "status": "Starting...",
         "turn": 0,
-        "max_turns": 10,
+        "max_turns": 50,
         "tool": None,
         "streaming": False
     }
@@ -136,7 +136,18 @@ async def query_with_feedback(
                         console.print()  # New line before tool notification
                     tool_name = chunk["name"]
                     display_name = tool_name.replace("mcp__", "").replace("__", " → ").replace("_", " ")
-                    console.print(f"\n[dim]🔧 {display_name}[/dim]", end="")
+                    console.print(f"\n[dim]🔧 {display_name}[/dim]")
+
+                    # Display arguments if present
+                    if chunk.get("input"):
+                        args_display = []
+                        for key, value in chunk["input"].items():
+                            # Truncate long values
+                            value_str = str(value)
+                            if len(value_str) > 100:
+                                value_str = value_str[:100] + "..."
+                            args_display.append(f"{key}={value_str}")
+                        console.print(f"[dim]   {', '.join(args_display)}[/dim]")
                     if not response_started:
                         live.update(create_feedback_display())  # Keep spinner going
 
@@ -178,6 +189,122 @@ async def query_with_feedback(
     return full_response
 
 
+async def handle_prompt_command(
+    command: str,
+    agent: AiAssistAgent,
+    conversation_history: list,
+    console: Console,
+    prompt_session: PromptSession
+) -> bool:
+    """Handle /server/prompt slash commands
+
+    Returns True if command was a prompt command (handled or error)
+    Returns False if not a prompt command (continue normal processing)
+    """
+    # Parse /server/prompt pattern
+    # Must be exactly 2 parts to avoid conflicts with built-in commands
+    parts = command.strip("/").split("/")
+
+    if len(parts) != 2:
+        return False  # Not a prompt command (could be /status, /help, etc.)
+
+    server_name, prompt_name = parts
+
+    # Validate server exists (connected MCP server)
+    if server_name not in agent.sessions:
+        console.print(f"[yellow]Unknown MCP server: {server_name}[/yellow]")
+        console.print(f"Connected servers: {', '.join(agent.sessions.keys())}")
+        return True
+
+    # Validate server has prompts
+    if server_name not in agent.available_prompts:
+        console.print(f"[yellow]Server '{server_name}' has no prompts[/yellow]")
+        return True
+
+    # Validate prompt exists in this server
+    if prompt_name not in agent.available_prompts[server_name]:
+        console.print(f"[yellow]Unknown prompt: {prompt_name}[/yellow]")
+        prompts = agent.available_prompts[server_name].keys()
+        console.print(f"Available prompts from {server_name}: {', '.join(prompts)}")
+        console.print(f"\nTip: Use /prompts to see all available prompts")
+        return True
+
+    # Get prompt definition to check for arguments
+    prompt_def = agent.available_prompts[server_name][prompt_name]
+
+    # Collect arguments if needed
+    arguments = None
+    if hasattr(prompt_def, 'arguments') and prompt_def.arguments:
+        console.print(f"\n[cyan]Prompt '{prompt_name}' requires arguments:[/cyan]")
+        console.print("[dim]Press Enter without a value to cancel[/dim]\n")
+
+        arguments = {}
+
+        # Create a separate session for argument collection to avoid state pollution
+        from prompt_toolkit import PromptSession as ArgPromptSession
+        arg_session = ArgPromptSession()
+
+        for arg in prompt_def.arguments:
+            # Use plain text for prompt_toolkit (no Rich markup)
+            required_marker = "*" if arg.required else ""
+
+            try:
+                value = await arg_session.prompt_async(f"{arg.name}{required_marker}> ")
+                value = value.strip()
+
+                # If empty and required, cancel
+                if not value and arg.required:
+                    console.print(f"\n[yellow]Cancelled: '{arg.name}' is required[/yellow]\n")
+                    return True
+
+                # If empty and optional, skip
+                if not value:
+                    continue
+
+                arguments[arg.name] = value
+
+            except (KeyboardInterrupt, EOFError):
+                console.print(f"\n[yellow]Cancelled[/yellow]\n")
+                return True
+
+        console.print()  # Blank line after input
+
+    # Execute the prompt
+    try:
+        session = agent.sessions[server_name]
+        result = await session.get_prompt(prompt_name, arguments=arguments)
+
+        # Convert prompt messages to conversation messages
+        prompt_content = []
+        for msg in result.messages:
+            # Extract text content
+            if hasattr(msg.content, 'text'):
+                content = msg.content.text
+            else:
+                content = str(msg.content)
+
+            # Add to conversation history
+            conversation_history.append({
+                "role": msg.role,
+                "content": content
+            })
+            prompt_content.append(content)
+
+        # Display prompt content to user
+        console.print(Panel(
+            f"[green]Injected prompt: {prompt_name}[/green]\n"
+            f"From: {server_name}\n"
+            f"Messages added: {len(result.messages)}\n\n"
+            f"[dim]{prompt_content[0][:200]}...[/dim]" if prompt_content else "",
+            title="Prompt Loaded"
+        ))
+
+    except Exception as e:
+        console.print(f"[red]Error executing prompt: {e}[/red]")
+
+    return True
+
+
 async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager):
     """Run interactive mode with TUI enhancements"""
     console = Console()
@@ -200,7 +327,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     session = PromptSession(
         message="You> ",
         multiline=False,  # Enter submits by default
-        completer=AiAssistCompleter(),
+        completer=AiAssistCompleter(agent=agent),
         history=FileHistory(str(history_file)),
         key_bindings=kb
     )
@@ -210,9 +337,10 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         f"[bold cyan]ai-assist - {identity.get_greeting()}[/bold cyan]\n\n"
         "Type your questions or commands.\n"
         "Commands: [yellow]/status[/yellow], [yellow]/history[/yellow], "
-        "[yellow]/clear-cache[/yellow], [yellow]/kg-save[/yellow], [yellow]/help[/yellow]\n"
+        "[yellow]/clear-cache[/yellow], [yellow]/kg-save[/yellow], [yellow]/prompts[/yellow], [yellow]/help[/yellow]\n"
         "Type [yellow]/exit[/yellow] or [yellow]/quit[/yellow] to exit\n\n"
         "[dim]🧠 Auto-learning enabled - Tool results saved to knowledge graph[/dim]\n"
+        "[dim]🎯 MCP prompts available - Use /prompts to see them[/dim]\n"
         "[dim]Press Enter to submit • Esc-Enter or Ctrl-J for multi-line input • Tab for completion[/dim]",
         border_style="cyan"
     ))
@@ -248,7 +376,94 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                 console.print("\n[cyan]Goodbye![/cyan]")
                 break
 
+            # Handle prompt slash commands: /server/prompt
+            if user_input.startswith("/"):
+                # Convert conversation_memory to messages for prompt injection
+                messages = conversation_memory.to_messages()
+                if await handle_prompt_command(user_input, agent, messages, console, session):
+                    # Automatically send the loaded prompt to Claude
+                    # The prompt has been injected into 'messages' and is the last user message
+                    try:
+                        console.print()  # Blank line before response
+
+                        # Use streaming query with the messages that now include the prompt
+                        full_response = ""
+                        response_started = False
+                        identity = get_identity()
+
+                        async for chunk in agent.query_streaming(
+                            messages=messages,
+                            progress_callback=None
+                        ):
+                            # Handle text chunks
+                            if isinstance(chunk, str):
+                                if not response_started:
+                                    console.print()  # Blank line before agent message
+                                    console.print(f"[bold cyan]{identity.assistant.nickname}:[/bold cyan] ", end="")
+                                    response_started = True
+                                console.print(chunk, end="")
+                                full_response += chunk
+
+                            # Handle tool use notifications
+                            elif isinstance(chunk, dict):
+                                if chunk.get("type") == "tool_use":
+                                    if response_started:
+                                        console.print()
+                                    tool_name = chunk["name"]
+                                    display_name = tool_name.replace("mcp__", "").replace("__", " → ").replace("_", " ")
+
+                                    # Show tool call with arguments
+                                    console.print(f"\n[dim]🔧 {display_name}[/dim]")
+
+                                    # Display arguments if present
+                                    if chunk.get("input"):
+                                        args_display = []
+                                        for key, value in chunk["input"].items():
+                                            # Truncate long values
+                                            value_str = str(value)
+                                            if len(value_str) > 100:
+                                                value_str = value_str[:100] + "..."
+                                            args_display.append(f"{key}={value_str}")
+                                        console.print(f"[dim]   {', '.join(args_display)}[/dim]")
+                                elif chunk.get("type") == "done":
+                                    if response_started:
+                                        console.print()
+                                    break
+                                elif chunk.get("type") == "error":
+                                    if response_started:
+                                        console.print()
+                                    console.print(f"\n[red]{chunk.get('message')}[/red]")
+                                    break
+
+                        # Show KG save feedback if entities were saved
+                        kg_saved_count = agent.get_last_kg_saved_count()
+                        if kg_saved_count > 0:
+                            console.print(f"[dim]💾 Saved {kg_saved_count} entit{'y' if kg_saved_count == 1 else 'ies'} to knowledge graph[/dim]")
+                        agent.clear_tool_calls()
+
+                        # Extract the prompt content (last user message) for conversation tracking
+                        prompt_content = messages[-1]["content"] if messages and messages[-1]["role"] == "user" else user_input
+
+                        # Add the exchange to conversation memory
+                        conversation_memory.add_exchange(prompt_content, full_response)
+
+                        # Track for state manager
+                        conversation_context.append({
+                            "user": user_input,  # Original /dci/rca command
+                            "assistant": full_response,
+                            "timestamp": str(asyncio.get_event_loop().time())
+                        })
+
+                    except Exception as e:
+                        console.print(f"\n[red]Error: {e}[/red]\n")
+
+                    continue
+
             # Handle commands
+            if user_input.lower() == "/prompts":
+                await handle_prompts_command(agent, console)
+                continue
+
             if user_input.lower() == "/status":
                 await handle_status_command(state_manager, console)
                 continue
@@ -358,6 +573,27 @@ async def handle_clear_cache_command(state_manager: StateManager, console: Conso
     console.print(f"\n[green]Cleared {removed} cache entries[/green]\n")
 
 
+async def handle_prompts_command(agent: AiAssistAgent, console: Console):
+    """Handle /prompts command - list available MCP prompts"""
+    if not agent.available_prompts:
+        console.print("[yellow]No prompts available from MCP servers[/yellow]\n")
+        return
+
+    table = Table(title="Available MCP Prompts")
+    table.add_column("Command", style="cyan")
+    table.add_column("Server", style="green")
+    table.add_column("Description", style="white")
+
+    for server_name, prompts in agent.available_prompts.items():
+        for prompt_name, prompt in prompts.items():
+            command = f"/{server_name}/{prompt_name}"
+            description = prompt.description or "(no description)"
+            table.add_row(command, server_name, description)
+
+    console.print(table)
+    console.print()
+
+
 async def handle_help_command(console: Console):
     """Handle /help command"""
     help_text = """
@@ -368,9 +604,20 @@ async def handle_help_command(console: Console):
 - `/history` - Show recent monitoring history
 - `/clear-cache` - Clear expired cache
 - `/clear` - Clear conversation memory (start fresh)
-- `/kg-save [on|off]` - Toggle knowledge graph auto-save (NEW!)
+- `/kg-save [on|off]` - Toggle knowledge graph auto-save
+- `/prompts` - List available MCP prompts (NEW!)
+- `/server/prompt` - Load an MCP prompt (e.g., `/dci/rca`) (NEW!)
 - `/exit` or `/quit` - Exit interactive mode
 - `/help` - Show this help
+
+## MCP Prompts 🎯
+Load specialized prompts from MCP servers:
+- Use `/prompts` to see all available prompts
+- Execute with `/server_name/prompt_name` (e.g., `/dci/weekly`)
+- If arguments needed, ai-assist will prompt you interactively
+- Required arguments marked with `*` - press Enter to cancel
+- Prompts inject expert context into the conversation
+- Great for specialized workflows and analysis
 
 ## Conversation Memory 💬
 ai-assist now remembers your conversation! Follow-up questions work naturally:

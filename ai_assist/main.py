@@ -16,6 +16,113 @@ from .identity import Identity, UserIdentity, AssistantIdentity, get_identity
 from .commands import is_valid_interactive_command, get_command_suggestion, is_valid_cli_command
 
 
+async def handle_prompt_command_basic(command: str, agent: AiAssistAgent, conversation_history: list, identity) -> bool:
+    """Handle /server/prompt slash commands for basic mode
+
+    Returns True if command was a prompt command (handled or error)
+    Returns False if not a prompt command (continue normal processing)
+    """
+    # Parse /server/prompt pattern
+    parts = command.strip("/").split("/")
+
+    if len(parts) != 2:
+        return False  # Not a prompt command
+
+    server_name, prompt_name = parts
+
+    # Validate server exists
+    if server_name not in agent.sessions:
+        print(f"Unknown MCP server: {server_name}")
+        print(f"Connected servers: {', '.join(agent.sessions.keys())}")
+        return True
+
+    # Validate server has prompts
+    if server_name not in agent.available_prompts:
+        print(f"Server '{server_name}' has no prompts")
+        return True
+
+    # Validate prompt exists
+    if prompt_name not in agent.available_prompts[server_name]:
+        print(f"Unknown prompt: {prompt_name}")
+        prompts = agent.available_prompts[server_name].keys()
+        print(f"Available prompts from {server_name}: {', '.join(prompts)}")
+        print("\nTip: Use /prompts to see all available prompts")
+        return True
+
+    # Get prompt definition to check for arguments
+    prompt_def = agent.available_prompts[server_name][prompt_name]
+
+    # Collect arguments if needed
+    arguments = None
+    if hasattr(prompt_def, 'arguments') and prompt_def.arguments:
+        print(f"\nPrompt '{prompt_name}' requires arguments:")
+        print("Press Enter without a value to cancel\n")
+
+        arguments = {}
+        for arg in prompt_def.arguments:
+            arg_desc = arg.description or arg.name
+            required_marker = "*" if arg.required else ""
+
+            try:
+                value = input(f"{arg.name}{required_marker}> ").strip()
+
+                # If empty and required, cancel
+                if not value and arg.required:
+                    print(f"\nCancelled: '{arg.name}' is required\n")
+                    return True
+
+                # If empty and optional, skip
+                if not value:
+                    continue
+
+                arguments[arg.name] = value
+
+            except (KeyboardInterrupt, EOFError):
+                print("\nCancelled\n")
+                return True
+
+        print()  # Blank line after input
+
+    # Execute the prompt
+    try:
+        session = agent.sessions[server_name]
+        result = await session.get_prompt(prompt_name, arguments=arguments)
+
+        # Convert prompt messages to conversation messages
+        for msg in result.messages:
+            # Extract text content
+            if hasattr(msg.content, 'text'):
+                content = msg.content.text
+            else:
+                content = str(msg.content)
+
+            # Add to conversation history
+            conversation_history.append({
+                "role": msg.role,
+                "content": content
+            })
+
+        # Display prompt loaded
+        print(f"\n✓ Loaded prompt: {prompt_name} from {server_name}")
+        print(f"  Messages added: {len(result.messages)}\n")
+
+        # Automatically send the loaded prompt to Claude
+        print(f"{identity.assistant.nickname}: ", end="", flush=True)
+
+        # Query with the messages that now include the prompt
+        response = await agent.query(messages=conversation_history)
+        print(response)
+        print()
+
+        # Add assistant response to messages
+        conversation_history.append({"role": "assistant", "content": response})
+
+    except Exception as e:
+        print(f"Error executing prompt: {e}")
+
+    return True
+
+
 def should_use_tui():
     """Auto-detect TUI capability"""
     import sys
@@ -63,10 +170,11 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
     print(f"ai-assist - {identity.get_greeting()}")
     print("="*60)
     print("\nType your questions or commands.")
-    print("Commands: /status, /history, /clear-cache, /help")
+    print("Commands: /status, /history, /clear-cache, /prompts, /help")
     print("Type /exit or /quit to exit\n")
 
     conversation_context = []
+    messages = []  # For prompt injection
 
     while True:
         try:
@@ -83,7 +191,29 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
                 print("Goodbye!")
                 break
 
+            # Handle prompt slash commands: /server/prompt
+            if user_input.startswith("/"):
+                if await handle_prompt_command_basic(user_input, agent, messages, identity):
+                    # Prompt was loaded and sent to Claude, continue to next input
+                    continue
+
             # Handle special commands
+            if user_input.lower() == "/prompts":
+                if not agent.available_prompts:
+                    print("No prompts available from MCP servers\n")
+                    continue
+
+                print("\nAvailable MCP Prompts:")
+                print("="*60)
+                for server_name, prompts in agent.available_prompts.items():
+                    print(f"\n{server_name}:")
+                    for prompt_name, prompt in prompts.items():
+                        command = f"/{server_name}/{prompt_name}"
+                        description = prompt.description or "(no description)"
+                        print(f"  {command:30s} - {description}")
+                print()
+                continue
+
             if user_input.lower() == "/status":
                 stats = state_manager.get_stats()
                 print(f"\nState Statistics:")
@@ -109,11 +239,18 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
                 print("\nai-assist Interactive Mode Help")
                 print("="*60)
                 print("Commands:")
-                print("  /status      - Show state statistics")
-                print("  /history     - Show recent monitoring history")
-                print("  /clear-cache - Clear expired cache")
-                print("  /exit, /quit - Exit interactive mode")
-                print("  /help        - Show this help")
+                print("  /status           - Show state statistics")
+                print("  /history          - Show recent monitoring history")
+                print("  /clear-cache      - Clear expired cache")
+                print("  /prompts          - List available MCP prompts")
+                print("  /server/prompt    - Load an MCP prompt (e.g., /dci/rca)")
+                print("  /exit, /quit      - Exit interactive mode")
+                print("  /help             - Show this help")
+                print("\nMCP Prompts:")
+                print("  Use /prompts to see all available prompts")
+                print("  Execute with /server_name/prompt_name")
+                print("  If arguments needed, ai-assist will prompt you interactively")
+                print("  Required arguments marked with * - press Enter to cancel")
                 print()
                 continue
 
@@ -123,9 +260,17 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
                 continue
 
             print(f"\n{identity.assistant.nickname}: ", end="", flush=True)
-            response = await agent.query(user_input)
+
+            # Add user message to messages list
+            messages.append({"role": "user", "content": user_input})
+
+            # Query with full message history (including any injected prompts)
+            response = await agent.query(messages=messages)
             print(response)
             print()
+
+            # Add assistant response to messages
+            messages.append({"role": "assistant", "content": response})
 
             # Track conversation
             conversation_context.append({

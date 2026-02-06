@@ -11,6 +11,7 @@ from .mcp_stdio_fix import stdio_client_fixed
 from .introspection_tools import IntrospectionTools
 from .report_tools import ReportTools
 from .schedule_tools import ScheduleTools
+from .filesystem_tools import FilesystemTools
 from .identity import get_identity
 
 if TYPE_CHECKING:
@@ -38,6 +39,9 @@ class AiAssistAgent:
         # Initialize internal schedule management tools
         self.schedule_tools = ScheduleTools()
 
+        # Initialize internal filesystem tools
+        self.filesystem_tools = FilesystemTools()
+
         if config.use_vertex:
             vertex_kwargs = {"project_id": config.vertex_project_id}
             if config.vertex_region:
@@ -52,6 +56,7 @@ class AiAssistAgent:
 
         self.sessions: dict[str, ClientSession] = {}
         self.available_tools: list[dict] = []
+        self.available_prompts: dict[str, dict] = {}  # {server_name: {prompt_name: Prompt}}
         self._server_tasks: list[asyncio.Task] = []
 
         # Track tool calls for KG storage
@@ -99,6 +104,12 @@ class AiAssistAgent:
             self.available_tools.extend(schedule_tool_defs)
             print(f"✓ Added {len(schedule_tool_defs)} schedule management tools")
 
+        # Add internal filesystem tools
+        filesystem_tool_defs = self.filesystem_tools.get_tool_definitions()
+        if filesystem_tool_defs:
+            self.available_tools.extend(filesystem_tool_defs)
+            print(f"✓ Added {len(filesystem_tool_defs)} filesystem tools")
+
     async def _run_server(self, name: str, config: MCPServerConfig):
         """Run an MCP server connection (as a background task)"""
         try:
@@ -142,6 +153,20 @@ class AiAssistAgent:
                         }
                         self.available_tools.append(tool_def)
 
+                    # Discover prompts from this server
+                    try:
+                        print(f"[{name}] Listing prompts...", flush=True)
+                        prompts_result = await session.list_prompts()
+                        if prompts_result.prompts:
+                            self.available_prompts[name] = {
+                                prompt.name: prompt
+                                for prompt in prompts_result.prompts
+                            }
+                            print(f"[{name}] Got {len(prompts_result.prompts)} prompt(s)", flush=True)
+                    except Exception as e:
+                        # Prompts are optional - silently skip if not supported
+                        print(f"[{name}] No prompts available (this is normal)", flush=True)
+
                     print(f"[{name}] Connection ready, keeping alive...", flush=True)
                     # Keep the connection alive by waiting indefinitely
                     try:
@@ -157,7 +182,7 @@ class AiAssistAgent:
         self,
         prompt: str = None,
         messages: list[dict] = None,
-        max_turns: int = 10,
+        max_turns: int = 50,
         progress_callback=None
     ) -> str:
         """Query the agent with a prompt or message history
@@ -244,7 +269,7 @@ class AiAssistAgent:
         self,
         prompt: str = None,
         messages: list[dict] = None,
-        max_turns: int = 10,
+        max_turns: int = 50,
         progress_callback=None
     ):
         """Query the agent with streaming response
@@ -311,14 +336,9 @@ class AiAssistAgent:
                     # Content block start - tool use
                     elif event.type == "content_block_start":
                         if hasattr(event.content_block, "type") and event.content_block.type == "tool_use":
-                            tool_info = {
-                                "type": "tool_use",
-                                "name": event.content_block.name,
-                                "id": event.content_block.id,
-                                "input": {}
-                            }
-                            tool_uses.append(tool_info)
-                            yield tool_info  # Notify about tool use
+                            # Just track that we're starting a tool use
+                            # We'll yield the notification with full input later
+                            pass
 
                     # Input JSON delta for tool
                     elif event.type == "content_block_delta":
@@ -330,6 +350,16 @@ class AiAssistAgent:
                 final_message = stream.get_final_message()
                 messages.append({"role": "assistant", "content": final_message.content})
 
+                # Yield tool use notifications with complete inputs
+                for block in final_message.content:
+                    if block.type == "tool_use":
+                        yield {
+                            "type": "tool_use",
+                            "name": block.name,
+                            "id": block.id,
+                            "input": block.input
+                        }
+
                 # Execute any tools
                 tool_results = []
                 for block in final_message.content:
@@ -338,6 +368,15 @@ class AiAssistAgent:
                             progress_callback("executing_tool", turn + 1, max_turns, block.name)
 
                         result = await self._execute_tool(block.name, block.input)
+
+                        # Truncate large tool results to prevent context overflow
+                        # Estimate ~4 chars per token, so 20K chars ≈ 5K tokens
+                        max_result_size = 20000  # 20KB
+                        if len(result) > max_result_size:
+                            truncated_result = result[:max_result_size]
+                            truncated_result += f"\n\n... [Result truncated: {len(result)} chars total, showing first {max_result_size} chars]"
+                            result = truncated_result
+
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": block.id,
@@ -388,7 +427,7 @@ class AiAssistAgent:
             except Exception as e:
                 return f"Error executing introspection tool {original_tool_name}: {str(e)}"
 
-        # Handle internal tools (report management, schedule management, etc.)
+        # Handle internal tools (report management, schedule management, filesystem, etc.)
         if server_name == "internal":
             try:
                 # Route to appropriate internal tool handler
@@ -398,8 +437,18 @@ class AiAssistAgent:
                     "get_schedule_status"
                 ]
 
+                filesystem_tools = [
+                    "read_file", "search_in_file", "create_directory",
+                    "list_directory", "execute_command"
+                ]
+
                 if original_tool_name in schedule_tools:
                     result_text = await self.schedule_tools.execute_tool(
+                        original_tool_name,
+                        arguments
+                    )
+                elif original_tool_name in filesystem_tools:
+                    result_text = await self.filesystem_tools.execute_tool(
                         original_tool_name,
                         arguments
                     )

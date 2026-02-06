@@ -1,6 +1,11 @@
 # ai-assist - AI Assistant for Managers
 
-An intelligent AI assistant powered by Claude and MCP (Model Context Protocol) that helps managers monitor Jira projects and DCI (Distributed CI) jobs with periodic automated checks and interactive querying.
+An intelligent AI assistant powered by Claude and MCP (Model Context Protocol) that helps managers with periodic automated checks and interactive querying.
+
+I use it personally with the following MCP servers:
+
+- ![DCI MCP Server](https://github.com/redhat-community-ai-tools/dci-mcp-server) for DCI and Jira
+- [Second Brain](https://github.com/flepied/second-brain-agent) to access my personal notes
 
 ## Features
 
