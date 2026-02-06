@@ -1,7 +1,7 @@
 """Tests for conversation context management"""
 
-import pytest
 from datetime import datetime, timedelta
+
 from ai_assist.context import ConversationMemory, KnowledgeGraphContext
 from ai_assist.knowledge_graph import KnowledgeGraph
 
@@ -139,6 +139,7 @@ def test_multiple_exchanges_ordering():
 
 # Knowledge Graph Context Tests
 
+
 def test_kg_context_initialization():
     """Test KnowledgeGraphContext initializes correctly"""
     kg = KnowledgeGraph(":memory:")
@@ -202,11 +203,7 @@ def test_enrich_prompt_with_jira_ticket():
         entity_type="jira_ticket",
         entity_id="CILAB-123",
         valid_from=datetime.now(),
-        data={
-            "key": "CILAB-123",
-            "summary": "Test failure in CI",
-            "status": "Open"
-        }
+        data={"key": "CILAB-123", "summary": "Test failure in CI", "status": "Open"},
     )
 
     context = KnowledgeGraphContext(kg)
@@ -232,10 +229,7 @@ def test_enrich_prompt_with_recent_failures():
             entity_type="dci_job",
             entity_id=f"job-{i}",
             valid_from=now - timedelta(hours=1),
-            data={
-                "job_id": f"job-{i}",
-                "status": "failure"
-            }
+            data={"job_id": f"job-{i}", "status": "failure"},
         )
 
     context = KnowledgeGraphContext(kg)
@@ -259,7 +253,7 @@ def test_enrich_prompt_max_entities():
             entity_type="jira_ticket",
             entity_id=f"CILAB-{i}",
             valid_from=datetime.now(),
-            data={"key": f"CILAB-{i}", "summary": f"Issue {i}", "status": "Open"}
+            data={"key": f"CILAB-{i}", "summary": f"Issue {i}", "status": "Open"},
         )
 
     context = KnowledgeGraphContext(kg)
@@ -279,7 +273,7 @@ def test_get_last_context():
         entity_type="jira_ticket",
         entity_id="CILAB-123",
         valid_from=datetime.now(),
-        data={"key": "CILAB-123", "summary": "Test", "status": "Open"}
+        data={"key": "CILAB-123", "summary": "Test", "status": "Open"},
     )
 
     context = KnowledgeGraphContext(kg)

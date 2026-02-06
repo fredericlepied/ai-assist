@@ -3,20 +3,22 @@
 import asyncio
 import json
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
-from mcp import ClientSession, StdioServerParameters
+from typing import TYPE_CHECKING, Optional
+
 from anthropic import Anthropic, AnthropicVertex
+from mcp import ClientSession, StdioServerParameters
+
 from .config import AiAssistConfig, MCPServerConfig
-from .mcp_stdio_fix import stdio_client_fixed
-from .introspection_tools import IntrospectionTools
-from .report_tools import ReportTools
-from .schedule_tools import ScheduleTools
 from .filesystem_tools import FilesystemTools
 from .identity import get_identity
+from .introspection_tools import IntrospectionTools
+from .mcp_stdio_fix import stdio_client_fixed
+from .report_tools import ReportTools
+from .schedule_tools import ScheduleTools
 
 if TYPE_CHECKING:
-    from .knowledge_graph import KnowledgeGraph
     from .context import ConversationMemory
+    from .knowledge_graph import KnowledgeGraph
 
 
 class AiAssistAgent:
@@ -66,17 +68,16 @@ class AiAssistAgent:
         """Connect to all configured MCP servers"""
         for server_name, server_config in self.config.mcp_servers.items():
             try:
-                task = asyncio.create_task(
-                    self._run_server(server_name, server_config),
-                    name=f"mcp_{server_name}"
-                )
+                task = asyncio.create_task(self._run_server(server_name, server_config), name=f"mcp_{server_name}")
                 self._server_tasks.append(task)
 
                 # Wait for server initialization (up to 5 seconds)
-                for i in range(10):
+                for _ in range(10):
                     await asyncio.sleep(0.5)
                     if server_name in self.sessions:
-                        print(f"✓ Connected to {server_name} MCP server with {len([t for t in self.available_tools if t['_server'] == server_name])} tools")
+                        print(
+                            f"✓ Connected to {server_name} MCP server with {len([t for t in self.available_tools if t['_server'] == server_name])} tools"
+                        )
                         break
                 else:
                     print(f"⚠ Warning: {server_name} did not initialize within 5 seconds")
@@ -84,6 +85,7 @@ class AiAssistAgent:
             except Exception as e:
                 print(f"✗ Failed to connect to {server_name}: {e}")
                 import traceback
+
                 traceback.print_exc()
 
         # Add introspection tools for self-awareness
@@ -132,7 +134,7 @@ class AiAssistAgent:
                     try:
                         result = await asyncio.wait_for(session.initialize(), timeout=10.0)
                         print(f"[{name}] Session initialized! Result: {result}", flush=True)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         print(f"[{name}] TIMEOUT waiting for initialize response!", flush=True)
                         raise
                     except Exception as e:
@@ -158,12 +160,9 @@ class AiAssistAgent:
                         print(f"[{name}] Listing prompts...", flush=True)
                         prompts_result = await session.list_prompts()
                         if prompts_result.prompts:
-                            self.available_prompts[name] = {
-                                prompt.name: prompt
-                                for prompt in prompts_result.prompts
-                            }
+                            self.available_prompts[name] = {prompt.name: prompt for prompt in prompts_result.prompts}
                             print(f"[{name}] Got {len(prompts_result.prompts)} prompt(s)", flush=True)
-                    except Exception as e:
+                    except Exception:
                         # Prompts are optional - silently skip if not supported
                         print(f"[{name}] No prompts available (this is normal)", flush=True)
 
@@ -176,14 +175,11 @@ class AiAssistAgent:
         except Exception as e:
             print(f"[{name}] ERROR in _run_server: {e}", flush=True)
             import traceback
+
             traceback.print_exc()
 
     async def query(
-        self,
-        prompt: str = None,
-        messages: list[dict] = None,
-        max_turns: int = 50,
-        progress_callback=None
+        self, prompt: str = None, messages: list[dict] = None, max_turns: int = 50, progress_callback=None
     ) -> str:
         """Query the agent with a prompt or message history
 
@@ -241,15 +237,14 @@ class AiAssistAgent:
                     if progress_callback:
                         progress_callback("executing_tool", turn + 1, max_turns, block.name)
 
-                    result = await self._execute_tool(
-                        block.name,
-                        block.input
+                    result = await self._execute_tool(block.name, block.input)
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result,
+                        }
                     )
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result,
-                    })
 
             if not tool_results:
                 if progress_callback:
@@ -266,11 +261,7 @@ class AiAssistAgent:
         return "Maximum turns reached without final answer"
 
     async def query_streaming(
-        self,
-        prompt: str = None,
-        messages: list[dict] = None,
-        max_turns: int = 50,
-        progress_callback=None
+        self, prompt: str = None, messages: list[dict] = None, max_turns: int = 50, progress_callback=None
     ):
         """Query the agent with streaming response
 
@@ -321,9 +312,7 @@ class AiAssistAgent:
                 messages=messages,
             ) as stream:
                 # Track content blocks
-                assistant_content = []
                 current_text = ""
-                tool_uses = []
 
                 for event in stream:
                     # Content block delta - streaming text
@@ -353,12 +342,7 @@ class AiAssistAgent:
                 # Yield tool use notifications with complete inputs
                 for block in final_message.content:
                     if block.type == "tool_use":
-                        yield {
-                            "type": "tool_use",
-                            "name": block.name,
-                            "id": block.id,
-                            "input": block.input
-                        }
+                        yield {"type": "tool_use", "name": block.name, "id": block.id, "input": block.input}
 
                 # Execute any tools
                 tool_results = []
@@ -377,11 +361,13 @@ class AiAssistAgent:
                             truncated_result += f"\n\n... [Result truncated: {len(result)} chars total, showing first {max_result_size} chars]"
                             result = truncated_result
 
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result,
-                        })
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": result,
+                            }
+                        )
 
                 # If no tool calls, we're done
                 if not tool_results:
@@ -408,20 +394,19 @@ class AiAssistAgent:
         # Handle introspection tools (self-awareness)
         if server_name == "introspection":
             try:
-                result_text = await self.introspection_tools.execute_tool(
-                    original_tool_name,
-                    arguments
-                )
+                result_text = await self.introspection_tools.execute_tool(original_tool_name, arguments)
 
                 # Track introspection tool call
-                self.last_tool_calls.append({
-                    "tool_name": tool_name,
-                    "server_name": server_name,
-                    "original_tool_name": original_tool_name,
-                    "arguments": arguments,
-                    "result": result_text,
-                    "timestamp": datetime.now()
-                })
+                self.last_tool_calls.append(
+                    {
+                        "tool_name": tool_name,
+                        "server_name": server_name,
+                        "original_tool_name": original_tool_name,
+                        "arguments": arguments,
+                        "result": result_text,
+                        "timestamp": datetime.now(),
+                    }
+                )
 
                 return result_text
             except Exception as e:
@@ -432,42 +417,42 @@ class AiAssistAgent:
             try:
                 # Route to appropriate internal tool handler
                 schedule_tools = [
-                    "create_monitor", "create_task", "list_schedules",
-                    "update_schedule", "delete_schedule", "enable_schedule",
-                    "get_schedule_status"
+                    "create_monitor",
+                    "create_task",
+                    "list_schedules",
+                    "update_schedule",
+                    "delete_schedule",
+                    "enable_schedule",
+                    "get_schedule_status",
                 ]
 
                 filesystem_tools = [
-                    "read_file", "search_in_file", "create_directory",
-                    "list_directory", "execute_command"
+                    "read_file",
+                    "search_in_file",
+                    "create_directory",
+                    "list_directory",
+                    "execute_command",
                 ]
 
                 if original_tool_name in schedule_tools:
-                    result_text = await self.schedule_tools.execute_tool(
-                        original_tool_name,
-                        arguments
-                    )
+                    result_text = await self.schedule_tools.execute_tool(original_tool_name, arguments)
                 elif original_tool_name in filesystem_tools:
-                    result_text = await self.filesystem_tools.execute_tool(
-                        original_tool_name,
-                        arguments
-                    )
+                    result_text = await self.filesystem_tools.execute_tool(original_tool_name, arguments)
                 else:
                     # Default to report tools
-                    result_text = await self.report_tools.execute_tool(
-                        original_tool_name,
-                        arguments
-                    )
+                    result_text = await self.report_tools.execute_tool(original_tool_name, arguments)
 
                 # Track internal tool call
-                self.last_tool_calls.append({
-                    "tool_name": tool_name,
-                    "server_name": server_name,
-                    "original_tool_name": original_tool_name,
-                    "arguments": arguments,
-                    "result": result_text,
-                    "timestamp": datetime.now()
-                })
+                self.last_tool_calls.append(
+                    {
+                        "tool_name": tool_name,
+                        "server_name": server_name,
+                        "original_tool_name": original_tool_name,
+                        "arguments": arguments,
+                        "result": result_text,
+                        "timestamp": datetime.now(),
+                    }
+                )
 
                 return result_text
             except Exception as e:
@@ -484,43 +469,31 @@ class AiAssistAgent:
 
             result_text = ""
             if result.content:
-                result_text = "\n".join([
-                    item.text if hasattr(item, "text") else str(item)
-                    for item in result.content
-                ])
+                result_text = "\n".join([item.text if hasattr(item, "text") else str(item) for item in result.content])
             else:
                 result_text = "Tool executed successfully with no output"
 
             # Store tool call for potential KG storage
-            self.last_tool_calls.append({
-                "tool_name": tool_name,
-                "server_name": server_name,
-                "original_tool_name": original_tool_name,
-                "arguments": arguments,
-                "result": result_text,
-                "timestamp": datetime.now()
-            })
+            self.last_tool_calls.append(
+                {
+                    "tool_name": tool_name,
+                    "server_name": server_name,
+                    "original_tool_name": original_tool_name,
+                    "arguments": arguments,
+                    "result": result_text,
+                    "timestamp": datetime.now(),
+                }
+            )
 
             # Optionally save to knowledge graph
             if self.knowledge_graph and self.kg_save_enabled:
-                await self._save_tool_result_to_kg(
-                    tool_name,
-                    original_tool_name,
-                    arguments,
-                    result_text
-                )
+                await self._save_tool_result_to_kg(tool_name, original_tool_name, arguments, result_text)
 
             return result_text
         except Exception as e:
             return f"Error executing tool {original_tool_name}: {str(e)}"
 
-    async def _save_tool_result_to_kg(
-        self,
-        tool_name: str,
-        original_tool_name: str,
-        arguments: dict,
-        result_text: str
-    ):
+    async def _save_tool_result_to_kg(self, tool_name: str, original_tool_name: str, arguments: dict, result_text: str):
         """Save tool result to knowledge graph if it contains entities
 
         Supports:
@@ -600,8 +573,11 @@ class AiAssistAgent:
                         "summary": entity_data.get("fields", {}).get("summary"),
                         "status": entity_data.get("fields", {}).get("status", {}).get("name"),
                         "priority": entity_data.get("fields", {}).get("priority", {}).get("name"),
-                        "assignee": entity_data.get("fields", {}).get("assignee", {}).get("displayName")
-                                   if entity_data.get("fields", {}).get("assignee") else None,
+                        "assignee": (
+                            entity_data.get("fields", {}).get("assignee", {}).get("displayName")
+                            if entity_data.get("fields", {}).get("assignee")
+                            else None
+                        ),
                     }
                 elif entity_type == "dci_job":
                     stored_data = {
@@ -626,7 +602,7 @@ class AiAssistAgent:
                                         "type": component.get("type"),
                                         "version": component.get("version"),
                                         "name": component.get("name"),
-                                    }
+                                    },
                                 )
                             except Exception:
                                 pass  # Entity might already exist
@@ -638,7 +614,7 @@ class AiAssistAgent:
                                 target_id=comp_id,
                                 valid_from=valid_from,
                                 tx_from=tx_time,
-                                properties={}
+                                properties={},
                             )
                 else:
                     stored_data = entity_data
@@ -650,7 +626,7 @@ class AiAssistAgent:
                         entity_id=entity_id,
                         valid_from=valid_from,
                         tx_from=tx_time,
-                        data=stored_data
+                        data=stored_data,
                     )
                     saved_count += 1
                 except Exception:
@@ -661,7 +637,7 @@ class AiAssistAgent:
             if saved_count > 0:
                 self.last_tool_calls[-1]["kg_saved_count"] = saved_count
 
-        except Exception as e:
+        except Exception:
             # Silently fail - KG storage is best-effort
             pass
 
@@ -694,4 +670,4 @@ class AiAssistAgent:
 
         self._server_tasks.clear()
         self.sessions.clear()
-        print(f"Closed all connections")
+        print("Closed all connections")

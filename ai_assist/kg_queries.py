@@ -1,8 +1,9 @@
 """High-level query interface for the knowledge graph"""
 
 from datetime import datetime, timedelta
-from typing import Optional, Any
-from .knowledge_graph import KnowledgeGraph, Entity, Relationship
+from typing import Any
+
+from .knowledge_graph import KnowledgeGraph
 
 
 class KnowledgeGraphQueries:
@@ -11,11 +12,7 @@ class KnowledgeGraphQueries:
     def __init__(self, kg: KnowledgeGraph):
         self.kg = kg
 
-    def what_did_we_know_at(
-        self,
-        time: datetime,
-        entity_type: Optional[str] = None
-    ) -> list[dict[str, Any]]:
+    def what_did_we_know_at(self, time: datetime, entity_type: str | None = None) -> list[dict[str, Any]]:
         """Query what ai-assist knew at a specific time
 
         Args:
@@ -33,16 +30,12 @@ class KnowledgeGraphQueries:
                 "type": e.entity_type,
                 "data": e.data,
                 "valid_from": e.valid_from.isoformat(),
-                "known_since": e.tx_from.isoformat()
+                "known_since": e.tx_from.isoformat(),
             }
             for e in entities
         ]
 
-    def what_changed_recently(
-        self,
-        hours: int = 1,
-        entity_type: Optional[str] = None
-    ) -> dict[str, Any]:
+    def what_changed_recently(self, hours: int = 1, entity_type: str | None = None) -> dict[str, Any]:
         """Get changes in the last N hours
 
         Args:
@@ -81,26 +74,18 @@ class KnowledgeGraphQueries:
                     "type": e.entity_type,
                     "data": e.data,
                     "discovered_at": e.tx_from.isoformat(),
-                    "valid_from": e.valid_from.isoformat()
+                    "valid_from": e.valid_from.isoformat(),
                 }
                 for e in new_entities
             ],
             "corrected_count": len(removed_entities),
             "corrected_entities": [
-                {
-                    "id": e.id,
-                    "type": e.entity_type,
-                    "was_believed": e.data
-                }
-                for e in removed_entities
-            ]
+                {"id": e.id, "type": e.entity_type, "was_believed": e.data} for e in removed_entities
+            ],
         }
 
     def find_late_discoveries(
-        self,
-        min_delay_minutes: int = 30,
-        entity_type: Optional[str] = None,
-        limit: int = 50
+        self, min_delay_minutes: int = 30, entity_type: str | None = None, limit: int = 50
     ) -> list[dict[str, Any]]:
         """Find entities discovered significantly after they became valid
 
@@ -125,22 +110,24 @@ class KnowledgeGraphQueries:
             lag_minutes = lag_seconds / 60
 
             if lag_minutes >= min_delay_minutes:
-                late_discoveries.append({
-                    "id": entity.id,
-                    "type": entity.entity_type,
-                    "data": entity.data,
-                    "valid_from": entity.valid_from.isoformat(),
-                    "discovered_at": entity.tx_from.isoformat(),
-                    "lag_minutes": round(lag_minutes, 1),
-                    "lag_human": self._format_duration(lag_seconds)
-                })
+                late_discoveries.append(
+                    {
+                        "id": entity.id,
+                        "type": entity.entity_type,
+                        "data": entity.data,
+                        "valid_from": entity.valid_from.isoformat(),
+                        "discovered_at": entity.tx_from.isoformat(),
+                        "lag_minutes": round(lag_minutes, 1),
+                        "lag_human": self._format_duration(lag_seconds),
+                    }
+                )
 
         # Sort by lag (worst first)
         late_discoveries.sort(key=lambda x: x["lag_minutes"], reverse=True)
 
         return late_discoveries
 
-    def get_job_with_context(self, job_id: str) -> Optional[dict[str, Any]]:
+    def get_job_with_context(self, job_id: str) -> dict[str, Any] | None:
         """Get a job with all related entities (components, tickets, etc.)
 
         Args:
@@ -167,7 +154,7 @@ class KnowledgeGraphQueries:
                 "entity_type": entity.entity_type,
                 "data": entity.data,
                 "relationship": rel.rel_type,
-                "properties": rel.properties
+                "properties": rel.properties,
             }
 
             if entity.entity_type == "component":
@@ -190,14 +177,10 @@ class KnowledgeGraphQueries:
             "discovery_lag": self._format_duration(lag_seconds),
             "components": components,
             "tickets": tickets,
-            "other_related": other
+            "other_related": other,
         }
 
-    def analyze_discovery_lag(
-        self,
-        entity_type: str,
-        days: int = 7
-    ) -> dict[str, Any]:
+    def analyze_discovery_lag(self, entity_type: str, days: int = 7) -> dict[str, Any]:
         """Analyze discovery lag statistics for an entity type
 
         Args:
@@ -220,7 +203,7 @@ class KnowledgeGraphQueries:
                 "entity_type": entity_type,
                 "period_days": days,
                 "count": 0,
-                "message": f"No {entity_type} entities discovered in the last {days} days"
+                "message": f"No {entity_type} entities discovered in the last {days} days",
             }
 
         # Calculate lags
@@ -249,10 +232,10 @@ class KnowledgeGraphQueries:
             "p90_lag_minutes": round(sorted_lags[p90_idx], 1) if p90_idx < len(sorted_lags) else None,
             "p95_lag_minutes": round(sorted_lags[p95_idx], 1) if p95_idx < len(sorted_lags) else None,
             "avg_lag_human": self._format_duration(avg_lag * 60),
-            "max_lag_human": self._format_duration(max_lag * 60)
+            "max_lag_human": self._format_duration(max_lag * 60),
         }
 
-    def get_ticket_with_context(self, ticket_id: str) -> Optional[dict[str, Any]]:
+    def get_ticket_with_context(self, ticket_id: str) -> dict[str, Any] | None:
         """Get a ticket with all related jobs
 
         Args:
@@ -271,12 +254,14 @@ class KnowledgeGraphQueries:
         related_jobs = []
         for rel, entity in related:
             if entity.entity_type == "dci_job":
-                related_jobs.append({
-                    "job_id": entity.id,
-                    "data": entity.data,
-                    "valid_from": entity.valid_from.isoformat(),
-                    "relationship": rel.rel_type
-                })
+                related_jobs.append(
+                    {
+                        "job_id": entity.id,
+                        "data": entity.data,
+                        "valid_from": entity.valid_from.isoformat(),
+                        "relationship": rel.rel_type,
+                    }
+                )
 
         return {
             "id": ticket.id,
@@ -285,7 +270,7 @@ class KnowledgeGraphQueries:
             "valid_from": ticket.valid_from.isoformat(),
             "discovered_at": ticket.tx_from.isoformat(),
             "related_jobs": related_jobs,
-            "job_count": len(related_jobs)
+            "job_count": len(related_jobs),
         }
 
     @staticmethod

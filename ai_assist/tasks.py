@@ -2,19 +2,21 @@
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, time as dt_time, timedelta
+from datetime import datetime, timedelta
+from datetime import time as dt_time
 from pathlib import Path
-from typing import Optional
+
 import yaml
 
 
 @dataclass
 class TaskDefinition:
     """Definition of a user-defined periodic task"""
+
     name: str
     prompt: str
     interval: str  # e.g., "5m", "1h", "morning on weekdays", "9:00 on monday,friday"
-    description: Optional[str] = None
+    description: str | None = None
     enabled: bool = True
     conditions: list[dict] = field(default_factory=list)
 
@@ -42,9 +44,10 @@ class TaskDefinition:
             if self.is_time_based:
                 TaskLoader.parse_time_schedule(self.interval)
             else:
-                self.interval_seconds
+                # Validate interval_seconds can be computed
+                _ = self.interval_seconds
         except ValueError as e:
-            raise ValueError(f"Invalid interval '{self.interval}': {e}")
+            raise ValueError(f"Invalid interval '{self.interval}': {e}") from e
 
 
 @dataclass
@@ -53,7 +56,8 @@ class MonitorDefinition(TaskDefinition):
 
     Extends TaskDefinition with knowledge graph configuration
     """
-    knowledge_graph: Optional[dict] = None
+
+    knowledge_graph: dict | None = None
 
 
 class TaskLoader:
@@ -109,11 +113,11 @@ class TaskLoader:
             if not (0 <= hour < 24 and 0 <= minute < 60):
                 raise ValueError("Time out of range")
             schedule_time = dt_time(hour, minute)
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError) as e:
             raise ValueError(
                 f"Invalid time format: '{time_part}'. "
                 "Use HH:MM (24-hour) or presets: morning, afternoon, evening, night"
-            )
+            ) from e
 
         # Parse days
         if days_part in TaskLoader.DAY_GROUPS:
@@ -121,13 +125,20 @@ class TaskLoader:
         else:
             # Parse individual days
             day_names = {
-                "monday": 0, "mon": 0,
-                "tuesday": 1, "tue": 1,
-                "wednesday": 2, "wed": 2,
-                "thursday": 3, "thu": 3,
-                "friday": 4, "fri": 4,
-                "saturday": 5, "sat": 5,
-                "sunday": 6, "sun": 6,
+                "monday": 0,
+                "mon": 0,
+                "tuesday": 1,
+                "tue": 1,
+                "wednesday": 2,
+                "wed": 2,
+                "thursday": 3,
+                "thu": 3,
+                "friday": 4,
+                "fri": 4,
+                "saturday": 5,
+                "sat": 5,
+                "sunday": 6,
+                "sun": 6,
             }
 
             day_parts = [d.strip() for d in days_part.split(",")]
@@ -137,17 +148,16 @@ class TaskLoader:
                     days.append(day_names[day])
                 else:
                     raise ValueError(
-                        f"Invalid day: '{day}'. "
-                        "Use day names (monday, tuesday, etc.) or groups (weekdays, weekends)"
+                        f"Invalid day: '{day}'. " "Use day names (monday, tuesday, etc.) or groups (weekdays, weekends)"
                     )
 
             if not days:
                 raise ValueError("At least one day must be specified")
 
-        return {"time": schedule_time, "days": sorted(list(set(days)))}
+        return {"time": schedule_time, "days": sorted(set(days))}
 
     @staticmethod
-    def calculate_next_run(schedule: dict, from_time: Optional[datetime] = None) -> datetime:
+    def calculate_next_run(schedule: dict, from_time: datetime | None = None) -> datetime:
         """Calculate next run time for a time-based schedule
 
         Args:
@@ -199,24 +209,23 @@ class TaskLoader:
         total_seconds = 0
 
         # Parse hours
-        hours_match = re.search(r'(\d+)h', interval_str)
+        hours_match = re.search(r"(\d+)h", interval_str)
         if hours_match:
             total_seconds += int(hours_match.group(1)) * 3600
 
         # Parse minutes
-        minutes_match = re.search(r'(\d+)m', interval_str)
+        minutes_match = re.search(r"(\d+)m", interval_str)
         if minutes_match:
             total_seconds += int(minutes_match.group(1)) * 60
 
         # Parse seconds
-        seconds_match = re.search(r'(\d+)s', interval_str)
+        seconds_match = re.search(r"(\d+)s", interval_str)
         if seconds_match:
             total_seconds += int(seconds_match.group(1))
 
         if total_seconds == 0:
             raise ValueError(
-                f"Invalid interval format: '{interval_str}'. "
-                "Use formats like '30s', '5m', '1h', or '2h30m'"
+                f"Invalid interval format: '{interval_str}'. " "Use formats like '30s', '5m', '1h', or '2h30m'"
             )
 
         return total_seconds
@@ -241,7 +250,7 @@ class TaskLoader:
                     interval=task_data["interval"],
                     description=task_data.get("description"),
                     enabled=task_data.get("enabled", True),
-                    conditions=task_data.get("conditions", [])
+                    conditions=task_data.get("conditions", []),
                 )
 
                 # Validate task
@@ -251,9 +260,9 @@ class TaskLoader:
             return tasks
 
         except yaml.YAMLError as e:
-            raise ValueError(f"YAML parsing error: {e}")
+            raise ValueError(f"YAML parsing error: {e}") from e
         except KeyError as e:
-            raise ValueError(f"Missing required field in task definition: {e}")
+            raise ValueError(f"Missing required field in task definition: {e}") from e
 
     def load_from_yaml_string(self, yaml_content: str) -> list[TaskDefinition]:
         """Load task definitions from YAML string (for testing)"""
@@ -271,7 +280,7 @@ class TaskLoader:
                     interval=task_data["interval"],
                     description=task_data.get("description"),
                     enabled=task_data.get("enabled", True),
-                    conditions=task_data.get("conditions", [])
+                    conditions=task_data.get("conditions", []),
                 )
 
                 task.validate()
@@ -280,9 +289,9 @@ class TaskLoader:
             return tasks
 
         except yaml.YAMLError as e:
-            raise ValueError(f"YAML parsing error: {e}")
+            raise ValueError(f"YAML parsing error: {e}") from e
         except KeyError as e:
-            raise ValueError(f"Missing required field in task definition: {e}")
+            raise ValueError(f"Missing required field in task definition: {e}") from e
 
     def load_monitors_from_yaml(self, path: Path) -> list[MonitorDefinition]:
         """Load monitor definitions from YAML file"""
@@ -305,7 +314,7 @@ class TaskLoader:
                     description=monitor_data.get("description"),
                     enabled=monitor_data.get("enabled", True),
                     conditions=monitor_data.get("conditions", []),
-                    knowledge_graph=monitor_data.get("knowledge_graph")
+                    knowledge_graph=monitor_data.get("knowledge_graph"),
                 )
 
                 monitor.validate()
@@ -314,6 +323,6 @@ class TaskLoader:
             return monitors
 
         except yaml.YAMLError as e:
-            raise ValueError(f"YAML parsing error: {e}")
+            raise ValueError(f"YAML parsing error: {e}") from e
         except KeyError as e:
-            raise ValueError(f"Missing required field in monitor definition: {e}")
+            raise ValueError(f"Missing required field in monitor definition: {e}") from e

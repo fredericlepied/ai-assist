@@ -1,6 +1,5 @@
 """Tests for condition evaluation"""
 
-import pytest
 from ai_assist.conditions import ConditionEvaluator
 
 

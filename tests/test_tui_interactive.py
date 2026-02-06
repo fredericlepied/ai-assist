@@ -1,16 +1,18 @@
 """Tests for TUI interactive mode"""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from ai_assist.tui_interactive import (
-    tui_interactive_mode,
-    handle_status_command,
-    handle_history_command,
-    handle_clear_cache_command,
-    handle_help_command
-)
+
+import pytest
+
 from ai_assist.agent import AiAssistAgent
 from ai_assist.state import StateManager
+from ai_assist.tui_interactive import (
+    handle_clear_cache_command,
+    handle_help_command,
+    handle_history_command,
+    handle_status_command,
+    tui_interactive_mode,
+)
 
 
 @pytest.fixture
@@ -52,8 +54,9 @@ def mock_state_manager():
 @pytest.mark.asyncio
 async def test_status_command(mock_state_manager):
     """Test /status command displays statistics"""
-    from rich.console import Console
     from io import StringIO
+
+    from rich.console import Console
 
     output = StringIO()
     console = Console(file=output, force_terminal=True)
@@ -68,8 +71,9 @@ async def test_status_command(mock_state_manager):
 @pytest.mark.asyncio
 async def test_history_command(mock_state_manager):
     """Test /history command displays recent checks"""
-    from rich.console import Console
     from io import StringIO
+
+    from rich.console import Console
 
     output = StringIO()
     console = Console(file=output, force_terminal=True)
@@ -84,8 +88,9 @@ async def test_history_command(mock_state_manager):
 @pytest.mark.asyncio
 async def test_clear_cache_command(mock_state_manager):
     """Test /clear-cache command clears cache"""
-    from rich.console import Console
     from io import StringIO
+
+    from rich.console import Console
 
     output = StringIO()
     console = Console(file=output, force_terminal=False)  # Disable colors for testing
@@ -100,8 +105,9 @@ async def test_clear_cache_command(mock_state_manager):
 @pytest.mark.asyncio
 async def test_help_command():
     """Test /help command displays help text"""
-    from rich.console import Console
     from io import StringIO
+
+    from rich.console import Console
 
     output = StringIO()
     console = Console(file=output, force_terminal=True)
@@ -117,7 +123,7 @@ async def test_help_command():
 @pytest.mark.asyncio
 async def test_tui_mode_initializes(mock_agent, mock_state_manager):
     """Test TUI mode initializes without errors"""
-    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
+    with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         # Simulate user typing /exit
         mock_session = AsyncMock()
         mock_session.prompt_async = AsyncMock(side_effect=["/exit"])
@@ -154,13 +160,10 @@ async def test_multiline_input_handling(mock_state_manager):
     agent.clear_tool_calls = MagicMock()
     agent.kg_save_enabled = True
 
-    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
+    with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         # Simulate multi-line input then exit
         mock_session = AsyncMock()
-        mock_session.prompt_async = AsyncMock(side_effect=[
-            "Line 1\nLine 2\nLine 3",
-            "/exit"
-        ])
+        mock_session.prompt_async = AsyncMock(side_effect=["Line 1\nLine 2\nLine 3", "/exit"])
         mock_session_class.return_value = mock_session
 
         await tui_interactive_mode(agent, mock_state_manager)
@@ -173,13 +176,9 @@ async def test_multiline_input_handling(mock_state_manager):
 @pytest.mark.asyncio
 async def test_empty_input_ignored(mock_agent, mock_state_manager):
     """Test empty input is ignored"""
-    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
+    with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
-        mock_session.prompt_async = AsyncMock(side_effect=[
-            "",  # Empty input
-            "   ",  # Whitespace only
-            "/exit"
-        ])
+        mock_session.prompt_async = AsyncMock(side_effect=["", "   ", "/exit"])  # Empty input  # Whitespace only
         mock_session_class.return_value = mock_session
 
         await tui_interactive_mode(mock_agent, mock_state_manager)
@@ -203,12 +202,9 @@ async def test_conversation_tracking(mock_state_manager):
     agent.clear_tool_calls = MagicMock()
     agent.kg_save_enabled = True
 
-    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
+    with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
-        mock_session.prompt_async = AsyncMock(side_effect=[
-            "Test question",
-            "/exit"
-        ])
+        mock_session.prompt_async = AsyncMock(side_effect=["Test question", "/exit"])
         mock_session_class.return_value = mock_session
 
         await tui_interactive_mode(agent, mock_state_manager)
@@ -226,7 +222,7 @@ async def test_conversation_tracking(mock_state_manager):
 @pytest.mark.asyncio
 async def test_keyboard_interrupt_handling(mock_agent, mock_state_manager):
     """Test KeyboardInterrupt is handled gracefully"""
-    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
+    with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
         mock_session.prompt_async = AsyncMock(side_effect=KeyboardInterrupt)
         mock_session_class.return_value = mock_session
@@ -240,7 +236,7 @@ async def test_keyboard_interrupt_handling(mock_agent, mock_state_manager):
 @pytest.mark.asyncio
 async def test_eoferror_handling(mock_agent, mock_state_manager):
     """Test EOFError (Ctrl-D) is handled gracefully"""
-    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
+    with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
         mock_session.prompt_async = AsyncMock(side_effect=EOFError)
         mock_session_class.return_value = mock_session
@@ -254,9 +250,11 @@ async def test_eoferror_handling(mock_agent, mock_state_manager):
 @pytest.mark.asyncio
 async def test_progress_feedback_callback():
     """Test progress callback is invoked during query"""
-    from ai_assist.tui_interactive import query_with_feedback
-    from rich.console import Console
     from io import StringIO
+
+    from rich.console import Console
+
+    from ai_assist.tui_interactive import query_with_feedback
 
     output = StringIO()
     console = Console(file=output, force_terminal=False)
@@ -310,12 +308,9 @@ async def test_feedback_with_tool_calls(mock_state_manager):
     agent.clear_tool_calls = MagicMock()
     agent.kg_save_enabled = True
 
-    with patch('ai_assist.tui_interactive.PromptSession') as mock_session_class:
+    with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
-        mock_session.prompt_async = AsyncMock(side_effect=[
-            "Find failed jobs",
-            "/exit"
-        ])
+        mock_session.prompt_async = AsyncMock(side_effect=["Find failed jobs", "/exit"])
         mock_session_class.return_value = mock_session
 
         await tui_interactive_mode(agent, mock_state_manager)

@@ -42,6 +42,18 @@ env/
 .DS_Store
 Thumbs.db
 
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+*.cover
+
+# Linting and formatting
+.ruff_cache/
+.mypy_cache/
+
 # Project specific
 *.log
 reports/

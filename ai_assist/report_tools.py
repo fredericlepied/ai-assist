@@ -1,9 +1,9 @@
 """Internal report management tools for ai-assist"""
 
 import json
-from pathlib import Path
-from datetime import datetime
 import os
+from datetime import datetime
+from pathlib import Path
 
 
 class ReportTools:
@@ -46,7 +46,7 @@ class ReportTools:
                     },
                     "required": ["name", "content"],
                 },
-                "_server": "internal"
+                "_server": "internal",
             },
             {
                 "name": "internal__append_to_report",
@@ -69,7 +69,7 @@ class ReportTools:
                     },
                     "required": ["name", "content"],
                 },
-                "_server": "internal"
+                "_server": "internal",
             },
             {
                 "name": "internal__read_report",
@@ -84,16 +84,13 @@ class ReportTools:
                     },
                     "required": ["name"],
                 },
-                "_server": "internal"
+                "_server": "internal",
             },
             {
                 "name": "internal__list_reports",
                 "description": "List all available reports with metadata",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {}
-                },
-                "_server": "internal"
+                "input_schema": {"type": "object", "properties": {}},
+                "_server": "internal",
             },
             {
                 "name": "internal__delete_report",
@@ -108,7 +105,7 @@ class ReportTools:
                     },
                     "required": ["name"],
                 },
-                "_server": "internal"
+                "_server": "internal",
             },
         ]
 
@@ -123,17 +120,10 @@ class ReportTools:
             str: Tool result as text
         """
         if tool_name == "write_report":
-            return self._write_report(
-                arguments["name"],
-                arguments["content"]
-            )
+            return self._write_report(arguments["name"], arguments["content"])
 
         elif tool_name == "append_to_report":
-            return self._append_to_report(
-                arguments["name"],
-                arguments["content"],
-                arguments.get("section")
-            )
+            return self._append_to_report(arguments["name"], arguments["content"], arguments.get("section"))
 
         elif tool_name == "read_report":
             return self._read_report(arguments["name"])
@@ -190,11 +180,13 @@ class ReportTools:
         reports = []
         for report_file in sorted(self.reports_dir.glob("*.md")):
             stat = report_file.stat()
-            reports.append({
-                "name": report_file.stem,
-                "size": stat.st_size,
-                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-            })
+            reports.append(
+                {
+                    "name": report_file.stem,
+                    "size": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                }
+            )
 
         return json.dumps(reports, indent=2)
 

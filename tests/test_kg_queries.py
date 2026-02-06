@@ -1,9 +1,11 @@
 """Tests for knowledge graph query interface"""
 
-import pytest
 from datetime import datetime, timedelta
-from ai_assist.knowledge_graph import KnowledgeGraph
+
+import pytest
+
 from ai_assist.kg_queries import KnowledgeGraphQueries
+from ai_assist.knowledge_graph import KnowledgeGraph
 
 
 @pytest.fixture
@@ -28,7 +30,7 @@ def test_what_did_we_know_at(kg, queries):
         entity_id="job-1",
         valid_from=datetime(2026, 2, 4, 10, 0),
         tx_from=datetime(2026, 2, 4, 11, 0),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     kg.insert_entity(
@@ -36,7 +38,7 @@ def test_what_did_we_know_at(kg, queries):
         entity_id="job-2",
         valid_from=datetime(2026, 2, 4, 10, 30),
         tx_from=datetime(2026, 2, 4, 12, 0),
-        data={"status": "error"}
+        data={"status": "error"},
     )
 
     # Query what we knew at 11:30
@@ -57,7 +59,7 @@ def test_what_changed_recently(kg, queries):
         entity_id="job-old",
         valid_from=two_hours_ago,
         tx_from=two_hours_ago,
-        data={"status": "success"}
+        data={"status": "success"},
     )
 
     # Recent entity (discovered 30 min ago)
@@ -66,7 +68,7 @@ def test_what_changed_recently(kg, queries):
         entity_id="job-new",
         valid_from=thirty_min_ago,
         tx_from=thirty_min_ago,
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     # Check changes in last hour
@@ -83,7 +85,7 @@ def test_find_late_discoveries(kg, queries):
         entity_id="job-late",
         valid_from=datetime(2026, 2, 4, 10, 0),
         tx_from=datetime(2026, 2, 4, 10, 45),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     # Job that failed at 11:00, discovered at 11:05 (5 min lag)
@@ -92,7 +94,7 @@ def test_find_late_discoveries(kg, queries):
         entity_id="job-quick",
         valid_from=datetime(2026, 2, 4, 11, 0),
         tx_from=datetime(2026, 2, 4, 11, 5),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     # Find discoveries with >30 min lag
@@ -114,7 +116,7 @@ def test_get_job_with_context(kg, queries):
         entity_id="job-123",
         valid_from=datetime(2026, 2, 4, 10, 0),
         tx_from=datetime(2026, 2, 4, 10, 5),
-        data={"status": "failure", "remoteci": "test-lab"}
+        data={"status": "failure", "remoteci": "test-lab"},
     )
 
     # Create components
@@ -123,7 +125,7 @@ def test_get_job_with_context(kg, queries):
         entity_id="comp-ocp",
         valid_from=datetime(2026, 2, 4, 0, 0),
         tx_from=datetime(2026, 2, 4, 0, 0),
-        data={"type": "ocp", "version": "4.19.0"}
+        data={"type": "ocp", "version": "4.19.0"},
     )
 
     comp2 = kg.insert_entity(
@@ -131,7 +133,7 @@ def test_get_job_with_context(kg, queries):
         entity_id="comp-storage",
         valid_from=datetime(2026, 2, 4, 0, 0),
         tx_from=datetime(2026, 2, 4, 0, 0),
-        data={"type": "storage", "name": "ceph"}
+        data={"type": "storage", "name": "ceph"},
     )
 
     # Create ticket
@@ -140,7 +142,7 @@ def test_get_job_with_context(kg, queries):
         entity_id="ticket-456",
         valid_from=datetime(2026, 2, 4, 12, 0),
         tx_from=datetime(2026, 2, 4, 12, 0),
-        data={"key": "CILAB-1234"}
+        data={"key": "CILAB-1234"},
     )
 
     # Create relationships
@@ -149,21 +151,18 @@ def test_get_job_with_context(kg, queries):
         source_id="job-123",
         target_id=comp1.id,
         valid_from=datetime(2026, 2, 4, 10, 0),
-        properties={"build": "ga"}
+        properties={"build": "ga"},
     )
 
     kg.insert_relationship(
-        rel_type="job_uses_component",
-        source_id="job-123",
-        target_id=comp2.id,
-        valid_from=datetime(2026, 2, 4, 10, 0)
+        rel_type="job_uses_component", source_id="job-123", target_id=comp2.id, valid_from=datetime(2026, 2, 4, 10, 0)
     )
 
     kg.insert_relationship(
         rel_type="job_references_ticket",
         source_id="job-123",
         target_id=ticket.id,
-        valid_from=datetime(2026, 2, 4, 12, 0)
+        valid_from=datetime(2026, 2, 4, 12, 0),
     )
 
     # Get job with context
@@ -199,7 +198,7 @@ def test_analyze_discovery_lag(kg, queries):
             entity_id=f"job-{i}",
             valid_from=valid_time,
             tx_from=tx_time,
-            data={"status": "failure"}
+            data={"status": "failure"},
         )
 
     # Analyze lag
@@ -226,7 +225,7 @@ def test_get_ticket_with_context(kg, queries):
         entity_id="ticket-789",
         valid_from=datetime(2026, 2, 4, 12, 0),
         tx_from=datetime(2026, 2, 4, 12, 0),
-        data={"key": "CILAB-5678", "summary": "Test issue"}
+        data={"key": "CILAB-5678", "summary": "Test issue"},
     )
 
     # Create jobs
@@ -235,7 +234,7 @@ def test_get_ticket_with_context(kg, queries):
         entity_id="job-a",
         valid_from=datetime(2026, 2, 4, 10, 0),
         tx_from=datetime(2026, 2, 4, 10, 5),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     job2 = kg.insert_entity(
@@ -243,7 +242,7 @@ def test_get_ticket_with_context(kg, queries):
         entity_id="job-b",
         valid_from=datetime(2026, 2, 4, 10, 30),
         tx_from=datetime(2026, 2, 4, 10, 35),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     # Create relationships
@@ -251,14 +250,14 @@ def test_get_ticket_with_context(kg, queries):
         rel_type="job_references_ticket",
         source_id=job1.id,
         target_id="ticket-789",
-        valid_from=datetime(2026, 2, 4, 12, 0)
+        valid_from=datetime(2026, 2, 4, 12, 0),
     )
 
     kg.insert_relationship(
         rel_type="job_references_ticket",
         source_id=job2.id,
         target_id="ticket-789",
-        valid_from=datetime(2026, 2, 4, 12, 0)
+        valid_from=datetime(2026, 2, 4, 12, 0),
     )
 
     # Get ticket with context
@@ -296,7 +295,7 @@ def test_what_changed_with_corrections(kg, queries):
         entity_id="job-original",
         valid_from=thirty_min_ago - timedelta(hours=1),
         tx_from=thirty_min_ago - timedelta(hours=1),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     # Corrected belief (discovered original was wrong)
@@ -308,7 +307,7 @@ def test_what_changed_with_corrections(kg, queries):
         entity_id="job-corrected",
         valid_from=thirty_min_ago - timedelta(hours=1),
         tx_from=thirty_min_ago,
-        data={"status": "success"}  # Actually succeeded
+        data={"status": "success"},  # Actually succeeded
     )
 
     # Check changes in last hour

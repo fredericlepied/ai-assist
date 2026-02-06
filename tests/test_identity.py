@@ -1,15 +1,9 @@
 """Tests for identity management"""
 
-import pytest
 import tempfile
 from pathlib import Path
-from ai_assist.identity import (
-    Identity,
-    UserIdentity,
-    AssistantIdentity,
-    CommunicationPreferences,
-    get_identity
-)
+
+from ai_assist.identity import AssistantIdentity, CommunicationPreferences, Identity, UserIdentity, get_identity
 
 
 def test_default_identity():
@@ -27,13 +21,9 @@ def test_default_identity():
 def test_custom_identity():
     """Test creating identity with custom values"""
     identity = Identity(
-        user=UserIdentity(
-            name="Fred Lepied",
-            role="Engineering Manager",
-            organization="Red Hat"
-        ),
+        user=UserIdentity(name="Fred Lepied", role="Engineering Manager", organization="Red Hat"),
         assistant=AssistantIdentity(nickname="Atlas"),
-        preferences=CommunicationPreferences(formality="casual")
+        preferences=CommunicationPreferences(formality="casual"),
     )
 
     assert identity.user.name == "Fred Lepied"
@@ -56,12 +46,8 @@ def test_system_prompt_generation_default():
 def test_system_prompt_generation_custom():
     """Test system prompt includes nickname, user name, and role"""
     identity = Identity(
-        user=UserIdentity(
-            name="Fred Lepied",
-            role="Engineering Manager",
-            organization="Red Hat"
-        ),
-        assistant=AssistantIdentity(nickname="Atlas")
+        user=UserIdentity(name="Fred Lepied", role="Engineering Manager", organization="Red Hat"),
+        assistant=AssistantIdentity(nickname="Atlas"),
     )
     prompt = identity.get_system_prompt()
 
@@ -74,9 +60,7 @@ def test_system_prompt_generation_custom():
 
 def test_system_prompt_with_casual_preference():
     """Test system prompt with casual communication style"""
-    identity = Identity(
-        preferences=CommunicationPreferences(formality="casual")
-    )
+    identity = Identity(preferences=CommunicationPreferences(formality="casual"))
     prompt = identity.get_system_prompt()
 
     assert "casual" in prompt or "friendly manner" in prompt
@@ -84,9 +68,7 @@ def test_system_prompt_with_casual_preference():
 
 def test_system_prompt_with_friendly_preference():
     """Test system prompt with friendly communication style"""
-    identity = Identity(
-        preferences=CommunicationPreferences(formality="friendly")
-    )
+    identity = Identity(preferences=CommunicationPreferences(formality="friendly"))
     prompt = identity.get_system_prompt()
 
     assert "warm" in prompt or "approachable" in prompt
@@ -94,10 +76,7 @@ def test_system_prompt_with_friendly_preference():
 
 def test_greeting_with_name():
     """Test personalized greeting"""
-    identity = Identity(
-        user=UserIdentity(name="Fred Lepied"),
-        assistant=AssistantIdentity(nickname="Atlas")
-    )
+    identity = Identity(user=UserIdentity(name="Fred Lepied"), assistant=AssistantIdentity(nickname="Atlas"))
     greeting = identity.get_greeting()
 
     assert greeting == "Hello Fred Lepied, I'm Atlas."
@@ -129,12 +108,8 @@ def test_save_and_load():
 
         # Create and save identity
         original = Identity(
-            user=UserIdentity(
-                name="Fred Lepied",
-                role="Engineering Manager",
-                organization="Red Hat"
-            ),
-            assistant=AssistantIdentity(nickname="Atlas")
+            user=UserIdentity(name="Fred Lepied", role="Engineering Manager", organization="Red Hat"),
+            assistant=AssistantIdentity(nickname="Atlas"),
         )
         original.save_to_file(path)
 
@@ -190,6 +165,7 @@ def test_get_identity_cached():
     """Test that get_identity returns cached instance"""
     # Clear cache by importing fresh
     from ai_assist import identity as identity_module
+
     identity_module._identity = None
 
     # First call loads from file
@@ -207,17 +183,13 @@ def test_get_identity_reload():
         path = Path(tmpdir) / "identity.yaml"
 
         # Save an identity
-        Identity(
-            user=UserIdentity(name="Test User")
-        ).save_to_file(path)
+        Identity(user=UserIdentity(name="Test User")).save_to_file(path)
 
         # Load it
-        id1 = Identity.load_from_file(path)
+        _id1 = Identity.load_from_file(path)
 
         # Modify file
-        Identity(
-            user=UserIdentity(name="Different User")
-        ).save_to_file(path)
+        Identity(user=UserIdentity(name="Different User")).save_to_file(path)
 
         # Load without reload should give cached
         id2 = Identity.load_from_file(path)
@@ -229,10 +201,7 @@ def test_get_identity_reload():
 def test_user_context_in_system_prompt():
     """Test that user context appears in system prompt"""
     identity = Identity(
-        user=UserIdentity(
-            name="Fred Lepied",
-            context="I manage a team of 8 engineers working on OpenShift CI/CD."
-        )
+        user=UserIdentity(name="Fred Lepied", context="I manage a team of 8 engineers working on OpenShift CI/CD.")
     )
     prompt = identity.get_system_prompt()
 
@@ -247,8 +216,8 @@ def test_custom_personality_override():
         user=UserIdentity(name="Fred Lepied"),
         assistant=AssistantIdentity(
             nickname="Nexus",
-            personality="You are Nexus, Fred's technical advisor specializing in CI/CD and distributed systems."
-        )
+            personality="You are Nexus, Fred's technical advisor specializing in CI/CD and distributed systems.",
+        ),
     )
     prompt = identity.get_system_prompt()
 
@@ -260,49 +229,35 @@ def test_custom_personality_override():
 def test_verbosity_preferences():
     """Test verbosity preference in system prompt"""
     # Concise
-    identity = Identity(
-        preferences=CommunicationPreferences(verbosity="concise")
-    )
+    identity = Identity(preferences=CommunicationPreferences(verbosity="concise"))
     assert "concise" in identity.get_system_prompt().lower()
 
     # Detailed
-    identity = Identity(
-        preferences=CommunicationPreferences(verbosity="detailed")
-    )
+    identity = Identity(preferences=CommunicationPreferences(verbosity="detailed"))
     assert "detailed" in identity.get_system_prompt().lower()
 
     # Verbose
-    identity = Identity(
-        preferences=CommunicationPreferences(verbosity="verbose")
-    )
+    identity = Identity(preferences=CommunicationPreferences(verbosity="verbose"))
     assert "verbose" in identity.get_system_prompt().lower() or "comprehensive" in identity.get_system_prompt().lower()
 
 
 def test_emoji_usage_preferences():
     """Test emoji usage preference in system prompt"""
     # None
-    identity = Identity(
-        preferences=CommunicationPreferences(emoji_usage="none")
-    )
+    identity = Identity(preferences=CommunicationPreferences(emoji_usage="none"))
     assert "not use emojis" in identity.get_system_prompt().lower()
 
     # Minimal
-    identity = Identity(
-        preferences=CommunicationPreferences(emoji_usage="minimal")
-    )
+    identity = Identity(preferences=CommunicationPreferences(emoji_usage="minimal"))
     assert "sparingly" in identity.get_system_prompt().lower()
 
     # Moderate
-    identity = Identity(
-        preferences=CommunicationPreferences(emoji_usage="moderate")
-    )
+    identity = Identity(preferences=CommunicationPreferences(emoji_usage="moderate"))
     prompt = identity.get_system_prompt().lower()
     assert "moderate" in prompt or "occasionally" in prompt
 
     # Liberal
-    identity = Identity(
-        preferences=CommunicationPreferences(emoji_usage="liberal")
-    )
+    identity = Identity(preferences=CommunicationPreferences(emoji_usage="liberal"))
     assert "engaging" in identity.get_system_prompt().lower()
 
 
@@ -313,17 +268,12 @@ def test_combined_enhanced_features():
             name="Fred Lepied",
             role="Engineering Manager",
             organization="Red Hat",
-            context="Managing 8 engineers on OpenShift CI/CD. Team includes seniors Sarah and Marcus."
+            context="Managing 8 engineers on OpenShift CI/CD. Team includes seniors Sarah and Marcus.",
         ),
         assistant=AssistantIdentity(
-            nickname="Nexus",
-            personality="You are Nexus, a management assistant for engineering teams."
+            nickname="Nexus", personality="You are Nexus, a management assistant for engineering teams."
         ),
-        preferences=CommunicationPreferences(
-            formality="professional",
-            verbosity="detailed",
-            emoji_usage="minimal"
-        )
+        preferences=CommunicationPreferences(formality="professional", verbosity="detailed", emoji_usage="minimal"),
     )
 
     prompt = identity.get_system_prompt()
@@ -349,19 +299,10 @@ def test_save_and_load_enhanced_identity():
         # Create enhanced identity
         original = Identity(
             user=UserIdentity(
-                name="Fred Lepied",
-                role="Engineering Manager",
-                context="Team of 8 engineers on OpenShift."
+                name="Fred Lepied", role="Engineering Manager", context="Team of 8 engineers on OpenShift."
             ),
-            assistant=AssistantIdentity(
-                nickname="Nexus",
-                personality="Custom personality here."
-            ),
-            preferences=CommunicationPreferences(
-                formality="casual",
-                verbosity="verbose",
-                emoji_usage="liberal"
-            )
+            assistant=AssistantIdentity(nickname="Nexus", personality="Custom personality here."),
+            preferences=CommunicationPreferences(formality="casual", verbosity="verbose", emoji_usage="liberal"),
         )
         original.save_to_file(path)
 

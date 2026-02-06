@@ -1,7 +1,7 @@
 """Tests for TUI components"""
 
-import pytest
 from prompt_toolkit.document import Document
+
 from ai_assist.tui import AiAssistCompleter
 
 

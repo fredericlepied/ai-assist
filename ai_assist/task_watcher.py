@@ -1,8 +1,8 @@
 """File watcher for hot-reloading schedule definitions"""
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 
 class TaskFileWatcher:
@@ -17,7 +17,7 @@ class TaskFileWatcher:
         """
         self.task_file = task_file
         self.callback = callback
-        self.last_modified: Optional[float] = None
+        self.last_modified: float | None = None
         self.running = False
 
     async def watch(self, check_interval: int = 5):

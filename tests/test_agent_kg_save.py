@@ -1,7 +1,9 @@
 """Tests for agent knowledge graph auto-save"""
 
-import pytest
 from datetime import datetime
+
+import pytest
+
 from ai_assist.agent import AiAssistAgent
 from ai_assist.config import AiAssistConfig
 from ai_assist.knowledge_graph import KnowledgeGraph
@@ -16,10 +18,7 @@ def kg():
 @pytest.fixture
 def agent_with_kg(kg):
     """Create agent with knowledge graph"""
-    config = AiAssistConfig(
-        anthropic_api_key="test-key",
-        mcp_servers={}
-    )
+    config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
     return AiAssistAgent(config, knowledge_graph=kg)
 
 
@@ -58,12 +57,14 @@ def test_tool_calls_tracked(agent_with_kg):
     assert len(agent_with_kg.last_tool_calls) == 0
 
     # Add a mock tool call
-    agent_with_kg.last_tool_calls.append({
-        "tool_name": "dci__search_dci_jobs",
-        "arguments": {"query": "test"},
-        "result": "test result",
-        "timestamp": datetime.now()
-    })
+    agent_with_kg.last_tool_calls.append(
+        {
+            "tool_name": "dci__search_dci_jobs",
+            "arguments": {"query": "test"},
+            "result": "test result",
+            "timestamp": datetime.now(),
+        }
+    )
 
     assert len(agent_with_kg.last_tool_calls) == 1
 
@@ -89,14 +90,8 @@ def test_get_last_kg_saved_count_zero(agent_with_kg):
 def test_get_last_kg_saved_count_with_saves(agent_with_kg):
     """Test getting saved count when entities were saved"""
     # Add tool calls with saved counts
-    agent_with_kg.last_tool_calls.append({
-        "tool_name": "dci__search_dci_jobs",
-        "kg_saved_count": 5
-    })
-    agent_with_kg.last_tool_calls.append({
-        "tool_name": "dci__search_jira_tickets",
-        "kg_saved_count": 3
-    })
+    agent_with_kg.last_tool_calls.append({"tool_name": "dci__search_dci_jobs", "kg_saved_count": 5})
+    agent_with_kg.last_tool_calls.append({"tool_name": "dci__search_jira_tickets", "kg_saved_count": 3})
 
     count = agent_with_kg.get_last_kg_saved_count()
     assert count == 8  # 5 + 3
@@ -105,14 +100,13 @@ def test_get_last_kg_saved_count_with_saves(agent_with_kg):
 def test_get_last_kg_saved_count_mixed(agent_with_kg):
     """Test getting saved count with mixed results"""
     # Some with saves, some without
-    agent_with_kg.last_tool_calls.append({
-        "tool_name": "dci__search_dci_jobs",
-        "kg_saved_count": 5
-    })
-    agent_with_kg.last_tool_calls.append({
-        "tool_name": "some__other_tool"
-        # No kg_saved_count
-    })
+    agent_with_kg.last_tool_calls.append({"tool_name": "dci__search_dci_jobs", "kg_saved_count": 5})
+    agent_with_kg.last_tool_calls.append(
+        {
+            "tool_name": "some__other_tool"
+            # No kg_saved_count
+        }
+    )
 
     count = agent_with_kg.get_last_kg_saved_count()
     assert count == 5
@@ -122,7 +116,7 @@ def test_get_last_kg_saved_count_mixed(agent_with_kg):
 async def test_save_jira_result_to_kg(agent_with_kg, kg):
     """Test saving Jira ticket result to KG"""
     # Mock Jira API response
-    jira_result = '''
+    jira_result = """
     {
         "key": "CILAB-123",
         "fields": {
@@ -133,14 +127,14 @@ async def test_save_jira_result_to_kg(agent_with_kg, kg):
             "created": "2026-02-01T10:00:00Z"
         }
     }
-    '''
+    """
 
     # Call the save method
     await agent_with_kg._save_tool_result_to_kg(
         tool_name="dci__get_jira_ticket",
         original_tool_name="get_jira_ticket",
         arguments={"ticket_key": "CILAB-123"},
-        result_text=jira_result
+        result_text=jira_result,
     )
 
     # Verify entity was saved
@@ -155,7 +149,7 @@ async def test_save_jira_result_to_kg(agent_with_kg, kg):
 @pytest.mark.asyncio
 async def test_save_jira_list_to_kg(agent_with_kg, kg):
     """Test saving list of Jira tickets to KG"""
-    jira_result = '''
+    jira_result = """
     {
         "issues": [
             {
@@ -178,13 +172,13 @@ async def test_save_jira_list_to_kg(agent_with_kg, kg):
             }
         ]
     }
-    '''
+    """
 
     await agent_with_kg._save_tool_result_to_kg(
         tool_name="dci__search_jira_tickets",
         original_tool_name="search_jira_tickets",
         arguments={"jql": "project=CILAB"},
-        result_text=jira_result
+        result_text=jira_result,
     )
 
     # Verify both entities saved
@@ -200,7 +194,7 @@ async def test_save_jira_list_to_kg(agent_with_kg, kg):
 @pytest.mark.asyncio
 async def test_save_dci_job_to_kg(agent_with_kg, kg):
     """Test saving DCI job to KG"""
-    dci_result = '''
+    dci_result = """
     {
         "hits": [
             {
@@ -221,13 +215,13 @@ async def test_save_dci_job_to_kg(agent_with_kg, kg):
             }
         ]
     }
-    '''
+    """
 
     await agent_with_kg._save_tool_result_to_kg(
         tool_name="dci__search_dci_jobs",
         original_tool_name="search_dci_jobs",
         arguments={"query": "status=failure"},
-        result_text=dci_result
+        result_text=dci_result,
     )
 
     # Verify job entity saved
@@ -255,10 +249,7 @@ async def test_save_disabled_when_kg_save_off(agent_with_kg, kg):
     jira_result = '{"key": "CILAB-999", "fields": {"summary": "Test"}}'
 
     await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__get_jira_ticket",
-        original_tool_name="get_jira_ticket",
-        arguments={},
-        result_text=jira_result
+        tool_name="dci__get_jira_ticket", original_tool_name="get_jira_ticket", arguments={}, result_text=jira_result
     )
 
     # Entity should NOT be saved
@@ -272,10 +263,7 @@ async def test_save_skips_non_json(agent_with_kg, kg):
     result = "This is not JSON"
 
     await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__search_dci_jobs",
-        original_tool_name="search_dci_jobs",
-        arguments={},
-        result_text=result
+        tool_name="dci__search_dci_jobs", original_tool_name="search_dci_jobs", arguments={}, result_text=result
     )
 
     # No error should occur, just silently skip
@@ -289,10 +277,7 @@ async def test_save_skips_error_results(agent_with_kg, kg):
     error_result = "Error: Something went wrong"
 
     await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__search_dci_jobs",
-        original_tool_name="search_dci_jobs",
-        arguments={},
-        result_text=error_result
+        tool_name="dci__search_dci_jobs", original_tool_name="search_dci_jobs", arguments={}, result_text=error_result
     )
 
     stats = kg.get_stats()
@@ -305,19 +290,12 @@ async def test_save_limits_entities(agent_with_kg, kg):
     # Create result with 30 jobs
     jobs = []
     for i in range(30):
-        jobs.append({
-            "id": f"job-{i}",
-            "status": "success",
-            "created_at": "2026-02-01T10:00:00Z"
-        })
+        jobs.append({"id": f"job-{i}", "status": "success", "created_at": "2026-02-01T10:00:00Z"})
 
     result = f'{{"hits": {jobs}}}'
 
     await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__search_dci_jobs",
-        original_tool_name="search_dci_jobs",
-        arguments={},
-        result_text=result
+        tool_name="dci__search_dci_jobs", original_tool_name="search_dci_jobs", arguments={}, result_text=result
     )
 
     # Should only save first 20

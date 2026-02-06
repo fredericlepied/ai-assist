@@ -1,9 +1,11 @@
 """Integration tests for knowledge graph with monitors"""
 
-import pytest
 from datetime import datetime, timedelta
-from ai_assist.knowledge_graph import KnowledgeGraph
+
+import pytest
+
 from ai_assist.kg_queries import KnowledgeGraphQueries
+from ai_assist.knowledge_graph import KnowledgeGraph
 
 
 def test_end_to_end_workflow():
@@ -28,10 +30,8 @@ def test_end_to_end_workflow():
             "job_id": "INT001",
             "status": "failure",
             "remoteci": "test-lab",
-            "components": [
-                {"type": "ocp", "version": "4.19.0"}
-            ]
-        }
+            "components": [{"type": "ocp", "version": "4.19.0"}],
+        },
     )
 
     # Job 2: Failed at 11:00, discovered at 11:05 (5 min lag)
@@ -47,11 +47,8 @@ def test_end_to_end_workflow():
             "job_id": "INT002",
             "status": "error",
             "remoteci": "test-lab",
-            "components": [
-                {"type": "ocp", "version": "4.19.0"},
-                {"type": "storage", "name": "ceph"}
-            ]
-        }
+            "components": [{"type": "ocp", "version": "4.19.0"}, {"type": "storage", "name": "ceph"}],
+        },
     )
 
     # Create component entities
@@ -60,7 +57,7 @@ def test_end_to_end_workflow():
         entity_id="comp-ocp-4.19.0",
         valid_from=base_time - timedelta(days=30),
         tx_from=base_time - timedelta(days=30),
-        data={"type": "ocp", "version": "4.19.0", "tags": ["build:ga"]}
+        data={"type": "ocp", "version": "4.19.0", "tags": ["build:ga"]},
     )
 
     comp_storage = kg.insert_entity(
@@ -68,7 +65,7 @@ def test_end_to_end_workflow():
         entity_id="comp-storage-ceph",
         valid_from=base_time - timedelta(days=30),
         tx_from=base_time - timedelta(days=30),
-        data={"type": "storage", "name": "ceph", "tags": ["build:ga"]}
+        data={"type": "storage", "name": "ceph", "tags": ["build:ga"]},
     )
 
     # Create relationships
@@ -77,7 +74,7 @@ def test_end_to_end_workflow():
         source_id=job1.id,
         target_id=comp_ocp.id,
         valid_from=job1_valid_from,
-        tx_from=job1_tx_from
+        tx_from=job1_tx_from,
     )
 
     kg.insert_relationship(
@@ -85,7 +82,7 @@ def test_end_to_end_workflow():
         source_id=job2.id,
         target_id=comp_ocp.id,
         valid_from=job2_valid_from,
-        tx_from=job2_tx_from
+        tx_from=job2_tx_from,
     )
 
     kg.insert_relationship(
@@ -93,7 +90,7 @@ def test_end_to_end_workflow():
         source_id=job2.id,
         target_id=comp_storage.id,
         valid_from=job2_valid_from,
-        tx_from=job2_tx_from
+        tx_from=job2_tx_from,
     )
 
     # Create Jira ticket for investigation
@@ -103,11 +100,7 @@ def test_end_to_end_workflow():
         entity_id="ticket-integration",
         valid_from=ticket_time,
         tx_from=ticket_time,
-        data={
-            "key": "TEST-1",
-            "summary": "Investigate failures",
-            "status": "Open"
-        }
+        data={"key": "TEST-1", "summary": "Investigate failures", "status": "Open"},
     )
 
     # Link jobs to ticket
@@ -116,7 +109,7 @@ def test_end_to_end_workflow():
         source_id=job1.id,
         target_id=ticket.id,
         valid_from=ticket_time,
-        tx_from=ticket_time
+        tx_from=ticket_time,
     )
 
     kg.insert_relationship(
@@ -124,7 +117,7 @@ def test_end_to_end_workflow():
         source_id=job2.id,
         target_id=ticket.id,
         valid_from=ticket_time,
-        tx_from=ticket_time
+        tx_from=ticket_time,
     )
 
     # Test 1: Statistics
@@ -203,7 +196,7 @@ def test_correction_workflow():
         entity_id="job-corrected",
         valid_from=base_time,
         tx_from=base_time + timedelta(minutes=10),
-        data={"job_id": "CORR001", "status": "failure"}
+        data={"job_id": "CORR001", "status": "failure"},
     )
 
     # Later: Realize it actually succeeded (correction)
@@ -218,7 +211,7 @@ def test_correction_workflow():
         entity_id="job-corrected-v2",
         valid_from=base_time,  # Same valid time (reality didn't change)
         tx_from=correction_time,  # New transaction time (belief changed)
-        data={"job_id": "CORR001", "status": "success"}
+        data={"job_id": "CORR001", "status": "success"},
     )
 
     # Query at different transaction times
@@ -247,7 +240,7 @@ def test_graph_traversal():
         entity_id="comp-shared",
         valid_from=base_time - timedelta(days=1),
         tx_from=base_time - timedelta(days=1),
-        data={"type": "ocp", "version": "4.19.0"}
+        data={"type": "ocp", "version": "4.19.0"},
     )
 
     # Create 3 jobs using this component
@@ -258,7 +251,7 @@ def test_graph_traversal():
             entity_id=f"job-{i}",
             valid_from=base_time + timedelta(hours=i),
             tx_from=base_time + timedelta(hours=i, minutes=5),
-            data={"job_id": f"J{i}", "status": "failure"}
+            data={"job_id": f"J{i}", "status": "failure"},
         )
         jobs.append(job)
 
@@ -267,7 +260,7 @@ def test_graph_traversal():
             source_id=job.id,
             target_id=comp.id,
             valid_from=job.valid_from,
-            tx_from=job.tx_from
+            tx_from=job.tx_from,
         )
 
     # Traverse from component to jobs (incoming relationships)

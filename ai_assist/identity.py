@@ -1,29 +1,31 @@
 """Identity management for ai-assist"""
 
-import os
-import yaml
 from pathlib import Path
-from typing import Optional
+
+import yaml
 from pydantic import BaseModel, Field
 
 
 class UserIdentity(BaseModel):
     """User identity information"""
+
     name: str = "there"
     role: str = "Manager"
-    organization: Optional[str] = None
-    timezone: Optional[str] = None
-    context: Optional[str] = None  # Detailed work context (team structure, priorities, etc.)
+    organization: str | None = None
+    timezone: str | None = None
+    context: str | None = None  # Detailed work context (team structure, priorities, etc.)
 
 
 class AssistantIdentity(BaseModel):
     """Assistant identity information"""
+
     nickname: str = "Nexus"
-    personality: Optional[str] = None  # Custom personality override
+    personality: str | None = None  # Custom personality override
 
 
 class CommunicationPreferences(BaseModel):
     """Communication style preferences"""
+
     formality: str = "professional"  # professional, casual, friendly
     verbosity: str = "concise"  # concise, detailed, verbose
     emoji_usage: str = "moderate"  # none, minimal, moderate, liberal
@@ -31,13 +33,14 @@ class CommunicationPreferences(BaseModel):
 
 class Identity(BaseModel):
     """Complete identity configuration"""
+
     version: str = "1.0"
     user: UserIdentity = Field(default_factory=UserIdentity)
     assistant: AssistantIdentity = Field(default_factory=AssistantIdentity)
     preferences: CommunicationPreferences = Field(default_factory=CommunicationPreferences)
 
     @classmethod
-    def load_from_file(cls, path: Optional[Path] = None) -> "Identity":
+    def load_from_file(cls, path: Path | None = None) -> "Identity":
         """Load identity from YAML file
 
         Args:
@@ -67,7 +70,7 @@ class Identity(BaseModel):
             print("Using default identity")
             return cls()
 
-    def save_to_file(self, path: Optional[Path] = None):
+    def save_to_file(self, path: Path | None = None):
         """Save identity to YAML file
 
         Args:
@@ -80,12 +83,7 @@ class Identity(BaseModel):
         path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(path, "w") as f:
-            yaml.safe_dump(
-                self.model_dump(),
-                f,
-                default_flow_style=False,
-                sort_keys=False
-            )
+            yaml.safe_dump(self.model_dump(), f, default_flow_style=False, sort_keys=False)
 
     def get_system_prompt(self) -> str:
         """Generate system prompt for Claude
@@ -157,7 +155,7 @@ class Identity(BaseModel):
 
 
 # Module-level cached identity
-_identity: Optional[Identity] = None
+_identity: Identity | None = None
 
 
 def get_identity(reload: bool = False) -> Identity:

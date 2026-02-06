@@ -2,8 +2,9 @@
 """Demo script to populate knowledge graph with sample data"""
 
 from datetime import datetime, timedelta
-from pathlib import Path
+
 from ai_assist.knowledge_graph import KnowledgeGraph
+
 
 def populate_demo_data():
     """Populate knowledge graph with demo data"""
@@ -45,18 +46,8 @@ def populate_demo_data():
 
     # Create components
     components = [
-        {
-            "id": "component-ocp-4.19.0",
-            "type": "ocp",
-            "version": "4.19.0",
-            "tags": ["build:ga"]
-        },
-        {
-            "id": "component-storage-ceph",
-            "type": "storage",
-            "version": "17.2.0",
-            "tags": ["build:ga"]
-        }
+        {"id": "component-ocp-4.19.0", "type": "ocp", "version": "4.19.0", "tags": ["build:ga"]},
+        {"id": "component-storage-ceph", "type": "storage", "version": "17.2.0", "tags": ["build:ga"]},
     ]
 
     # Insert components
@@ -66,11 +57,7 @@ def populate_demo_data():
             entity_id=comp["id"],
             valid_from=base_time - timedelta(days=30),  # Components existed before jobs
             tx_from=base_time - timedelta(days=30),
-            data={
-                "type": comp["type"],
-                "version": comp.get("version"),
-                "tags": comp.get("tags", [])
-            }
+            data={"type": comp["type"], "version": comp.get("version"), "tags": comp.get("tags", [])},
         )
         print(f"  Created component: {comp['id']}")
 
@@ -83,11 +70,7 @@ def populate_demo_data():
             valid_from=job["valid_from"],
             valid_to=job.get("valid_to"),
             tx_from=job["tx_from"],
-            data={
-                "job_id": job["job_id"],
-                "status": job["status"],
-                "remoteci": job["remoteci"]
-            }
+            data={"job_id": job["job_id"], "status": job["status"], "remoteci": job["remoteci"]},
         )
 
         # Create relationships to components
@@ -98,7 +81,7 @@ def populate_demo_data():
                 target_id=comp["id"],
                 valid_from=job["valid_from"],
                 tx_from=job["tx_from"],
-                properties={"tags": comp.get("tags", [])}
+                properties={"tags": comp.get("tags", [])},
             )
 
         lag_minutes = (job["tx_from"] - job["valid_from"]).total_seconds() / 60
@@ -114,8 +97,8 @@ def populate_demo_data():
         data={
             "key": "CILAB-1234",
             "summary": "Investigate DCI job failures in telco-cilab-bos2",
-            "status": "In Progress"
-        }
+            "status": "In Progress",
+        },
     )
     print("  Created ticket: ticket-CILAB-1234")
 
@@ -125,18 +108,19 @@ def populate_demo_data():
         source_id="dci-job-123456",
         target_id="ticket-CILAB-1234",
         valid_from=ticket_time,
-        tx_from=ticket_time
+        tx_from=ticket_time,
     )
     print("  Linked job to ticket")
 
     # Get stats
     stats = kg.get_stats()
-    print(f"\nDemo data populated successfully!")
+    print("\nDemo data populated successfully!")
     print(f"Total entities: {stats['total_entities']}")
     print(f"Total relationships: {stats['total_relationships']}")
     print(f"\nDatabase: {stats['db_path']}")
 
     kg.close()
+
 
 if __name__ == "__main__":
     populate_demo_data()

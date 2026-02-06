@@ -3,7 +3,8 @@
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+
 from .agent import AiAssistAgent
 from .state import StateManager
 
@@ -106,7 +107,7 @@ class ConditionEvaluator:
 
                 # Try to convert value to appropriate type
                 try:
-                    if isinstance(field_value, (int, float)):
+                    if isinstance(field_value, int | float):
                         value = float(value_str)
                     else:
                         value = value_str
@@ -216,7 +217,7 @@ class ActionExecutor:
         """
 
         try:
-            result = await self.agent.query(prompt)
+            await self.agent.query(prompt)
             print(f"📄 Created Google Doc: {title}")
         except Exception as e:
             print(f"Error creating Google Doc: {e}")

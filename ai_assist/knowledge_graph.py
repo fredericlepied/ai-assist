@@ -2,10 +2,10 @@
 
 import json
 import sqlite3
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 
@@ -22,12 +22,13 @@ class Entity:
         tx_to: When ai-assist stopped believing the fact (None if current belief)
         data: Flexible JSON data for the entity
     """
+
     id: str
     entity_type: str
     valid_from: datetime
-    valid_to: Optional[datetime]
+    valid_to: datetime | None
     tx_from: datetime
-    tx_to: Optional[datetime]
+    tx_to: datetime | None
     data: dict[str, Any]
 
     def to_dict(self) -> dict:
@@ -39,7 +40,7 @@ class Entity:
             "valid_to": self.valid_to.isoformat() if self.valid_to else None,
             "tx_from": self.tx_from.isoformat(),
             "tx_to": self.tx_to.isoformat() if self.tx_to else None,
-            "data": self.data
+            "data": self.data,
         }
 
     @classmethod
@@ -52,7 +53,7 @@ class Entity:
             valid_to=datetime.fromisoformat(row[3]) if row[3] else None,
             tx_from=datetime.fromisoformat(row[4]),
             tx_to=datetime.fromisoformat(row[5]) if row[5] else None,
-            data=json.loads(row[6])
+            data=json.loads(row[6]),
         )
 
 
@@ -71,14 +72,15 @@ class Relationship:
         tx_to: When ai-assist stopped believing it (None if current belief)
         properties: Additional properties for the relationship
     """
+
     id: str
     rel_type: str
     source_id: str
     target_id: str
     valid_from: datetime
-    valid_to: Optional[datetime]
+    valid_to: datetime | None
     tx_from: datetime
-    tx_to: Optional[datetime]
+    tx_to: datetime | None
     properties: dict[str, Any]
 
     def to_dict(self) -> dict:
@@ -92,7 +94,7 @@ class Relationship:
             "valid_to": self.valid_to.isoformat() if self.valid_to else None,
             "tx_from": self.tx_from.isoformat(),
             "tx_to": self.tx_to.isoformat() if self.tx_to else None,
-            "properties": self.properties
+            "properties": self.properties,
         }
 
     @classmethod
@@ -107,14 +109,14 @@ class Relationship:
             valid_to=datetime.fromisoformat(row[5]) if row[5] else None,
             tx_from=datetime.fromisoformat(row[6]),
             tx_to=datetime.fromisoformat(row[7]) if row[7] else None,
-            properties=json.loads(row[8]) if row[8] else {}
+            properties=json.loads(row[8]) if row[8] else {},
         )
 
 
 class KnowledgeGraph:
     """Bi-temporal knowledge graph storage engine"""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         """Initialize the knowledge graph
 
         Args:
@@ -134,7 +136,8 @@ class KnowledgeGraph:
         cursor = self.conn.cursor()
 
         # Entities table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS entities (
                 id TEXT PRIMARY KEY,
                 entity_type TEXT NOT NULL,
@@ -144,24 +147,32 @@ class KnowledgeGraph:
                 tx_to TIMESTAMP,
                 data JSON NOT NULL
             )
-        """)
+        """
+        )
 
         # Indexes for temporal queries
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_entities_type
             ON entities(entity_type)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_entities_valid_time
             ON entities(valid_from, valid_to)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_entities_tx_time
             ON entities(tx_from, tx_to)
-        """)
+        """
+        )
 
         # Relationships table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS relationships (
                 id TEXT PRIMARY KEY,
                 rel_type TEXT NOT NULL,
@@ -175,29 +186,40 @@ class KnowledgeGraph:
                 FOREIGN KEY (source_id) REFERENCES entities(id),
                 FOREIGN KEY (target_id) REFERENCES entities(id)
             )
-        """)
+        """
+        )
 
         # Indexes for relationship queries
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_relationships_type
             ON relationships(rel_type)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_relationships_source
             ON relationships(source_id)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_relationships_target
             ON relationships(target_id)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_relationships_valid_time
             ON relationships(valid_from, valid_to)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_relationships_tx_time
             ON relationships(tx_from, tx_to)
-        """)
+        """
+        )
 
         self.conn.commit()
 
@@ -206,10 +228,10 @@ class KnowledgeGraph:
         entity_type: str,
         data: dict[str, Any],
         valid_from: datetime,
-        tx_from: Optional[datetime] = None,
-        entity_id: Optional[str] = None,
-        valid_to: Optional[datetime] = None,
-        tx_to: Optional[datetime] = None
+        tx_from: datetime | None = None,
+        entity_id: str | None = None,
+        valid_to: datetime | None = None,
+        tx_to: datetime | None = None,
     ) -> Entity:
         """Insert a new entity into the knowledge graph
 
@@ -238,32 +260,32 @@ class KnowledgeGraph:
             valid_to=valid_to,
             tx_from=tx_from,
             tx_to=tx_to,
-            data=data
+            data=data,
         )
 
         cursor = self.conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO entities (id, entity_type, valid_from, valid_to, tx_from, tx_to, data)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            entity.id,
-            entity.entity_type,
-            entity.valid_from.isoformat(),
-            entity.valid_to.isoformat() if entity.valid_to else None,
-            entity.tx_from.isoformat(),
-            entity.tx_to.isoformat() if entity.tx_to else None,
-            json.dumps(entity.data)
-        ))
+        """,
+            (
+                entity.id,
+                entity.entity_type,
+                entity.valid_from.isoformat(),
+                entity.valid_to.isoformat() if entity.valid_to else None,
+                entity.tx_from.isoformat(),
+                entity.tx_to.isoformat() if entity.tx_to else None,
+                json.dumps(entity.data),
+            ),
+        )
         self.conn.commit()
 
         return entity
 
     def update_entity(
-        self,
-        entity_id: str,
-        valid_to: Optional[datetime] = None,
-        tx_to: Optional[datetime] = None
-    ) -> Optional[Entity]:
+        self, entity_id: str, valid_to: datetime | None = None, tx_to: datetime | None = None
+    ) -> Entity | None:
         """Update an entity's temporal bounds
 
         This is used to close the temporal window (set valid_to or tx_to)
@@ -293,15 +315,18 @@ class KnowledgeGraph:
         if tx_to is not None:
             entity.tx_to = tx_to
 
-        cursor.execute("""
+        cursor.execute(
+            """
             UPDATE entities
             SET valid_to = ?, tx_to = ?
             WHERE id = ?
-        """, (
-            entity.valid_to.isoformat() if entity.valid_to else None,
-            entity.tx_to.isoformat() if entity.tx_to else None,
-            entity_id
-        ))
+        """,
+            (
+                entity.valid_to.isoformat() if entity.valid_to else None,
+                entity.tx_to.isoformat() if entity.tx_to else None,
+                entity_id,
+            ),
+        )
         self.conn.commit()
 
         return entity
@@ -312,11 +337,11 @@ class KnowledgeGraph:
         source_id: str,
         target_id: str,
         valid_from: datetime,
-        tx_from: Optional[datetime] = None,
-        properties: Optional[dict[str, Any]] = None,
-        rel_id: Optional[str] = None,
-        valid_to: Optional[datetime] = None,
-        tx_to: Optional[datetime] = None
+        tx_from: datetime | None = None,
+        properties: dict[str, Any] | None = None,
+        rel_id: str | None = None,
+        valid_to: datetime | None = None,
+        tx_to: datetime | None = None,
     ) -> Relationship:
         """Insert a new relationship between entities
 
@@ -352,35 +377,33 @@ class KnowledgeGraph:
             valid_to=valid_to,
             tx_from=tx_from,
             tx_to=tx_to,
-            properties=properties
+            properties=properties,
         )
 
         cursor = self.conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO relationships
             (id, rel_type, source_id, target_id, valid_from, valid_to, tx_from, tx_to, properties)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            relationship.id,
-            relationship.rel_type,
-            relationship.source_id,
-            relationship.target_id,
-            relationship.valid_from.isoformat(),
-            relationship.valid_to.isoformat() if relationship.valid_to else None,
-            relationship.tx_from.isoformat(),
-            relationship.tx_to.isoformat() if relationship.tx_to else None,
-            json.dumps(relationship.properties)
-        ))
+        """,
+            (
+                relationship.id,
+                relationship.rel_type,
+                relationship.source_id,
+                relationship.target_id,
+                relationship.valid_from.isoformat(),
+                relationship.valid_to.isoformat() if relationship.valid_to else None,
+                relationship.tx_from.isoformat(),
+                relationship.tx_to.isoformat() if relationship.tx_to else None,
+                json.dumps(relationship.properties),
+            ),
+        )
         self.conn.commit()
 
         return relationship
 
-    def query_as_of(
-        self,
-        tx_time: datetime,
-        entity_type: Optional[str] = None,
-        limit: Optional[int] = None
-    ) -> list[Entity]:
+    def query_as_of(self, tx_time: datetime, entity_type: str | None = None, limit: int | None = None) -> list[Entity]:
         """Query entities as they were known at a specific transaction time
 
         This answers: "What did ai-assist know at time X?"
@@ -415,10 +438,7 @@ class KnowledgeGraph:
         return [Entity.from_row(row) for row in cursor.fetchall()]
 
     def query_valid_at(
-        self,
-        valid_time: datetime,
-        entity_type: Optional[str] = None,
-        limit: Optional[int] = None
+        self, valid_time: datetime, entity_type: str | None = None, limit: int | None = None
     ) -> list[Entity]:
         """Query entities that were valid at a specific time in reality
 
@@ -454,7 +474,7 @@ class KnowledgeGraph:
         cursor.execute(query, params)
         return [Entity.from_row(row) for row in cursor.fetchall()]
 
-    def get_entity(self, entity_id: str) -> Optional[Entity]:
+    def get_entity(self, entity_id: str) -> Entity | None:
         """Get an entity by ID
 
         Args:
@@ -471,8 +491,8 @@ class KnowledgeGraph:
     def get_related_entities(
         self,
         entity_id: str,
-        rel_type: Optional[str] = None,
-        direction: Literal["outgoing", "incoming", "both"] = "outgoing"
+        rel_type: str | None = None,
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> list[tuple[Relationship, Entity]]:
         """Get entities related to this entity
 
@@ -536,12 +556,14 @@ class KnowledgeGraph:
         cursor = self.conn.cursor()
 
         # Count entities by type
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT entity_type, COUNT(*)
             FROM entities
             WHERE tx_to IS NULL
             GROUP BY entity_type
-        """)
+        """
+        )
         entity_counts = dict(cursor.fetchall())
 
         # Total entities
@@ -549,12 +571,14 @@ class KnowledgeGraph:
         total_entities = cursor.fetchone()[0]
 
         # Count relationships by type
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT rel_type, COUNT(*)
             FROM relationships
             WHERE tx_to IS NULL
             GROUP BY rel_type
-        """)
+        """
+        )
         relationship_counts = dict(cursor.fetchall())
 
         # Total relationships

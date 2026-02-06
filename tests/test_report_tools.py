@@ -1,9 +1,11 @@
 """Tests for internal report management tools"""
 
-import pytest
 import json
 import tempfile
 from pathlib import Path
+
+import pytest
+
 from ai_assist.report_tools import ReportTools
 
 
@@ -30,7 +32,7 @@ class TestReportTools:
 
     def test_tilde_expansion_in_env_var(self, monkeypatch, tmp_path):
         """Test that tilde in AI_ASSIST_REPORTS_DIR is properly expanded"""
-        import os
+
         # Set env var with tilde
         test_dir = tmp_path / "test-reports"
         monkeypatch.setenv("AI_ASSIST_REPORTS_DIR", f"~/{test_dir.name}")
@@ -40,7 +42,7 @@ class TestReportTools:
 
         # Path should be absolute and not contain literal ~
         assert rt.reports_dir.is_absolute()
-        assert '~' not in str(rt.reports_dir)
+        assert "~" not in str(rt.reports_dir)
         # Should have expanded to home directory
         assert str(rt.reports_dir).startswith(str(Path.home()))
 
@@ -65,8 +67,7 @@ class TestWriteReport:
     async def test_write_report_creates_file(self, report_tools, temp_reports):
         """Test that write_report creates a markdown file"""
         result = await report_tools.execute_tool(
-            "write_report",
-            {"name": "test-report", "content": "# Test Report\n\nContent here."}
+            "write_report", {"name": "test-report", "content": "# Test Report\n\nContent here."}
         )
 
         assert "test-report" in result
@@ -84,10 +85,7 @@ class TestWriteReport:
     @pytest.mark.asyncio
     async def test_write_report_includes_timestamp(self, report_tools, temp_reports):
         """Test that write_report adds timestamp metadata"""
-        await report_tools.execute_tool(
-            "write_report",
-            {"name": "timestamped", "content": "# Report"}
-        )
+        await report_tools.execute_tool("write_report", {"name": "timestamped", "content": "# Report"})
 
         report_file = temp_reports / "timestamped.md"
         content = report_file.read_text()
@@ -100,16 +98,10 @@ class TestWriteReport:
     async def test_write_report_overwrites_existing(self, report_tools, temp_reports):
         """Test that write_report overwrites existing files"""
         # Create initial report
-        await report_tools.execute_tool(
-            "write_report",
-            {"name": "overwrite-test", "content": "# Original Content"}
-        )
+        await report_tools.execute_tool("write_report", {"name": "overwrite-test", "content": "# Original Content"})
 
         # Overwrite with new content
-        await report_tools.execute_tool(
-            "write_report",
-            {"name": "overwrite-test", "content": "# New Content"}
-        )
+        await report_tools.execute_tool("write_report", {"name": "overwrite-test", "content": "# New Content"})
 
         report_file = temp_reports / "overwrite-test.md"
         content = report_file.read_text()
@@ -126,15 +118,11 @@ class TestAppendToReport:
     async def test_append_to_existing_report(self, report_tools, temp_reports):
         """Test appending to an existing report"""
         # Create initial report
-        await report_tools.execute_tool(
-            "write_report",
-            {"name": "append-test", "content": "# Initial Content"}
-        )
+        await report_tools.execute_tool("write_report", {"name": "append-test", "content": "# Initial Content"})
 
         # Append to it
         result = await report_tools.execute_tool(
-            "append_to_report",
-            {"name": "append-test", "content": "Additional content"}
+            "append_to_report", {"name": "append-test", "content": "Additional content"}
         )
 
         assert "Content appended" in result
@@ -148,18 +136,10 @@ class TestAppendToReport:
     @pytest.mark.asyncio
     async def test_append_with_section_header(self, report_tools, temp_reports):
         """Test appending with a section header"""
-        await report_tools.execute_tool(
-            "write_report",
-            {"name": "sections", "content": "# Report"}
-        )
+        await report_tools.execute_tool("write_report", {"name": "sections", "content": "# Report"})
 
         await report_tools.execute_tool(
-            "append_to_report",
-            {
-                "name": "sections",
-                "content": "Section content",
-                "section": "New Section"
-            }
+            "append_to_report", {"name": "sections", "content": "Section content", "section": "New Section"}
         )
 
         report_file = temp_reports / "sections.md"
@@ -171,10 +151,7 @@ class TestAppendToReport:
     @pytest.mark.asyncio
     async def test_append_creates_file_if_not_exists(self, report_tools, temp_reports):
         """Test that append creates file if it doesn't exist"""
-        result = await report_tools.execute_tool(
-            "append_to_report",
-            {"name": "new-report", "content": "First content"}
-        )
+        result = await report_tools.execute_tool("append_to_report", {"name": "new-report", "content": "First content"})
 
         assert "Content appended" in result
 
@@ -190,25 +167,16 @@ class TestReadReport:
     @pytest.mark.asyncio
     async def test_read_existing_report(self, report_tools, temp_reports):
         """Test reading an existing report"""
-        await report_tools.execute_tool(
-            "write_report",
-            {"name": "readable", "content": "# Readable Report"}
-        )
+        await report_tools.execute_tool("write_report", {"name": "readable", "content": "# Readable Report"})
 
-        result = await report_tools.execute_tool(
-            "read_report",
-            {"name": "readable"}
-        )
+        result = await report_tools.execute_tool("read_report", {"name": "readable"})
 
         assert "# Readable Report" in result
 
     @pytest.mark.asyncio
     async def test_read_nonexistent_report(self, report_tools):
         """Test reading a non-existent report"""
-        result = await report_tools.execute_tool(
-            "read_report",
-            {"name": "nonexistent"}
-        )
+        result = await report_tools.execute_tool("read_report", {"name": "nonexistent"})
 
         assert "not found" in result
 
@@ -228,14 +196,8 @@ class TestListReports:
     @pytest.mark.asyncio
     async def test_list_reports_with_files(self, report_tools):
         """Test listing reports with files"""
-        await report_tools.execute_tool(
-            "write_report",
-            {"name": "report1", "content": "Content 1"}
-        )
-        await report_tools.execute_tool(
-            "write_report",
-            {"name": "report2", "content": "Content 2"}
-        )
+        await report_tools.execute_tool("write_report", {"name": "report1", "content": "Content 1"})
+        await report_tools.execute_tool("write_report", {"name": "report2", "content": "Content 2"})
 
         result = await report_tools.execute_tool("list_reports", {})
 
@@ -258,18 +220,12 @@ class TestDeleteReport:
     @pytest.mark.asyncio
     async def test_delete_existing_report(self, report_tools, temp_reports):
         """Test deleting an existing report"""
-        await report_tools.execute_tool(
-            "write_report",
-            {"name": "deleteme", "content": "Content"}
-        )
+        await report_tools.execute_tool("write_report", {"name": "deleteme", "content": "Content"})
 
         report_file = temp_reports / "deleteme.md"
         assert report_file.exists()
 
-        result = await report_tools.execute_tool(
-            "delete_report",
-            {"name": "deleteme"}
-        )
+        result = await report_tools.execute_tool("delete_report", {"name": "deleteme"})
 
         assert "deleted" in result
         assert not report_file.exists()
@@ -277,9 +233,6 @@ class TestDeleteReport:
     @pytest.mark.asyncio
     async def test_delete_nonexistent_report(self, report_tools):
         """Test deleting a non-existent report"""
-        result = await report_tools.execute_tool(
-            "delete_report",
-            {"name": "nonexistent"}
-        )
+        result = await report_tools.execute_tool("delete_report", {"name": "nonexistent"})
 
         assert "not found" in result

@@ -1,8 +1,10 @@
 """Tests for bi-temporal knowledge graph"""
 
+from datetime import datetime
+
 import pytest
-from datetime import datetime, timedelta
-from ai_assist.knowledge_graph import KnowledgeGraph, Entity, Relationship
+
+from ai_assist.knowledge_graph import KnowledgeGraph
 
 
 @pytest.fixture
@@ -23,7 +25,7 @@ def test_insert_entity_with_bitemporal(kg):
         entity_id="job-test",
         valid_from=valid_time,
         tx_from=tx_time,
-        data={"status": "failure", "remoteci": "test-lab"}
+        data={"status": "failure", "remoteci": "test-lab"},
     )
 
     assert entity.id == "job-test"
@@ -42,9 +44,7 @@ def test_insert_entity_auto_tx_time(kg):
     """Test that tx_from defaults to now if not provided"""
     before = datetime.now()
     entity = kg.insert_entity(
-        entity_type="jira_ticket",
-        data={"key": "CILAB-1234"},
-        valid_from=datetime(2026, 2, 4, 9, 0)
+        entity_type="jira_ticket", data={"key": "CILAB-1234"}, valid_from=datetime(2026, 2, 4, 9, 0)
     )
     after = datetime.now()
 
@@ -53,11 +53,11 @@ def test_insert_entity_auto_tx_time(kg):
 
 def test_get_entity(kg):
     """Test retrieving an entity by ID"""
-    entity = kg.insert_entity(
+    _entity = kg.insert_entity(
         entity_type="component",
         entity_id="comp-123",
         valid_from=datetime(2026, 2, 4, 10, 0),
-        data={"type": "ocp", "version": "4.19.0"}
+        data={"type": "ocp", "version": "4.19.0"},
     )
 
     retrieved = kg.get_entity("comp-123")
@@ -71,11 +71,8 @@ def test_get_entity(kg):
 
 def test_update_entity_temporal_bounds(kg):
     """Test updating entity temporal bounds"""
-    entity = kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-456",
-        valid_from=datetime(2026, 2, 4, 10, 0),
-        data={"status": "running"}
+    _entity = kg.insert_entity(
+        entity_type="dci_job", entity_id="job-456", valid_from=datetime(2026, 2, 4, 10, 0), data={"status": "running"}
     )
 
     # Job finished at 11:00
@@ -98,7 +95,7 @@ def test_query_as_of(kg):
         entity_id="job-early",
         valid_from=datetime(2026, 2, 4, 10, 0),
         tx_from=datetime(2026, 2, 4, 11, 0),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     # Insert another at tx_time = 12:00
@@ -107,7 +104,7 @@ def test_query_as_of(kg):
         entity_id="job-late",
         valid_from=datetime(2026, 2, 4, 10, 30),
         tx_from=datetime(2026, 2, 4, 12, 0),
-        data={"status": "error"}
+        data={"status": "error"},
     )
 
     # Query as_of 10:30 -> should find nothing (we didn't know yet)
@@ -127,12 +124,12 @@ def test_query_as_of(kg):
 def test_query_as_of_with_corrections(kg):
     """Test that corrected beliefs don't show up in as-of queries"""
     # Insert initial belief at 11:00
-    entity = kg.insert_entity(
+    _entity = kg.insert_entity(
         entity_type="dci_job",
         entity_id="job-corrected",
         valid_from=datetime(2026, 2, 4, 10, 0),
         tx_from=datetime(2026, 2, 4, 11, 0),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     # At 11:30, we realize our belief was wrong and correct it
@@ -144,7 +141,7 @@ def test_query_as_of_with_corrections(kg):
         entity_id="job-corrected-v2",
         valid_from=datetime(2026, 2, 4, 10, 0),
         tx_from=datetime(2026, 2, 4, 11, 30),
-        data={"status": "success"}  # Actually succeeded
+        data={"status": "success"},  # Actually succeeded
     )
 
     # Query as_of 11:15 -> should see original (wrong) belief
@@ -169,7 +166,7 @@ def test_query_valid_at(kg):
         valid_from=datetime(2026, 2, 4, 10, 0),
         valid_to=datetime(2026, 2, 4, 11, 0),
         tx_from=datetime(2026, 2, 4, 11, 5),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     # Job that ran from 11:00 to 12:00
@@ -179,7 +176,7 @@ def test_query_valid_at(kg):
         valid_from=datetime(2026, 2, 4, 11, 0),
         valid_to=datetime(2026, 2, 4, 12, 0),
         tx_from=datetime(2026, 2, 4, 12, 5),
-        data={"status": "success"}
+        data={"status": "success"},
     )
 
     # Query valid_at 10:30 -> should find only morning job
@@ -201,17 +198,14 @@ def test_insert_relationship(kg):
     """Test inserting relationships between entities"""
     # Create job and component
     job = kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-789",
-        valid_from=datetime(2026, 2, 4, 10, 0),
-        data={"status": "failure"}
+        entity_type="dci_job", entity_id="job-789", valid_from=datetime(2026, 2, 4, 10, 0), data={"status": "failure"}
     )
 
     component = kg.insert_entity(
         entity_type="component",
         entity_id="comp-ocp-419",
         valid_from=datetime(2026, 2, 4, 0, 0),
-        data={"type": "ocp", "version": "4.19.0"}
+        data={"type": "ocp", "version": "4.19.0"},
     )
 
     # Create relationship
@@ -220,7 +214,7 @@ def test_insert_relationship(kg):
         source_id=job.id,
         target_id=component.id,
         valid_from=datetime(2026, 2, 4, 10, 0),
-        properties={"build": "ga"}
+        properties={"build": "ga"},
     )
 
     assert rel.rel_type == "job_uses_component"
@@ -233,10 +227,7 @@ def test_get_related_entities_outgoing(kg):
     """Test getting entities via outgoing relationships"""
     # Create job
     job = kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-abc",
-        valid_from=datetime(2026, 2, 4, 10, 0),
-        data={"status": "failure"}
+        entity_type="dci_job", entity_id="job-abc", valid_from=datetime(2026, 2, 4, 10, 0), data={"status": "failure"}
     )
 
     # Create components
@@ -244,29 +235,23 @@ def test_get_related_entities_outgoing(kg):
         entity_type="component",
         entity_id="comp-1",
         valid_from=datetime(2026, 2, 4, 0, 0),
-        data={"type": "ocp", "version": "4.19.0"}
+        data={"type": "ocp", "version": "4.19.0"},
     )
 
     comp2 = kg.insert_entity(
         entity_type="component",
         entity_id="comp-2",
         valid_from=datetime(2026, 2, 4, 0, 0),
-        data={"type": "storage", "name": "ceph"}
+        data={"type": "storage", "name": "ceph"},
     )
 
     # Create relationships
     kg.insert_relationship(
-        rel_type="job_uses_component",
-        source_id=job.id,
-        target_id=comp1.id,
-        valid_from=datetime(2026, 2, 4, 10, 0)
+        rel_type="job_uses_component", source_id=job.id, target_id=comp1.id, valid_from=datetime(2026, 2, 4, 10, 0)
     )
 
     kg.insert_relationship(
-        rel_type="job_uses_component",
-        source_id=job.id,
-        target_id=comp2.id,
-        valid_from=datetime(2026, 2, 4, 10, 0)
+        rel_type="job_uses_component", source_id=job.id, target_id=comp2.id, valid_from=datetime(2026, 2, 4, 10, 0)
     )
 
     # Get related entities
@@ -285,37 +270,25 @@ def test_get_related_entities_incoming(kg):
         entity_type="jira_ticket",
         entity_id="ticket-123",
         valid_from=datetime(2026, 2, 4, 12, 0),
-        data={"key": "CILAB-1234"}
+        data={"key": "CILAB-1234"},
     )
 
     # Create jobs that reference this ticket
     job1 = kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-1",
-        valid_from=datetime(2026, 2, 4, 10, 0),
-        data={"status": "failure"}
+        entity_type="dci_job", entity_id="job-1", valid_from=datetime(2026, 2, 4, 10, 0), data={"status": "failure"}
     )
 
     job2 = kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-2",
-        valid_from=datetime(2026, 2, 4, 10, 30),
-        data={"status": "failure"}
+        entity_type="dci_job", entity_id="job-2", valid_from=datetime(2026, 2, 4, 10, 30), data={"status": "failure"}
     )
 
     # Create relationships from jobs to ticket
     kg.insert_relationship(
-        rel_type="job_references_ticket",
-        source_id=job1.id,
-        target_id=ticket.id,
-        valid_from=datetime(2026, 2, 4, 12, 0)
+        rel_type="job_references_ticket", source_id=job1.id, target_id=ticket.id, valid_from=datetime(2026, 2, 4, 12, 0)
     )
 
     kg.insert_relationship(
-        rel_type="job_references_ticket",
-        source_id=job2.id,
-        target_id=ticket.id,
-        valid_from=datetime(2026, 2, 4, 12, 0)
+        rel_type="job_references_ticket", source_id=job2.id, target_id=ticket.id, valid_from=datetime(2026, 2, 4, 12, 0)
     )
 
     # Get jobs that reference this ticket (incoming)
@@ -329,56 +302,36 @@ def test_get_related_entities_incoming(kg):
 def test_get_related_entities_filtered_by_type(kg):
     """Test filtering related entities by relationship type"""
     job = kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-xyz",
-        valid_from=datetime(2026, 2, 4, 10, 0),
-        data={"status": "failure"}
+        entity_type="dci_job", entity_id="job-xyz", valid_from=datetime(2026, 2, 4, 10, 0), data={"status": "failure"}
     )
 
     comp = kg.insert_entity(
-        entity_type="component",
-        entity_id="comp-x",
-        valid_from=datetime(2026, 2, 4, 0, 0),
-        data={"type": "ocp"}
+        entity_type="component", entity_id="comp-x", valid_from=datetime(2026, 2, 4, 0, 0), data={"type": "ocp"}
     )
 
     ticket = kg.insert_entity(
         entity_type="jira_ticket",
         entity_id="ticket-x",
         valid_from=datetime(2026, 2, 4, 12, 0),
-        data={"key": "CILAB-5678"}
+        data={"key": "CILAB-5678"},
     )
 
     # Create different relationship types
     kg.insert_relationship(
-        rel_type="job_uses_component",
-        source_id=job.id,
-        target_id=comp.id,
-        valid_from=datetime(2026, 2, 4, 10, 0)
+        rel_type="job_uses_component", source_id=job.id, target_id=comp.id, valid_from=datetime(2026, 2, 4, 10, 0)
     )
 
     kg.insert_relationship(
-        rel_type="job_references_ticket",
-        source_id=job.id,
-        target_id=ticket.id,
-        valid_from=datetime(2026, 2, 4, 12, 0)
+        rel_type="job_references_ticket", source_id=job.id, target_id=ticket.id, valid_from=datetime(2026, 2, 4, 12, 0)
     )
 
     # Get only component relationships
-    components = kg.get_related_entities(
-        job.id,
-        rel_type="job_uses_component",
-        direction="outgoing"
-    )
+    components = kg.get_related_entities(job.id, rel_type="job_uses_component", direction="outgoing")
     assert len(components) == 1
     assert components[0][1].id == "comp-x"
 
     # Get only ticket relationships
-    tickets = kg.get_related_entities(
-        job.id,
-        rel_type="job_references_ticket",
-        direction="outgoing"
-    )
+    tickets = kg.get_related_entities(job.id, rel_type="job_references_ticket", direction="outgoing")
     assert len(tickets) == 1
     assert tickets[0][1].id == "ticket-x"
 
@@ -392,32 +345,20 @@ def test_get_stats(kg):
 
     # Add some entities
     job = kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-1",
-        valid_from=datetime(2026, 2, 4, 10, 0),
-        data={"status": "failure"}
+        entity_type="dci_job", entity_id="job-1", valid_from=datetime(2026, 2, 4, 10, 0), data={"status": "failure"}
     )
 
     kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-2",
-        valid_from=datetime(2026, 2, 4, 11, 0),
-        data={"status": "success"}
+        entity_type="dci_job", entity_id="job-2", valid_from=datetime(2026, 2, 4, 11, 0), data={"status": "success"}
     )
 
     comp = kg.insert_entity(
-        entity_type="component",
-        entity_id="comp-1",
-        valid_from=datetime(2026, 2, 4, 0, 0),
-        data={"type": "ocp"}
+        entity_type="component", entity_id="comp-1", valid_from=datetime(2026, 2, 4, 0, 0), data={"type": "ocp"}
     )
 
     # Add relationship
     kg.insert_relationship(
-        rel_type="job_uses_component",
-        source_id=job.id,
-        target_id=comp.id,
-        valid_from=datetime(2026, 2, 4, 10, 0)
+        rel_type="job_uses_component", source_id=job.id, target_id=comp.id, valid_from=datetime(2026, 2, 4, 10, 0)
     )
 
     stats = kg.get_stats()
@@ -435,7 +376,7 @@ def test_entity_to_dict(kg):
         entity_id="job-dict",
         valid_from=datetime(2026, 2, 4, 10, 0),
         tx_from=datetime(2026, 2, 4, 11, 0),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     entity_dict = entity.to_dict()
@@ -449,17 +390,11 @@ def test_entity_to_dict(kg):
 def test_relationship_to_dict(kg):
     """Test relationship serialization to dictionary"""
     job = kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-rel",
-        valid_from=datetime(2026, 2, 4, 10, 0),
-        data={"status": "failure"}
+        entity_type="dci_job", entity_id="job-rel", valid_from=datetime(2026, 2, 4, 10, 0), data={"status": "failure"}
     )
 
     comp = kg.insert_entity(
-        entity_type="component",
-        entity_id="comp-rel",
-        valid_from=datetime(2026, 2, 4, 0, 0),
-        data={"type": "ocp"}
+        entity_type="component", entity_id="comp-rel", valid_from=datetime(2026, 2, 4, 0, 0), data={"type": "ocp"}
     )
 
     rel = kg.insert_relationship(
@@ -467,7 +402,7 @@ def test_relationship_to_dict(kg):
         source_id=job.id,
         target_id=comp.id,
         valid_from=datetime(2026, 2, 4, 10, 0),
-        properties={"build": "ga"}
+        properties={"build": "ga"},
     )
 
     rel_dict = rel.to_dict()
@@ -481,11 +416,7 @@ def test_context_manager(kg):
     """Test that knowledge graph can be used as context manager"""
     # Note: kg fixture already provides a graph, so we create a new one
     with KnowledgeGraph(db_path=":memory:") as graph:
-        entity = graph.insert_entity(
-            entity_type="test",
-            valid_from=datetime.now(),
-            data={"test": "data"}
-        )
+        entity = graph.insert_entity(entity_type="test", valid_from=datetime.now(), data={"test": "data"})
         assert entity is not None
 
     # Connection should be closed after context exit
@@ -495,23 +426,23 @@ def test_context_manager(kg):
 def test_discovery_lag_scenario(kg):
     """Test scenario: identify jobs discovered late"""
     # Job failed at 10:00, but we discovered it at 10:45 (45 min lag)
-    job_late = kg.insert_entity(
+    _job_late = kg.insert_entity(
         entity_type="dci_job",
         entity_id="job-late-discovery",
         valid_from=datetime(2026, 2, 4, 10, 0),
         valid_to=datetime(2026, 2, 4, 10, 15),  # 15 min duration
         tx_from=datetime(2026, 2, 4, 10, 45),  # Discovered 45 min after start
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     # Job failed at 11:00, discovered at 11:05 (5 min lag)
-    job_quick = kg.insert_entity(
+    _job_quick = kg.insert_entity(
         entity_type="dci_job",
         entity_id="job-quick-discovery",
         valid_from=datetime(2026, 2, 4, 11, 0),
         valid_to=datetime(2026, 2, 4, 11, 10),
         tx_from=datetime(2026, 2, 4, 11, 5),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     # Query all jobs

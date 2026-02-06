@@ -3,26 +3,28 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class MonitorState(BaseModel):
     """State for a single monitor"""
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    last_check: Optional[datetime] = None
+    last_check: datetime | None = None
     last_results: dict[str, Any] = Field(default_factory=dict)
     seen_items: set[str] = Field(default_factory=set)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_serializer('seen_items')
+    @field_serializer("seen_items")
     def serialize_seen_items(self, value: set[str]) -> list[str]:
         """Serialize set to list for JSON compatibility"""
         return list(value)
 
-    @field_serializer('last_check')
-    def serialize_last_check(self, value: Optional[datetime]) -> Optional[str]:
+    @field_serializer("last_check")
+    def serialize_last_check(self, value: datetime | None) -> str | None:
         """Serialize datetime to ISO format string"""
         return value.isoformat() if value else None
 
@@ -67,12 +69,7 @@ class StateManager:
         with open(state_file, "w") as f:
             json.dump(state.model_dump(), f, indent=2, default=str)
 
-    def update_monitor(
-        self,
-        monitor_name: str,
-        results: dict[str, Any],
-        seen_items: set[str] = None
-    ):
+    def update_monitor(self, monitor_name: str, results: dict[str, Any], seen_items: set[str] = None):
         """Update monitor state with new results"""
         state = self.get_monitor_state(monitor_name)
         state.last_check = datetime.now()
@@ -88,24 +85,15 @@ class StateManager:
         state = self.get_monitor_state(monitor_name)
         return current_items - state.seen_items
 
-    def cache_query_result(
-        self,
-        query_key: str,
-        result: Any,
-        ttl_seconds: int = 300
-    ):
+    def cache_query_result(self, query_key: str, result: Any, ttl_seconds: int = 300):
         """Cache a query result with TTL"""
         cache_file = self.cache_dir / f"{self._sanitize_key(query_key)}.json"
-        cache_data = {
-            "result": result,
-            "timestamp": datetime.now().isoformat(),
-            "ttl_seconds": ttl_seconds
-        }
+        cache_data = {"result": result, "timestamp": datetime.now().isoformat(), "ttl_seconds": ttl_seconds}
 
         with open(cache_file, "w") as f:
             json.dump(cache_data, f, indent=2, default=str)
 
-    def get_cached_query(self, query_key: str) -> Optional[Any]:
+    def get_cached_query(self, query_key: str) -> Any | None:
         """Get cached query result if not expired"""
         cache_file = self.cache_dir / f"{self._sanitize_key(query_key)}.json"
 
@@ -131,12 +119,9 @@ class StateManager:
         context_file.parent.mkdir(exist_ok=True)
 
         with open(context_file, "w") as f:
-            json.dump({
-                "context": context,
-                "timestamp": datetime.now().isoformat()
-            }, f, indent=2, default=str)
+            json.dump({"context": context, "timestamp": datetime.now().isoformat()}, f, indent=2, default=str)
 
-    def load_conversation_context(self, context_name: str) -> Optional[dict]:
+    def load_conversation_context(self, context_name: str) -> dict | None:
         """Load saved conversation context"""
         context_file = self.state_dir / "context" / f"{context_name}.json"
 
@@ -168,10 +153,7 @@ class StateManager:
         history_file = history_dir / f"{monitor_name}.jsonl"
 
         with open(history_file, "a") as f:
-            json.dump({
-                "timestamp": datetime.now().isoformat(),
-                "result": result
-            }, f, default=str)
+            json.dump({"timestamp": datetime.now().isoformat(), "result": result}, f, default=str)
             f.write("\n")
 
     @staticmethod
@@ -183,7 +165,9 @@ class StateManager:
         """Get statistics about stored state"""
         monitor_count = len(list(self.state_dir.glob("*.json")))
         cache_count = len(list(self.cache_dir.glob("*.json")))
-        history_count = len(list((self.state_dir / "history").glob("*.jsonl"))) if (self.state_dir / "history").exists() else 0
+        history_count = (
+            len(list((self.state_dir / "history").glob("*.jsonl"))) if (self.state_dir / "history").exists() else 0
+        )
 
         return {
             "state_dir": str(self.state_dir),

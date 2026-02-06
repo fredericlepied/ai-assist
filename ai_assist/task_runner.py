@@ -2,16 +2,18 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
-from .tasks import TaskDefinition
+from typing import Any
+
 from .agent import AiAssistAgent
+from .conditions import ActionExecutor, ConditionEvaluator
 from .state import StateManager
-from .conditions import ConditionEvaluator, ActionExecutor
+from .tasks import TaskDefinition
 
 
 @dataclass
 class TaskResult:
     """Result from executing a task"""
+
     task_name: str
     success: bool
     output: str
@@ -22,12 +24,7 @@ class TaskResult:
 class TaskRunner:
     """Execute a user-defined task and track its state"""
 
-    def __init__(
-        self,
-        task_def: TaskDefinition,
-        agent: AiAssistAgent,
-        state_manager: StateManager
-    ):
+    def __init__(self, task_def: TaskDefinition, agent: AiAssistAgent, state_manager: StateManager):
         self.task_def = task_def
         self.agent = agent
         self.state_manager = state_manager
@@ -36,10 +33,7 @@ class TaskRunner:
     def _get_state_key(self) -> str:
         """Generate state key for this task"""
         # Sanitize task name for use in filenames
-        sanitized = "".join(
-            c if c.isalnum() or c in "-_" else "_"
-            for c in self.task_def.name
-        )
+        sanitized = "".join(c if c.isalnum() or c in "-_" else "_" for c in self.task_def.name)
         return f"task_{sanitized}"
 
     async def run(self) -> TaskResult:
@@ -72,7 +66,7 @@ class TaskRunner:
                     "last_success": True,
                     "last_output_length": len(output),
                     "last_metadata": metadata,
-                }
+                },
             )
 
             self.state_manager.append_history(
@@ -82,15 +76,11 @@ class TaskRunner:
                     "success": True,
                     "timestamp": timestamp.isoformat(),
                     "metadata": metadata,
-                }
+                },
             )
 
             return TaskResult(
-                task_name=self.task_def.name,
-                success=True,
-                output=output,
-                timestamp=timestamp,
-                metadata=metadata
+                task_name=self.task_def.name, success=True, output=output, timestamp=timestamp, metadata=metadata
             )
 
         except Exception as e:
@@ -101,7 +91,7 @@ class TaskRunner:
                     "task_name": self.task_def.name,
                     "last_success": False,
                     "last_error": error_msg,
-                }
+                },
             )
 
             self.state_manager.append_history(
@@ -111,18 +101,14 @@ class TaskRunner:
                     "success": False,
                     "error": error_msg,
                     "timestamp": timestamp.isoformat(),
-                }
+                },
             )
 
             return TaskResult(
-                task_name=self.task_def.name,
-                success=False,
-                output=error_msg,
-                timestamp=timestamp,
-                metadata={}
+                task_name=self.task_def.name, success=False, output=error_msg, timestamp=timestamp, metadata={}
             )
 
-    def get_last_run(self) -> Optional[datetime]:
+    def get_last_run(self) -> datetime | None:
         """Get timestamp of last successful run"""
         state = self.state_manager.get_monitor_state(self.state_key)
         return state.last_check

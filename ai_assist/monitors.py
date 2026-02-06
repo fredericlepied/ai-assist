@@ -3,15 +3,15 @@
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+
 from .agent import AiAssistAgent
-from .state import StateManager
 from .knowledge_graph import KnowledgeGraph
-from .tasks import TaskLoader
-from .task_runner import TaskRunner
-from .task_watcher import TaskFileWatcher
 from .monitor_runner import MonitorRunner
 from .schedule_loader import ScheduleLoader
+from .state import StateManager
+from .task_runner import TaskRunner
+from .task_watcher import TaskFileWatcher
+from .tasks import TaskLoader
 
 
 class MonitoringScheduler:
@@ -22,8 +22,8 @@ class MonitoringScheduler:
         agent: AiAssistAgent,
         config,
         state_manager: StateManager,
-        knowledge_graph: Optional[KnowledgeGraph] = None,
-        schedule_file: Optional[Path] = None
+        knowledge_graph: KnowledgeGraph | None = None,
+        schedule_file: Path | None = None,
     ):
         self.agent = agent
         self.config = config
@@ -58,12 +58,7 @@ class MonitoringScheduler:
             runners = []
             for monitor_def in monitor_defs:
                 if monitor_def.enabled:
-                    runner = MonitorRunner(
-                        monitor_def,
-                        self.agent,
-                        self.state_manager,
-                        self.knowledge_graph
-                    )
+                    runner = MonitorRunner(monitor_def, self.agent, self.state_manager, self.knowledge_graph)
                     runners.append(runner)
                     print(f"Loaded monitor: {monitor_def.name} (interval: {monitor_def.interval})")
                 else:
@@ -96,12 +91,11 @@ class MonitoringScheduler:
             print(f"Error loading tasks from {self.schedule_file}: {e}")
             return []
 
-
     async def reload_schedules(self):
         """Reload all schedules from JSON file (hot reload)"""
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("Reloading schedules...")
-        print("="*60)
+        print("=" * 60)
 
         try:
             # Load new schedules
@@ -128,12 +122,7 @@ class MonitoringScheduler:
             for monitor in self.monitors:
                 interval = 0 if monitor.monitor_def.is_time_based else monitor.monitor_def.interval_seconds
                 task_handle = asyncio.create_task(
-                    self._schedule_task(
-                        monitor.monitor_def.name,
-                        monitor.run,
-                        interval,
-                        task_def=monitor.monitor_def
-                    )
+                    self._schedule_task(monitor.monitor_def.name, monitor.run, interval, task_def=monitor.monitor_def)
                 )
                 self.monitor_handles.append(task_handle)
 
@@ -142,22 +131,18 @@ class MonitoringScheduler:
                 interval = 0 if task_runner.task_def.is_time_based else task_runner.task_def.interval_seconds
                 task_handle = asyncio.create_task(
                     self._schedule_task(
-                        task_runner.task_def.name,
-                        task_runner.run,
-                        interval,
-                        task_def=task_runner.task_def
+                        task_runner.task_def.name, task_runner.run, interval, task_def=task_runner.task_def
                     )
                 )
                 self.user_task_handles.append(task_handle)
 
             print(f"✓ Reloaded {len(new_monitors)} monitor(s) and {len(new_tasks)} task(s)")
-            print("="*60 + "\n")
+            print("=" * 60 + "\n")
 
         except Exception as e:
             print(f"✗ Failed to reload schedules: {e}")
             print("Keeping existing schedules")
-            print("="*60 + "\n")
-
+            print("=" * 60 + "\n")
 
     async def start(self):
         """Start the monitoring loop"""
@@ -174,12 +159,7 @@ class MonitoringScheduler:
         for monitor in self.monitors:
             interval = 0 if monitor.monitor_def.is_time_based else monitor.monitor_def.interval_seconds
             task_handle = asyncio.create_task(
-                self._schedule_task(
-                    monitor.monitor_def.name,
-                    monitor.run,
-                    interval,
-                    task_def=monitor.monitor_def
-                )
+                self._schedule_task(monitor.monitor_def.name, monitor.run, interval, task_def=monitor.monitor_def)
             )
             tasks.append(task_handle)
             self.monitor_handles.append(task_handle)
@@ -190,12 +170,7 @@ class MonitoringScheduler:
         for task_runner in self.user_tasks:
             interval = 0 if task_runner.task_def.is_time_based else task_runner.task_def.interval_seconds
             task_handle = asyncio.create_task(
-                self._schedule_task(
-                    task_runner.task_def.name,
-                    task_runner.run,
-                    interval,
-                    task_def=task_runner.task_def
-                )
+                self._schedule_task(task_runner.task_def.name, task_runner.run, interval, task_def=task_runner.task_def)
             )
             tasks.append(task_handle)
             self.user_task_handles.append(task_handle)
@@ -229,6 +204,7 @@ class MonitoringScheduler:
                 results = await task_func()
 
                 from .task_runner import TaskResult
+
                 if isinstance(results, TaskResult):
                     if results.success:
                         print(f"{name}: ✓ Completed")

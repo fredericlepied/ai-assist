@@ -18,7 +18,7 @@ class AiAssistCompleter(Completer):
             "/search",
             "/exit",
             "/quit",
-            "/help"
+            "/help",
         ]
 
     def get_completions(self, document, complete_event):
@@ -45,7 +45,7 @@ class AiAssistCompleter(Completer):
                                 full_command,
                                 start_position=-len(word),
                                 display=full_command,
-                                display_meta=prompt.description[:60] if prompt.description else "MCP prompt"
+                                display_meta=prompt.description[:60] if prompt.description else "MCP prompt",
                             )
 
             # Completing server names: /server
@@ -58,7 +58,7 @@ class AiAssistCompleter(Completer):
                             server_cmd,
                             start_position=-len(word),
                             display=server_cmd,
-                            display_meta=f"MCP server ({len(self.agent.available_prompts[server_name])} prompts)"
+                            display_meta=f"MCP server ({len(self.agent.available_prompts[server_name])} prompts)",
                         )
 
             # Standard command completion
@@ -66,10 +66,7 @@ class AiAssistCompleter(Completer):
                 if cmd.startswith(word.lower()):
                     # Yield the remainder of the command
                     yield Completion(
-                        cmd,
-                        start_position=-len(word),
-                        display=cmd,
-                        display_meta=self._get_command_description(cmd)
+                        cmd, start_position=-len(word), display=cmd, display_meta=self._get_command_description(cmd)
                     )
 
     def _get_command_description(self, command: str) -> str:
@@ -84,6 +81,6 @@ class AiAssistCompleter(Completer):
             "/search": "Search conversation history",
             "/exit": "Exit interactive mode",
             "/quit": "Exit interactive mode",
-            "/help": "Show help message"
+            "/help": "Show help message",
         }
         return descriptions.get(command, "")

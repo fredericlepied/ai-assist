@@ -2,9 +2,10 @@
 
 import json
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
-from .state import StateManager
+from typing import TYPE_CHECKING
+
 from .knowledge_graph import KnowledgeGraph
+from .state import StateManager
 from .tasks import MonitorDefinition
 
 if TYPE_CHECKING:
@@ -19,7 +20,7 @@ class MonitorRunner:
         monitor_def: MonitorDefinition,
         agent: "AiAssistAgent",
         state_manager: StateManager,
-        knowledge_graph: Optional[KnowledgeGraph] = None
+        knowledge_graph: KnowledgeGraph | None = None,
     ):
         self.monitor_def = monitor_def
         self.agent = agent
@@ -47,17 +48,19 @@ class MonitorRunner:
 
             self.state_manager.cache_query_result(cache_key, result_data, ttl_seconds=300)
 
-            self.state_manager.append_history(f"monitor_{self.monitor_def.name}", {
-                "check_time": datetime.now().isoformat()
-            })
+            self.state_manager.append_history(
+                f"monitor_{self.monitor_def.name}", {"check_time": datetime.now().isoformat()}
+            )
 
-            if self.knowledge_graph and self.monitor_def.knowledge_graph and \
-               self.monitor_def.knowledge_graph.get("enabled"):
+            if (
+                self.knowledge_graph
+                and self.monitor_def.knowledge_graph
+                and self.monitor_def.knowledge_graph.get("enabled")
+            ):
                 await self._store_in_kg()
 
             self.state_manager.update_monitor(
-                f"monitor_{self.monitor_def.name}",
-                {"last_run": datetime.now().isoformat()}
+                f"monitor_{self.monitor_def.name}", {"last_run": datetime.now().isoformat()}
             )
 
             return [result_data]
@@ -156,8 +159,11 @@ class MonitorRunner:
                 "summary": entity_data.get("fields", {}).get("summary"),
                 "status": entity_data.get("fields", {}).get("status", {}).get("name"),
                 "priority": entity_data.get("fields", {}).get("priority", {}).get("name"),
-                "assignee": entity_data.get("fields", {}).get("assignee", {}).get("displayName")
-                           if entity_data.get("fields", {}).get("assignee") else None,
+                "assignee": (
+                    entity_data.get("fields", {}).get("assignee", {}).get("displayName")
+                    if entity_data.get("fields", {}).get("assignee")
+                    else None
+                ),
             }
         elif entity_type == "dci_job":
             data = {
@@ -181,7 +187,7 @@ class MonitorRunner:
                                 "type": component.get("type"),
                                 "version": component.get("version"),
                                 "name": component.get("name"),
-                            }
+                            },
                         )
                     except Exception:
                         pass
@@ -192,15 +198,11 @@ class MonitorRunner:
                         target_id=comp_id,
                         valid_from=valid_from,
                         tx_from=tx_time,
-                        properties={}
+                        properties={},
                     )
         else:
             data = entity_data
 
         self.knowledge_graph.insert_entity(
-            entity_type=entity_type,
-            entity_id=entity_id,
-            valid_from=valid_from,
-            tx_from=tx_time,
-            data=data
+            entity_type=entity_type, entity_id=entity_id, valid_from=valid_from, tx_from=tx_time, data=data
         )

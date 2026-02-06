@@ -1,9 +1,11 @@
 """Tests for internal schedule management tools"""
 
-import pytest
 import json
 import tempfile
 from pathlib import Path
+
+import pytest
+
 from ai_assist.schedule_tools import ScheduleTools
 
 
@@ -57,8 +59,8 @@ class TestCreateMonitor:
                 "prompt": "Check for failures",
                 "interval": "5m",
                 "description": "Test monitor",
-                "enabled": True
-            }
+                "enabled": True,
+            },
         )
 
         assert "created successfully" in result
@@ -77,12 +79,7 @@ class TestCreateMonitor:
 
         result = await schedule_tools.execute_tool(
             "create_monitor",
-            {
-                "name": "KG Monitor",
-                "prompt": "Monitor with KG",
-                "interval": "10m",
-                "knowledge_graph": kg_config
-            }
+            {"name": "KG Monitor", "prompt": "Monitor with KG", "interval": "10m", "knowledge_graph": kg_config},
         )
 
         assert "created successfully" in result
@@ -93,14 +90,10 @@ class TestCreateMonitor:
     @pytest.mark.asyncio
     async def test_create_monitor_duplicate_name(self, schedule_tools):
         """Test that duplicate monitor names are rejected"""
-        await schedule_tools.execute_tool(
-            "create_monitor",
-            {"name": "Duplicate", "prompt": "Test", "interval": "5m"}
-        )
+        await schedule_tools.execute_tool("create_monitor", {"name": "Duplicate", "prompt": "Test", "interval": "5m"})
 
         result = await schedule_tools.execute_tool(
-            "create_monitor",
-            {"name": "Duplicate", "prompt": "Test2", "interval": "10m"}
+            "create_monitor", {"name": "Duplicate", "prompt": "Test2", "interval": "10m"}
         )
 
         assert "Error" in result
@@ -110,8 +103,7 @@ class TestCreateMonitor:
     async def test_create_monitor_invalid_interval(self, schedule_tools):
         """Test that invalid interval format is rejected"""
         result = await schedule_tools.execute_tool(
-            "create_monitor",
-            {"name": "Invalid", "prompt": "Test", "interval": "invalid"}
+            "create_monitor", {"name": "Invalid", "prompt": "Test", "interval": "invalid"}
         )
 
         assert "Error" in result
@@ -130,8 +122,8 @@ class TestCreateTask:
                 "name": "Daily Report",
                 "prompt": "Generate daily report",
                 "interval": "morning on weekdays",
-                "description": "Daily summary"
-            }
+                "description": "Daily summary",
+            },
         )
 
         assert "created successfully" in result
@@ -147,12 +139,7 @@ class TestCreateTask:
     async def test_create_task_with_time_schedule(self, schedule_tools):
         """Test creating a task with time-based schedule"""
         result = await schedule_tools.execute_tool(
-            "create_task",
-            {
-                "name": "Time Task",
-                "prompt": "Run at specific time",
-                "interval": "9:00 on monday,friday"
-            }
+            "create_task", {"name": "Time Task", "prompt": "Run at specific time", "interval": "9:00 on monday,friday"}
         )
 
         assert "created successfully" in result
@@ -160,14 +147,10 @@ class TestCreateTask:
     @pytest.mark.asyncio
     async def test_create_task_duplicate_name(self, schedule_tools):
         """Test that duplicate task names are rejected"""
-        await schedule_tools.execute_tool(
-            "create_task",
-            {"name": "Duplicate", "prompt": "Test", "interval": "1h"}
-        )
+        await schedule_tools.execute_tool("create_task", {"name": "Duplicate", "prompt": "Test", "interval": "1h"})
 
         result = await schedule_tools.execute_tool(
-            "create_task",
-            {"name": "Duplicate", "prompt": "Test2", "interval": "2h"}
+            "create_task", {"name": "Duplicate", "prompt": "Test2", "interval": "2h"}
         )
 
         assert "Error" in result
@@ -176,14 +159,10 @@ class TestCreateTask:
     @pytest.mark.asyncio
     async def test_create_task_conflicts_with_monitor(self, schedule_tools):
         """Test that task name conflicting with monitor is rejected"""
-        await schedule_tools.execute_tool(
-            "create_monitor",
-            {"name": "Shared Name", "prompt": "Test", "interval": "5m"}
-        )
+        await schedule_tools.execute_tool("create_monitor", {"name": "Shared Name", "prompt": "Test", "interval": "5m"})
 
         result = await schedule_tools.execute_tool(
-            "create_task",
-            {"name": "Shared Name", "prompt": "Test", "interval": "1h"}
+            "create_task", {"name": "Shared Name", "prompt": "Test", "interval": "1h"}
         )
 
         assert "Error" in result
@@ -202,14 +181,8 @@ class TestListSchedules:
     @pytest.mark.asyncio
     async def test_list_schedules_with_data(self, schedule_tools):
         """Test listing schedules with monitors and tasks"""
-        await schedule_tools.execute_tool(
-            "create_monitor",
-            {"name": "Monitor 1", "prompt": "Test", "interval": "5m"}
-        )
-        await schedule_tools.execute_tool(
-            "create_task",
-            {"name": "Task 1", "prompt": "Test", "interval": "1h"}
-        )
+        await schedule_tools.execute_tool("create_monitor", {"name": "Monitor 1", "prompt": "Test", "interval": "5m"})
+        await schedule_tools.execute_tool("create_task", {"name": "Task 1", "prompt": "Test", "interval": "1h"})
 
         result = await schedule_tools.execute_tool("list_schedules", {})
 
@@ -221,19 +194,10 @@ class TestListSchedules:
     @pytest.mark.asyncio
     async def test_list_schedules_filter_monitors(self, schedule_tools):
         """Test listing only monitors"""
-        await schedule_tools.execute_tool(
-            "create_monitor",
-            {"name": "Monitor 1", "prompt": "Test", "interval": "5m"}
-        )
-        await schedule_tools.execute_tool(
-            "create_task",
-            {"name": "Task 1", "prompt": "Test", "interval": "1h"}
-        )
+        await schedule_tools.execute_tool("create_monitor", {"name": "Monitor 1", "prompt": "Test", "interval": "5m"})
+        await schedule_tools.execute_tool("create_task", {"name": "Task 1", "prompt": "Test", "interval": "1h"})
 
-        result = await schedule_tools.execute_tool(
-            "list_schedules",
-            {"filter_type": "monitor"}
-        )
+        result = await schedule_tools.execute_tool("list_schedules", {"filter_type": "monitor"})
 
         assert "Monitor 1" in result
         assert "Task 1" not in result
@@ -241,19 +205,10 @@ class TestListSchedules:
     @pytest.mark.asyncio
     async def test_list_schedules_filter_tasks(self, schedule_tools):
         """Test listing only tasks"""
-        await schedule_tools.execute_tool(
-            "create_monitor",
-            {"name": "Monitor 1", "prompt": "Test", "interval": "5m"}
-        )
-        await schedule_tools.execute_tool(
-            "create_task",
-            {"name": "Task 1", "prompt": "Test", "interval": "1h"}
-        )
+        await schedule_tools.execute_tool("create_monitor", {"name": "Monitor 1", "prompt": "Test", "interval": "5m"})
+        await schedule_tools.execute_tool("create_task", {"name": "Task 1", "prompt": "Test", "interval": "1h"})
 
-        result = await schedule_tools.execute_tool(
-            "list_schedules",
-            {"filter_type": "task"}
-        )
+        result = await schedule_tools.execute_tool("list_schedules", {"filter_type": "task"})
 
         assert "Monitor 1" not in result
         assert "Task 1" in result
@@ -265,14 +220,10 @@ class TestUpdateSchedule:
     @pytest.mark.asyncio
     async def test_update_schedule_interval(self, schedule_tools, temp_schedules):
         """Test updating a schedule's interval"""
-        await schedule_tools.execute_tool(
-            "create_task",
-            {"name": "Update Test", "prompt": "Test", "interval": "5m"}
-        )
+        await schedule_tools.execute_tool("create_task", {"name": "Update Test", "prompt": "Test", "interval": "5m"})
 
         result = await schedule_tools.execute_tool(
-            "update_schedule",
-            {"name": "Update Test", "schedule_type": "task", "interval": "10m"}
+            "update_schedule", {"name": "Update Test", "schedule_type": "task", "interval": "10m"}
         )
 
         assert "updated successfully" in result
@@ -284,17 +235,11 @@ class TestUpdateSchedule:
     async def test_update_schedule_prompt(self, schedule_tools, temp_schedules):
         """Test updating a schedule's prompt"""
         await schedule_tools.execute_tool(
-            "create_monitor",
-            {"name": "Prompt Test", "prompt": "Old prompt", "interval": "5m"}
+            "create_monitor", {"name": "Prompt Test", "prompt": "Old prompt", "interval": "5m"}
         )
 
         result = await schedule_tools.execute_tool(
-            "update_schedule",
-            {
-                "name": "Prompt Test",
-                "schedule_type": "monitor",
-                "prompt": "New prompt"
-            }
+            "update_schedule", {"name": "Prompt Test", "schedule_type": "monitor", "prompt": "New prompt"}
         )
 
         assert "updated successfully" in result
@@ -306,8 +251,7 @@ class TestUpdateSchedule:
     async def test_update_schedule_not_found(self, schedule_tools):
         """Test updating a non-existent schedule"""
         result = await schedule_tools.execute_tool(
-            "update_schedule",
-            {"name": "Nonexistent", "schedule_type": "task", "interval": "1h"}
+            "update_schedule", {"name": "Nonexistent", "schedule_type": "task", "interval": "1h"}
         )
 
         assert "Error" in result
@@ -316,18 +260,10 @@ class TestUpdateSchedule:
     @pytest.mark.asyncio
     async def test_update_schedule_invalid_interval(self, schedule_tools):
         """Test updating with invalid interval"""
-        await schedule_tools.execute_tool(
-            "create_task",
-            {"name": "Invalid Update", "prompt": "Test", "interval": "5m"}
-        )
+        await schedule_tools.execute_tool("create_task", {"name": "Invalid Update", "prompt": "Test", "interval": "5m"})
 
         result = await schedule_tools.execute_tool(
-            "update_schedule",
-            {
-                "name": "Invalid Update",
-                "schedule_type": "task",
-                "interval": "invalid"
-            }
+            "update_schedule", {"name": "Invalid Update", "schedule_type": "task", "interval": "invalid"}
         )
 
         assert "Error" in result
@@ -339,15 +275,9 @@ class TestDeleteSchedule:
     @pytest.mark.asyncio
     async def test_delete_schedule_success(self, schedule_tools, temp_schedules):
         """Test deleting a schedule successfully"""
-        await schedule_tools.execute_tool(
-            "create_task",
-            {"name": "Delete Me", "prompt": "Test", "interval": "5m"}
-        )
+        await schedule_tools.execute_tool("create_task", {"name": "Delete Me", "prompt": "Test", "interval": "5m"})
 
-        result = await schedule_tools.execute_tool(
-            "delete_schedule",
-            {"name": "Delete Me", "schedule_type": "task"}
-        )
+        result = await schedule_tools.execute_tool("delete_schedule", {"name": "Delete Me", "schedule_type": "task"})
 
         assert "deleted successfully" in result
 
@@ -357,10 +287,7 @@ class TestDeleteSchedule:
     @pytest.mark.asyncio
     async def test_delete_schedule_not_found(self, schedule_tools):
         """Test deleting a non-existent schedule"""
-        result = await schedule_tools.execute_tool(
-            "delete_schedule",
-            {"name": "Nonexistent", "schedule_type": "task"}
-        )
+        result = await schedule_tools.execute_tool("delete_schedule", {"name": "Nonexistent", "schedule_type": "task"})
 
         assert "Error" in result
         assert "not found" in result
@@ -373,13 +300,11 @@ class TestEnableSchedule:
     async def test_enable_schedule(self, schedule_tools, temp_schedules):
         """Test enabling a disabled schedule"""
         await schedule_tools.execute_tool(
-            "create_task",
-            {"name": "Enable Test", "prompt": "Test", "interval": "5m", "enabled": False}
+            "create_task", {"name": "Enable Test", "prompt": "Test", "interval": "5m", "enabled": False}
         )
 
         result = await schedule_tools.execute_tool(
-            "enable_schedule",
-            {"name": "Enable Test", "schedule_type": "task", "enabled": True}
+            "enable_schedule", {"name": "Enable Test", "schedule_type": "task", "enabled": True}
         )
 
         assert "enabled successfully" in result
@@ -391,13 +316,11 @@ class TestEnableSchedule:
     async def test_disable_schedule(self, schedule_tools, temp_schedules):
         """Test disabling an enabled schedule"""
         await schedule_tools.execute_tool(
-            "create_monitor",
-            {"name": "Disable Test", "prompt": "Test", "interval": "5m"}
+            "create_monitor", {"name": "Disable Test", "prompt": "Test", "interval": "5m"}
         )
 
         result = await schedule_tools.execute_tool(
-            "enable_schedule",
-            {"name": "Disable Test", "schedule_type": "monitor", "enabled": False}
+            "enable_schedule", {"name": "Disable Test", "schedule_type": "monitor", "enabled": False}
         )
 
         assert "disabled successfully" in result
@@ -414,17 +337,11 @@ class TestGetScheduleStatus:
         """Test getting schedule status"""
         await schedule_tools.execute_tool(
             "create_task",
-            {
-                "name": "Status Test",
-                "prompt": "Test prompt",
-                "interval": "5m",
-                "description": "Test description"
-            }
+            {"name": "Status Test", "prompt": "Test prompt", "interval": "5m", "description": "Test description"},
         )
 
         result = await schedule_tools.execute_tool(
-            "get_schedule_status",
-            {"name": "Status Test", "schedule_type": "task"}
+            "get_schedule_status", {"name": "Status Test", "schedule_type": "task"}
         )
 
         assert "Status Test" in result
@@ -437,8 +354,7 @@ class TestGetScheduleStatus:
     async def test_get_schedule_status_not_found(self, schedule_tools):
         """Test getting status of non-existent schedule"""
         result = await schedule_tools.execute_tool(
-            "get_schedule_status",
-            {"name": "Nonexistent", "schedule_type": "task"}
+            "get_schedule_status", {"name": "Nonexistent", "schedule_type": "task"}
         )
 
         assert "Error" in result
@@ -453,10 +369,7 @@ class TestJSONPersistence:
         """Test that schedules persist when creating new ScheduleTools instance"""
         # Create schedules with first instance
         tools1 = ScheduleTools(schedules_file=temp_schedules)
-        await tools1.execute_tool(
-            "create_monitor",
-            {"name": "Persistent", "prompt": "Test", "interval": "5m"}
-        )
+        await tools1.execute_tool("create_monitor", {"name": "Persistent", "prompt": "Test", "interval": "5m"})
 
         # Create new instance and verify schedules are loaded
         tools2 = ScheduleTools(schedules_file=temp_schedules)
@@ -486,10 +399,7 @@ class TestJSONPersistence:
         tools = ScheduleTools(schedules_file=temp_schedules)
 
         # Create a schedule
-        await tools.execute_tool(
-            "create_task",
-            {"name": "Atomic", "prompt": "Test", "interval": "5m"}
-        )
+        await tools.execute_tool("create_task", {"name": "Atomic", "prompt": "Test", "interval": "5m"})
 
         # File should exist and be valid JSON
         assert temp_schedules.exists()

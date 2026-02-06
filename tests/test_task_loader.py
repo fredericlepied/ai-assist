@@ -1,7 +1,9 @@
 """Tests for task definition loading"""
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from ai_assist.tasks import TaskDefinition, TaskLoader
 
 
@@ -204,11 +206,7 @@ def test_load_from_file_not_exists():
 def test_task_definition_validation():
     """Test task definition validation"""
     # Valid task
-    task = TaskDefinition(
-        name="Valid Task",
-        prompt="Test prompt",
-        interval="5m"
-    )
+    task = TaskDefinition(name="Valid Task", prompt="Test prompt", interval="5m")
     task.validate()  # Should not raise
 
     # Invalid: no name

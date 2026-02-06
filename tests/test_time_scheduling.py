@@ -1,7 +1,10 @@
 """Tests for time-based task scheduling"""
 
+from datetime import datetime, timedelta
+from datetime import time as dt_time
+
 import pytest
-from datetime import datetime, time as dt_time, timedelta
+
 from ai_assist.tasks import TaskDefinition, TaskLoader
 
 
@@ -128,17 +131,9 @@ def test_calculate_next_run_weekend_only():
 
 def test_task_definition_is_time_based():
     """Test detecting time-based schedules"""
-    time_task = TaskDefinition(
-        name="Morning Task",
-        prompt="Check status",
-        interval="morning on weekdays"
-    )
+    time_task = TaskDefinition(name="Morning Task", prompt="Check status", interval="morning on weekdays")
 
-    interval_task = TaskDefinition(
-        name="Interval Task",
-        prompt="Check status",
-        interval="5m"
-    )
+    interval_task = TaskDefinition(name="Interval Task", prompt="Check status", interval="5m")
 
     assert time_task.is_time_based is True
     assert interval_task.is_time_based is False
@@ -147,20 +142,12 @@ def test_task_definition_is_time_based():
 def test_task_definition_validates_time_schedule():
     """Test that time-based schedules are validated"""
     # Valid time schedule
-    task = TaskDefinition(
-        name="Test",
-        prompt="Test",
-        interval="morning on weekdays"
-    )
+    task = TaskDefinition(name="Test", prompt="Test", interval="morning on weekdays")
     task.validate()  # Should not raise
 
     # Invalid time schedule
     with pytest.raises(ValueError, match="Invalid interval"):
-        task = TaskDefinition(
-            name="Test",
-            prompt="Test",
-            interval="invalid on weekdays"
-        )
+        task = TaskDefinition(name="Test", prompt="Test", interval="invalid on weekdays")
         task.validate()
 
 

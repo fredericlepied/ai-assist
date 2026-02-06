@@ -1,11 +1,13 @@
 """Tests for introspection tools"""
 
-import pytest
 import json
 from datetime import datetime, timedelta
+
+import pytest
+
+from ai_assist.context import ConversationMemory
 from ai_assist.introspection_tools import IntrospectionTools
 from ai_assist.knowledge_graph import KnowledgeGraph
-from ai_assist.context import ConversationMemory
 
 
 @pytest.fixture
@@ -97,12 +99,11 @@ async def test_search_kg_by_type(introspection_tools_with_kg, kg):
             entity_type="jira_ticket",
             entity_id=f"CILAB-{i}",
             valid_from=datetime.now(),
-            data={"key": f"CILAB-{i}", "summary": f"Issue {i}"}
+            data={"key": f"CILAB-{i}", "summary": f"Issue {i}"},
         )
 
     result = await introspection_tools_with_kg.execute_tool(
-        "search_knowledge_graph",
-        {"entity_type": "jira_ticket", "limit": 10}
+        "search_knowledge_graph", {"entity_type": "jira_ticket", "limit": 10}
     )
 
     data = json.loads(result)
@@ -118,7 +119,7 @@ async def test_search_kg_with_time_range(introspection_tools_with_kg, kg):
         entity_type="dci_job",
         entity_id="job-old",
         valid_from=datetime.now() - timedelta(hours=48),
-        data={"status": "success"}
+        data={"status": "success"},
     )
 
     # Add recent entity
@@ -126,12 +127,11 @@ async def test_search_kg_with_time_range(introspection_tools_with_kg, kg):
         entity_type="dci_job",
         entity_id="job-recent",
         valid_from=datetime.now() - timedelta(hours=1),
-        data={"status": "failure"}
+        data={"status": "failure"},
     )
 
     result = await introspection_tools_with_kg.execute_tool(
-        "search_knowledge_graph",
-        {"entity_type": "dci_job", "time_range_hours": 24, "limit": 10}
+        "search_knowledge_graph", {"entity_type": "dci_job", "time_range_hours": 24, "limit": 10}
     )
 
     data = json.loads(result)
@@ -145,15 +145,11 @@ async def test_search_kg_with_limit(introspection_tools_with_kg, kg):
     # Add many entities
     for i in range(20):
         kg.insert_entity(
-            entity_type="jira_ticket",
-            entity_id=f"CILAB-{i}",
-            valid_from=datetime.now(),
-            data={"key": f"CILAB-{i}"}
+            entity_type="jira_ticket", entity_id=f"CILAB-{i}", valid_from=datetime.now(), data={"key": f"CILAB-{i}"}
         )
 
     result = await introspection_tools_with_kg.execute_tool(
-        "search_knowledge_graph",
-        {"entity_type": "jira_ticket", "limit": 5}
+        "search_knowledge_graph", {"entity_type": "jira_ticket", "limit": 5}
     )
 
     data = json.loads(result)
@@ -167,13 +163,10 @@ async def test_get_kg_entity_found(introspection_tools_with_kg, kg):
         entity_type="jira_ticket",
         entity_id="CILAB-123",
         valid_from=datetime.now(),
-        data={"key": "CILAB-123", "summary": "Test issue", "status": "Open"}
+        data={"key": "CILAB-123", "summary": "Test issue", "status": "Open"},
     )
 
-    result = await introspection_tools_with_kg.execute_tool(
-        "get_kg_entity",
-        {"entity_id": "CILAB-123"}
-    )
+    result = await introspection_tools_with_kg.execute_tool("get_kg_entity", {"entity_id": "CILAB-123"})
 
     data = json.loads(result)
     assert data["found"] is True
@@ -184,10 +177,7 @@ async def test_get_kg_entity_found(introspection_tools_with_kg, kg):
 @pytest.mark.asyncio
 async def test_get_kg_entity_not_found(introspection_tools_with_kg, kg):
     """Test getting non-existent entity"""
-    result = await introspection_tools_with_kg.execute_tool(
-        "get_kg_entity",
-        {"entity_id": "CILAB-999"}
-    )
+    result = await introspection_tools_with_kg.execute_tool("get_kg_entity", {"entity_id": "CILAB-999"})
 
     data = json.loads(result)
     assert data["found"] is False
@@ -197,33 +187,19 @@ async def test_get_kg_entity_not_found(introspection_tools_with_kg, kg):
 async def test_get_kg_entity_with_relationships(introspection_tools_with_kg, kg):
     """Test getting entity with its relationships"""
     # Add job
-    kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-1",
-        valid_from=datetime.now(),
-        data={"status": "success"}
-    )
+    kg.insert_entity(entity_type="dci_job", entity_id="job-1", valid_from=datetime.now(), data={"status": "success"})
 
     # Add component
     kg.insert_entity(
-        entity_type="dci_component",
-        entity_id="comp-1",
-        valid_from=datetime.now(),
-        data={"version": "4.19.0"}
+        entity_type="dci_component", entity_id="comp-1", valid_from=datetime.now(), data={"version": "4.19.0"}
     )
 
     # Add relationship
     kg.insert_relationship(
-        rel_type="job_uses_component",
-        source_id="job-1",
-        target_id="comp-1",
-        valid_from=datetime.now()
+        rel_type="job_uses_component", source_id="job-1", target_id="comp-1", valid_from=datetime.now()
     )
 
-    result = await introspection_tools_with_kg.execute_tool(
-        "get_kg_entity",
-        {"entity_id": "job-1"}
-    )
+    result = await introspection_tools_with_kg.execute_tool("get_kg_entity", {"entity_id": "job-1"})
 
     data = json.loads(result)
     assert data["found"] is True
@@ -235,23 +211,10 @@ async def test_get_kg_entity_with_relationships(introspection_tools_with_kg, kg)
 async def test_get_kg_stats(introspection_tools_with_kg, kg):
     """Test getting KG statistics"""
     # Add some entities
-    kg.insert_entity(
-        entity_type="jira_ticket",
-        entity_id="CILAB-1",
-        valid_from=datetime.now(),
-        data={}
-    )
-    kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-1",
-        valid_from=datetime.now(),
-        data={}
-    )
+    kg.insert_entity(entity_type="jira_ticket", entity_id="CILAB-1", valid_from=datetime.now(), data={})
+    kg.insert_entity(entity_type="dci_job", entity_id="job-1", valid_from=datetime.now(), data={})
 
-    result = await introspection_tools_with_kg.execute_tool(
-        "get_kg_stats",
-        {}
-    )
+    result = await introspection_tools_with_kg.execute_tool("get_kg_stats", {})
 
     data = json.loads(result)
     assert data["total_entities"] == 2
@@ -263,19 +226,12 @@ async def test_get_kg_stats(introspection_tools_with_kg, kg):
 async def test_search_conversation_history(introspection_tools_full):
     """Test searching conversation history"""
     # Add some exchanges
+    introspection_tools_full.conversation_memory.add_exchange("What DCI jobs failed?", "Here are 5 failed jobs...")
     introspection_tools_full.conversation_memory.add_exchange(
-        "What DCI jobs failed?",
-        "Here are 5 failed jobs..."
-    )
-    introspection_tools_full.conversation_memory.add_exchange(
-        "Why did they fail?",
-        "The failures were due to network issues..."
+        "Why did they fail?", "The failures were due to network issues..."
     )
 
-    result = await introspection_tools_full.execute_tool(
-        "search_conversation_history",
-        {"search_term": "failed"}
-    )
+    result = await introspection_tools_full.execute_tool("search_conversation_history", {"search_term": "failed"})
 
     data = json.loads(result)
     # Only first exchange contains exact substring "failed"
@@ -286,15 +242,9 @@ async def test_search_conversation_history(introspection_tools_full):
 @pytest.mark.asyncio
 async def test_search_conversation_no_matches(introspection_tools_full):
     """Test conversation search with no matches"""
-    introspection_tools_full.conversation_memory.add_exchange(
-        "Hello",
-        "Hi there!"
-    )
+    introspection_tools_full.conversation_memory.add_exchange("Hello", "Hi there!")
 
-    result = await introspection_tools_full.execute_tool(
-        "search_conversation_history",
-        {"search_term": "kubernetes"}
-    )
+    result = await introspection_tools_full.execute_tool("search_conversation_history", {"search_term": "kubernetes"})
 
     data = json.loads(result)
     assert data["found"] == 0
@@ -303,14 +253,10 @@ async def test_search_conversation_no_matches(introspection_tools_full):
 @pytest.mark.asyncio
 async def test_search_conversation_case_insensitive(introspection_tools_full):
     """Test conversation search is case insensitive"""
-    introspection_tools_full.conversation_memory.add_exchange(
-        "What about OpenShift?",
-        "OpenShift is working fine."
-    )
+    introspection_tools_full.conversation_memory.add_exchange("What about OpenShift?", "OpenShift is working fine.")
 
     result = await introspection_tools_full.execute_tool(
-        "search_conversation_history",
-        {"search_term": "openshift"}  # lowercase
+        "search_conversation_history", {"search_term": "openshift"}  # lowercase
     )
 
     data = json.loads(result)
@@ -322,10 +268,7 @@ async def test_tool_without_kg(conversation_memory):
     """Test KG tools fail gracefully without KG"""
     tools = IntrospectionTools(knowledge_graph=None, conversation_memory=conversation_memory)
 
-    result = await tools.execute_tool(
-        "search_knowledge_graph",
-        {"entity_type": "jira_ticket"}
-    )
+    result = await tools.execute_tool("search_knowledge_graph", {"entity_type": "jira_ticket"})
 
     data = json.loads(result)
     assert "error" in data
@@ -337,10 +280,7 @@ async def test_tool_without_conversation(kg):
     """Test conversation tool fails gracefully without conversation memory"""
     tools = IntrospectionTools(knowledge_graph=kg, conversation_memory=None)
 
-    result = await tools.execute_tool(
-        "search_conversation_history",
-        {"search_term": "test"}
-    )
+    result = await tools.execute_tool("search_conversation_history", {"search_term": "test"})
 
     data = json.loads(result)
     assert "error" in data
@@ -350,10 +290,7 @@ async def test_tool_without_conversation(kg):
 @pytest.mark.asyncio
 async def test_unknown_tool(introspection_tools_full):
     """Test calling unknown tool returns error"""
-    result = await introspection_tools_full.execute_tool(
-        "unknown_tool",
-        {}
-    )
+    result = await introspection_tools_full.execute_tool("unknown_tool", {})
 
     data = json.loads(result)
     assert "error" in data

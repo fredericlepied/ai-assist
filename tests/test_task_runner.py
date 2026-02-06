@@ -1,11 +1,12 @@
 """Tests for task runner"""
 
-import pytest
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
-from ai_assist.tasks import TaskDefinition
-from ai_assist.task_runner import TaskRunner, TaskResult
+
+import pytest
+
 from ai_assist.state import StateManager
+from ai_assist.task_runner import TaskResult, TaskRunner
+from ai_assist.tasks import TaskDefinition
 
 
 @pytest.fixture
@@ -32,10 +33,7 @@ def mock_agent():
 def sample_task():
     """Create sample task definition"""
     return TaskDefinition(
-        name="Test Task",
-        prompt="Find failures in the system",
-        interval="5m",
-        description="A test task"
+        name="Test Task", prompt="Find failures in the system", interval="5m", description="A test task"
     )
 
 
@@ -106,11 +104,7 @@ async def test_task_runner_history(mock_agent, state_manager, sample_task):
 @pytest.mark.asyncio
 async def test_task_runner_state_key_sanitization(mock_agent, state_manager):
     """Test that task names are sanitized for state keys"""
-    task = TaskDefinition(
-        name="Test Task / With Special! Chars",
-        prompt="Test",
-        interval="5m"
-    )
+    task = TaskDefinition(name="Test Task / With Special! Chars", prompt="Test", interval="5m")
 
     runner = TaskRunner(task, mock_agent, state_manager)
     state_key = runner._get_state_key()
@@ -142,11 +136,7 @@ async def test_task_result_creation():
     from datetime import datetime
 
     result = TaskResult(
-        task_name="Test",
-        success=True,
-        output="Test output",
-        timestamp=datetime.now(),
-        metadata={"count": 5}
+        task_name="Test", success=True, output="Test output", timestamp=datetime.now(), metadata={"count": 5}
     )
 
     assert result.task_name == "Test"

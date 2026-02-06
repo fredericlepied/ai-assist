@@ -4,16 +4,17 @@ import asyncio
 import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from .config import get_config
+
 from .agent import AiAssistAgent
+from .commands import get_command_suggestion, is_valid_cli_command, is_valid_interactive_command
+from .config import get_config
+from .identity import AssistantIdentity, Identity, UserIdentity, get_identity
+from .kg_queries import KnowledgeGraphQueries
+from .knowledge_graph import KnowledgeGraph
 from .monitors import MonitoringScheduler
 from .state import StateManager
-from .knowledge_graph import KnowledgeGraph
-from .kg_queries import KnowledgeGraphQueries
-from .identity import Identity, UserIdentity, AssistantIdentity, get_identity
-from .commands import is_valid_interactive_command, get_command_suggestion, is_valid_cli_command
 
 
 async def handle_prompt_command_basic(command: str, agent: AiAssistAgent, conversation_history: list, identity) -> bool:
@@ -54,13 +55,12 @@ async def handle_prompt_command_basic(command: str, agent: AiAssistAgent, conver
 
     # Collect arguments if needed
     arguments = None
-    if hasattr(prompt_def, 'arguments') and prompt_def.arguments:
+    if hasattr(prompt_def, "arguments") and prompt_def.arguments:
         print(f"\nPrompt '{prompt_name}' requires arguments:")
         print("Press Enter without a value to cancel\n")
 
         arguments = {}
         for arg in prompt_def.arguments:
-            arg_desc = arg.description or arg.name
             required_marker = "*" if arg.required else ""
 
             try:
@@ -91,16 +91,13 @@ async def handle_prompt_command_basic(command: str, agent: AiAssistAgent, conver
         # Convert prompt messages to conversation messages
         for msg in result.messages:
             # Extract text content
-            if hasattr(msg.content, 'text'):
+            if hasattr(msg.content, "text"):
                 content = msg.content.text
             else:
                 content = str(msg.content)
 
             # Add to conversation history
-            conversation_history.append({
-                "role": msg.role,
-                "content": content
-            })
+            conversation_history.append({"role": msg.role, "content": content})
 
         # Display prompt loaded
         print(f"\n✓ Loaded prompt: {prompt_name} from {server_name}")
@@ -137,12 +134,9 @@ def should_use_tui():
         return False
 
     # Check libraries available
-    try:
-        import prompt_toolkit
-        import rich
-        return True
-    except ImportError:
-        return False
+    import importlib.util
+
+    return importlib.util.find_spec("prompt_toolkit") is not None and importlib.util.find_spec("rich") is not None
 
 
 async def interactive_mode(agent: AiAssistAgent, state_manager: StateManager, use_tui: bool = None):
@@ -153,6 +147,7 @@ async def interactive_mode(agent: AiAssistAgent, state_manager: StateManager, us
     if use_tui:
         try:
             from .tui_interactive import tui_interactive_mode
+
             await tui_interactive_mode(agent, state_manager)
         except ImportError:
             print("TUI libraries not available, using basic mode")
@@ -166,9 +161,9 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
     """Original simple interactive mode (fallback)"""
     identity = get_identity()
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print(f"ai-assist - {identity.get_greeting()}")
-    print("="*60)
+    print("=" * 60)
     print("\nType your questions or commands.")
     print("Commands: /status, /history, /clear-cache, /prompts, /help")
     print("Type /exit or /quit to exit\n")
@@ -184,10 +179,7 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
                 continue
 
             if user_input.lower() in ["/exit", "/quit"]:
-                state_manager.save_conversation_context(
-                    "last_interactive_session",
-                    {"messages": conversation_context}
-                )
+                state_manager.save_conversation_context("last_interactive_session", {"messages": conversation_context})
                 print("Goodbye!")
                 break
 
@@ -204,7 +196,7 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
                     continue
 
                 print("\nAvailable MCP Prompts:")
-                print("="*60)
+                print("=" * 60)
                 for server_name, prompts in agent.available_prompts.items():
                     print(f"\n{server_name}:")
                     for prompt_name, prompt in prompts.items():
@@ -216,7 +208,7 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
 
             if user_input.lower() == "/status":
                 stats = state_manager.get_stats()
-                print(f"\nState Statistics:")
+                print("\nState Statistics:")
                 for key, value in stats.items():
                     print(f"  {key}: {value}")
                 print()
@@ -237,7 +229,7 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
 
             if user_input.lower() == "/help":
                 print("\nai-assist Interactive Mode Help")
-                print("="*60)
+                print("=" * 60)
                 print("Commands:")
                 print("  /status           - Show state statistics")
                 print("  /history          - Show recent monitoring history")
@@ -273,11 +265,9 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
             messages.append({"role": "assistant", "content": response})
 
             # Track conversation
-            conversation_context.append({
-                "user": user_input,
-                "assistant": response,
-                "timestamp": str(asyncio.get_event_loop().time())
-            })
+            conversation_context.append(
+                {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
+            )
 
         except KeyboardInterrupt:
             print("\n\nGoodbye!")
@@ -286,22 +276,11 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
             print(f"\nError: {e}\n")
 
 
-async def monitoring_mode(
-    agent: AiAssistAgent,
-    config,
-    state_manager: StateManager,
-    knowledge_graph: KnowledgeGraph
-):
+async def monitoring_mode(agent: AiAssistAgent, config, state_manager: StateManager, knowledge_graph: KnowledgeGraph):
     """Run in monitoring mode"""
     schedule_file = Path.home() / ".ai-assist" / "schedules.json"
 
-    scheduler = MonitoringScheduler(
-        agent,
-        config,
-        state_manager,
-        knowledge_graph,
-        schedule_file=schedule_file
-    )
+    scheduler = MonitoringScheduler(agent, config, state_manager, knowledge_graph, schedule_file=schedule_file)
 
     try:
         await scheduler.start()
@@ -325,10 +304,10 @@ def kg_stats_command(kg: KnowledgeGraph):
     print(f"Total entities: {stats['total_entities']}")
     print(f"Total relationships: {stats['total_relationships']}")
     print("\nEntities by type:")
-    for entity_type, count in stats['entities_by_type'].items():
+    for entity_type, count in stats["entities_by_type"].items():
         print(f"  {entity_type:20s}: {count}")
     print("\nRelationships by type:")
-    for rel_type, count in stats['relationships_by_type'].items():
+    for rel_type, count in stats["relationships_by_type"].items():
         print(f"  {rel_type:20s}: {count}")
     print()
 
@@ -388,15 +367,15 @@ def kg_changes_command(kg: KnowledgeGraph, hours: int = 1):
     print(f"New entities: {changes['new_count']}")
     print(f"Corrected beliefs: {changes['corrected_count']}")
 
-    if changes['new_entities']:
+    if changes["new_entities"]:
         print("\nNew entities:")
-        for entity in changes['new_entities'][:10]:
+        for entity in changes["new_entities"][:10]:
             print(f"  {entity['type']}: {entity['id']}")
             print(f"    Discovered: {entity['discovered_at']}")
 
-    if changes['corrected_entities']:
+    if changes["corrected_entities"]:
         print("\nCorrected beliefs:")
-        for entity in changes['corrected_entities'][:10]:
+        for entity in changes["corrected_entities"][:10]:
             print(f"  {entity['type']}: {entity['id']}")
     print()
 
@@ -422,7 +401,7 @@ def kg_show_command(kg: KnowledgeGraph, entity_id: str):
         print(f"Valid from: {context['valid_from']}")
         print(f"Discovered: {context['discovered_at']}")
         print(f"\nRelated jobs ({len(context['related_jobs'])}):")
-        for job in context['related_jobs']:
+        for job in context["related_jobs"]:
             print(f"  - {job['job_id']}: {job['data'].get('status', 'unknown')}")
         print()
         return
@@ -433,15 +412,15 @@ def kg_show_command(kg: KnowledgeGraph, entity_id: str):
         print("=" * 50)
         print(f"Status: {context['data'].get('status', 'unknown')}")
         print(f"Valid from: {context['valid_from']}")
-        if context['valid_to']:
+        if context["valid_to"]:
             print(f"Valid to: {context['valid_to']}")
         print(f"Discovered: {context['discovered_at']}")
         print(f"Discovery lag: {context['discovery_lag']}")
         print(f"\nComponents ({len(context['components'])}):")
-        for comp in context['components']:
+        for comp in context["components"]:
             print(f"  - {comp['data']['type']} {comp['data'].get('version', '')}")
         print(f"\nTickets ({len(context['tickets'])}):")
-        for ticket in context['tickets']:
+        for ticket in context["tickets"]:
             print(f"  - {ticket['data'].get('key', ticket['entity_id'])}")
         print()
         return
@@ -471,15 +450,17 @@ def identity_show_command():
     if identity.user.timezone:
         print(f"Timezone: {identity.user.timezone}")
     if identity.user.context:
-        print(f"\nUser Context:")
-        print(f"  {identity.user.context[:200]}..." if len(identity.user.context) > 200 else f"  {identity.user.context}")
+        print("\nUser Context:")
+        print(
+            f"  {identity.user.context[:200]}..." if len(identity.user.context) > 200 else f"  {identity.user.context}"
+        )
 
-    print(f"\nAssistant:")
+    print("\nAssistant:")
     print(f"  Nickname: {identity.assistant.nickname}")
     if identity.assistant.personality:
-        print(f"  Custom Personality: Yes")
+        print("  Custom Personality: Yes")
 
-    print(f"\nPreferences:")
+    print("\nPreferences:")
     print(f"  Formality: {identity.preferences.formality}")
     print(f"  Verbosity: {identity.preferences.verbosity}")
     print(f"  Emoji Usage: {identity.preferences.emoji_usage}")
@@ -508,12 +489,8 @@ def identity_init_command():
 
     # Create identity
     identity = Identity(
-        user=UserIdentity(
-            name=name,
-            role=role,
-            organization=organization
-        ),
-        assistant=AssistantIdentity(nickname=nickname)
+        user=UserIdentity(name=name, role=role, organization=organization),
+        assistant=AssistantIdentity(nickname=nickname),
     )
 
     # Save
@@ -530,8 +507,8 @@ async def main_async():
     # Parse command - must start with /
     command = sys.argv[1] if len(sys.argv) > 1 else None
 
-    if command and not command.startswith('/'):
-        print(f"Error: Commands must start with /")
+    if command and not command.startswith("/"):
+        print("Error: Commands must start with /")
         print(f"Did you mean: /{command}?")
         print("\nRun 'ai-assist /help' to see available commands")
         sys.exit(1)
@@ -553,9 +530,9 @@ async def main_async():
     needs_agent = command not in no_agent_commands
 
     if needs_agent and not config.anthropic_api_key and not config.vertex_project_id:
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("ERROR: No Anthropic credentials configured")
-        print("="*60)
+        print("=" * 60)
         print("\nai-assist requires Anthropic API access to function.")
         print("\nYou have TWO options:")
         print("\n1. VERTEX AI (Google Cloud) - Recommended for enterprise:")
@@ -570,7 +547,7 @@ async def main_async():
         print("   • Add to .env file: ANTHROPIC_API_KEY=your-key-here")
         print("   • Free tier: $5 credit for new accounts")
         print("\nFor more info, see: https://docs.anthropic.com/")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
         sys.exit(1)
 
     # Initialize state manager and knowledge graph
@@ -589,7 +566,7 @@ async def main_async():
 
             if command == "help":
                 print("\nai-assist - AI Assistant for Managers")
-                print("="*60)
+                print("=" * 60)
                 print("\nAvailable commands:")
                 print("  /monitor           - Start monitoring DCI and Jira")
                 print("  /query '<text>'    - Run a one-time query")

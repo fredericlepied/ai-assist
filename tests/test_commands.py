@@ -1,12 +1,10 @@
 """Tests for command validation utilities"""
 
-import pytest
 from ai_assist.commands import (
-    is_valid_interactive_command,
-    is_valid_cli_command,
-    get_command_suggestion,
     INTERACTIVE_COMMANDS,
-    CLI_COMMANDS
+    get_command_suggestion,
+    is_valid_cli_command,
+    is_valid_interactive_command,
 )
 
 
@@ -42,9 +40,19 @@ class TestCLICommandValidation:
     def test_valid_cli_commands(self):
         """Test that valid CLI commands are recognized"""
         valid_commands = [
-            "monitor", "query", "interactive", "status", "clear-cache",
-            "identity-show", "identity-init", "kg-stats", "kg-asof",
-            "kg-late", "kg-changes", "kg-show", "help"
+            "monitor",
+            "query",
+            "interactive",
+            "status",
+            "clear-cache",
+            "identity-show",
+            "identity-init",
+            "kg-stats",
+            "kg-asof",
+            "kg-late",
+            "kg-changes",
+            "kg-show",
+            "help",
         ]
         for cmd in valid_commands:
             assert is_valid_cli_command(cmd), f"Command {cmd} should be valid"

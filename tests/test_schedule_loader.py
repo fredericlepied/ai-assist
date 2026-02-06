@@ -1,9 +1,11 @@
 """Tests for schedule loader"""
 
-import pytest
 import json
 import tempfile
 from pathlib import Path
+
+import pytest
+
 from ai_assist.schedule_loader import ScheduleLoader
 from ai_assist.tasks import MonitorDefinition, TaskDefinition
 
@@ -28,7 +30,7 @@ def sample_schedules():
                 "description": "Test monitor",
                 "enabled": True,
                 "conditions": [],
-                "knowledge_graph": {"enabled": True}
+                "knowledge_graph": {"enabled": True},
             }
         ],
         "tasks": [
@@ -38,9 +40,9 @@ def sample_schedules():
                 "interval": "morning on weekdays",
                 "description": "Daily summary",
                 "enabled": True,
-                "conditions": []
+                "conditions": [],
             }
-        ]
+        ],
     }
 
 
@@ -102,18 +104,10 @@ class TestScheduleLoader:
         data = {
             "version": "1.0",
             "monitors": [
-                {
-                    "name": "Valid Monitor",
-                    "prompt": "Test",
-                    "interval": "5m"
-                },
-                {
-                    "name": "Invalid Monitor",
-                    "prompt": "Test",
-                    "interval": "invalid"  # Invalid interval
-                }
+                {"name": "Valid Monitor", "prompt": "Test", "interval": "5m"},
+                {"name": "Invalid Monitor", "prompt": "Test", "interval": "invalid"},  # Invalid interval
             ],
-            "tasks": []
+            "tasks": [],
         }
         temp_json_file.write_text(json.dumps(data))
 
@@ -138,7 +132,7 @@ class TestScheduleLoader:
                     # Missing prompt and interval
                 }
             ],
-            "tasks": []
+            "tasks": [],
         }
         temp_json_file.write_text(json.dumps(data))
 
@@ -168,20 +162,10 @@ class TestScheduleLoader:
         data = {
             "version": "1.0",
             "monitors": [
-                {
-                    "name": "Enabled Monitor",
-                    "prompt": "Test",
-                    "interval": "5m",
-                    "enabled": True
-                },
-                {
-                    "name": "Disabled Monitor",
-                    "prompt": "Test",
-                    "interval": "10m",
-                    "enabled": False
-                }
+                {"name": "Enabled Monitor", "prompt": "Test", "interval": "5m", "enabled": True},
+                {"name": "Disabled Monitor", "prompt": "Test", "interval": "10m", "enabled": False},
             ],
-            "tasks": []
+            "tasks": [],
         }
         temp_json_file.write_text(json.dumps(data))
 
@@ -199,17 +183,9 @@ class TestScheduleLoader:
             "version": "1.0",
             "monitors": [],
             "tasks": [
-                {
-                    "name": "Morning Task",
-                    "prompt": "Morning report",
-                    "interval": "morning on weekdays"
-                },
-                {
-                    "name": "Specific Time Task",
-                    "prompt": "Run at 9am",
-                    "interval": "9:00 on monday,friday"
-                }
-            ]
+                {"name": "Morning Task", "prompt": "Morning report", "interval": "morning on weekdays"},
+                {"name": "Specific Time Task", "prompt": "Run at 9am", "interval": "9:00 on monday,friday"},
+            ],
         }
         temp_json_file.write_text(json.dumps(data))
 
@@ -229,16 +205,11 @@ class TestScheduleLoader:
                     "name": "KG Monitor",
                     "prompt": "Test",
                     "interval": "5m",
-                    "conditions": [
-                        {"type": "cache", "key": "test", "max_age": "1h"}
-                    ],
-                    "knowledge_graph": {
-                        "enabled": True,
-                        "save_results": True
-                    }
+                    "conditions": [{"type": "cache", "key": "test", "max_age": "1h"}],
+                    "knowledge_graph": {"enabled": True, "save_results": True},
                 }
             ],
-            "tasks": []
+            "tasks": [],
         }
         temp_json_file.write_text(json.dumps(data))
 
@@ -253,14 +224,8 @@ class TestScheduleLoader:
         """Test loading multiple monitors and tasks"""
         data = {
             "version": "1.0",
-            "monitors": [
-                {"name": f"Monitor {i}", "prompt": "Test", "interval": f"{i}m"}
-                for i in range(1, 6)
-            ],
-            "tasks": [
-                {"name": f"Task {i}", "prompt": "Test", "interval": f"{i}h"}
-                for i in range(1, 4)
-            ]
+            "monitors": [{"name": f"Monitor {i}", "prompt": "Test", "interval": f"{i}m"} for i in range(1, 6)],
+            "tasks": [{"name": f"Task {i}", "prompt": "Test", "interval": f"{i}h"} for i in range(1, 4)],
         }
         temp_json_file.write_text(json.dumps(data))
 

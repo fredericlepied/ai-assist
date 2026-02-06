@@ -2,9 +2,8 @@
 
 import json
 from pathlib import Path
-from datetime import datetime
-from typing import Optional
-from .tasks import TaskDefinition, MonitorDefinition, TaskLoader
+
+from .tasks import MonitorDefinition, TaskDefinition
 
 
 class ScheduleTools:
@@ -54,7 +53,7 @@ class ScheduleTools:
                         "conditions": {
                             "type": "array",
                             "description": "Optional list of condition dictionaries",
-                            "items": {"type": "object"}
+                            "items": {"type": "object"},
                         },
                         "knowledge_graph": {
                             "type": "object",
@@ -63,7 +62,7 @@ class ScheduleTools:
                     },
                     "required": ["name", "prompt", "interval"],
                 },
-                "_server": "internal"
+                "_server": "internal",
             },
             {
                 "name": "internal__create_task",
@@ -94,12 +93,12 @@ class ScheduleTools:
                         "conditions": {
                             "type": "array",
                             "description": "Optional list of condition dictionaries",
-                            "items": {"type": "object"}
+                            "items": {"type": "object"},
                         },
                     },
                     "required": ["name", "prompt", "interval"],
                 },
-                "_server": "internal"
+                "_server": "internal",
             },
             {
                 "name": "internal__list_schedules",
@@ -114,7 +113,7 @@ class ScheduleTools:
                         }
                     },
                 },
-                "_server": "internal"
+                "_server": "internal",
             },
             {
                 "name": "internal__update_schedule",
@@ -150,7 +149,7 @@ class ScheduleTools:
                         "conditions": {
                             "type": "array",
                             "description": "New conditions list",
-                            "items": {"type": "object"}
+                            "items": {"type": "object"},
                         },
                         "knowledge_graph": {
                             "type": "object",
@@ -159,7 +158,7 @@ class ScheduleTools:
                     },
                     "required": ["name", "schedule_type"],
                 },
-                "_server": "internal"
+                "_server": "internal",
             },
             {
                 "name": "internal__delete_schedule",
@@ -179,7 +178,7 @@ class ScheduleTools:
                     },
                     "required": ["name", "schedule_type"],
                 },
-                "_server": "internal"
+                "_server": "internal",
             },
             {
                 "name": "internal__enable_schedule",
@@ -203,7 +202,7 @@ class ScheduleTools:
                     },
                     "required": ["name", "schedule_type", "enabled"],
                 },
-                "_server": "internal"
+                "_server": "internal",
             },
             {
                 "name": "internal__get_schedule_status",
@@ -223,7 +222,7 @@ class ScheduleTools:
                     },
                     "required": ["name", "schedule_type"],
                 },
-                "_server": "internal"
+                "_server": "internal",
             },
         ]
 
@@ -245,7 +244,7 @@ class ScheduleTools:
                 description=arguments.get("description"),
                 enabled=arguments.get("enabled", True),
                 conditions=arguments.get("conditions", []),
-                knowledge_graph=arguments.get("knowledge_graph")
+                knowledge_graph=arguments.get("knowledge_graph"),
             )
 
         elif tool_name == "create_task":
@@ -255,39 +254,29 @@ class ScheduleTools:
                 interval=arguments["interval"],
                 description=arguments.get("description"),
                 enabled=arguments.get("enabled", True),
-                conditions=arguments.get("conditions", [])
+                conditions=arguments.get("conditions", []),
             )
 
         elif tool_name == "list_schedules":
-            return self._list_schedules(
-                filter_type=arguments.get("filter_type")
-            )
+            return self._list_schedules(filter_type=arguments.get("filter_type"))
 
         elif tool_name == "update_schedule":
             return self._update_schedule(
                 name=arguments["name"],
                 schedule_type=arguments["schedule_type"],
-                **{k: v for k, v in arguments.items() if k not in ["name", "schedule_type"]}
+                **{k: v for k, v in arguments.items() if k not in ["name", "schedule_type"]},
             )
 
         elif tool_name == "delete_schedule":
-            return self._delete_schedule(
-                name=arguments["name"],
-                schedule_type=arguments["schedule_type"]
-            )
+            return self._delete_schedule(name=arguments["name"], schedule_type=arguments["schedule_type"])
 
         elif tool_name == "enable_schedule":
             return self._enable_schedule(
-                name=arguments["name"],
-                schedule_type=arguments["schedule_type"],
-                enabled=arguments["enabled"]
+                name=arguments["name"], schedule_type=arguments["schedule_type"], enabled=arguments["enabled"]
             )
 
         elif tool_name == "get_schedule_status":
-            return self._get_schedule_status(
-                name=arguments["name"],
-                schedule_type=arguments["schedule_type"]
-            )
+            return self._get_schedule_status(name=arguments["name"], schedule_type=arguments["schedule_type"])
 
         else:
             raise ValueError(f"Unknown schedule tool: {tool_name}")
@@ -297,10 +286,10 @@ class ScheduleTools:
         name: str,
         prompt: str,
         interval: str,
-        description: Optional[str] = None,
+        description: str | None = None,
         enabled: bool = True,
         conditions: list = None,
-        knowledge_graph: Optional[dict] = None
+        knowledge_graph: dict | None = None,
     ) -> str:
         """Create a new monitor schedule"""
         if conditions is None:
@@ -315,7 +304,7 @@ class ScheduleTools:
                 description=description,
                 enabled=enabled,
                 conditions=conditions,
-                knowledge_graph=knowledge_graph
+                knowledge_graph=knowledge_graph,
             )
             monitor_def.validate()
         except ValueError as e:
@@ -359,9 +348,9 @@ class ScheduleTools:
         name: str,
         prompt: str,
         interval: str,
-        description: Optional[str] = None,
+        description: str | None = None,
         enabled: bool = True,
-        conditions: list = None
+        conditions: list = None,
     ) -> str:
         """Create a new task schedule"""
         if conditions is None:
@@ -375,7 +364,7 @@ class ScheduleTools:
                 interval=interval,
                 description=description,
                 enabled=enabled,
-                conditions=conditions
+                conditions=conditions,
             )
             task_def.validate()
         except ValueError as e:
@@ -412,7 +401,7 @@ class ScheduleTools:
 
         return f"Task '{name}' created successfully (interval: {interval}, enabled: {enabled})"
 
-    def _list_schedules(self, filter_type: Optional[str] = None) -> str:
+    def _list_schedules(self, filter_type: str | None = None) -> str:
         """List all schedules with their status"""
         schedules = self._load_schedules()
 
@@ -451,12 +440,7 @@ class ScheduleTools:
 
         return "\n".join(result)
 
-    def _update_schedule(
-        self,
-        name: str,
-        schedule_type: str,
-        **updates
-    ) -> str:
+    def _update_schedule(self, name: str, schedule_type: str, **updates) -> str:
         """Update an existing schedule"""
         schedules = self._load_schedules()
         collection_name = "monitors" if schedule_type == "monitor" else "tasks"
@@ -594,7 +578,7 @@ class ScheduleTools:
 
             return data
 
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             # Backup corrupted file
             backup_file = self.schedules_file.with_suffix(".json.backup")
             if self.schedules_file.exists():

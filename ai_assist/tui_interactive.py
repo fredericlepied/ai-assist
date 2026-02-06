@@ -1,26 +1,25 @@
 """TUI-enhanced interactive mode for ai-assist"""
 
 import asyncio
-import os
 from pathlib import Path
+
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.text import Text
-from rich.live import Live
 from rich.spinner import Spinner
 from rich.table import Table
 
 from .agent import AiAssistAgent
+from .commands import get_command_suggestion, is_valid_interactive_command
+from .context import ConversationMemory, KnowledgeGraphContext
+from .identity import get_identity
+from .knowledge_graph import KnowledgeGraph
 from .state import StateManager
 from .tui import AiAssistCompleter
-from .context import ConversationMemory, KnowledgeGraphContext
-from .knowledge_graph import KnowledgeGraph
-from .identity import get_identity
-from .commands import is_valid_interactive_command, get_command_suggestion
 
 
 async def query_with_feedback(
@@ -28,7 +27,7 @@ async def query_with_feedback(
     prompt: str,
     console: Console,
     conversation_memory: ConversationMemory = None,
-    kg_context: KnowledgeGraphContext = None
+    kg_context: KnowledgeGraphContext = None,
 ) -> str:
     """Query the agent with real-time feedback and streaming display
 
@@ -45,18 +44,11 @@ async def query_with_feedback(
     identity = get_identity()
 
     # Enrich prompt with knowledge graph context if available
-    original_prompt = prompt
     context_summary = []
     if kg_context:
         prompt, context_summary = kg_context.enrich_prompt(prompt)
     # State to track progress
-    feedback_state = {
-        "status": "Starting...",
-        "turn": 0,
-        "max_turns": 50,
-        "tool": None,
-        "streaming": False
-    }
+    feedback_state = {"status": "Starting...", "turn": 0, "max_turns": 50, "tool": None, "streaming": False}
 
     def progress_callback(status: str, turn: int, max_turns: int, tool_name: str | None):
         """Update feedback state"""
@@ -112,9 +104,7 @@ async def query_with_feedback(
 
         # Use streaming query with conversation context
         async for chunk in agent.query_streaming(
-            prompt=prompt if messages is None else None,
-            messages=messages,
-            progress_callback=progress_callback
+            prompt=prompt if messages is None else None, messages=messages, progress_callback=progress_callback
         ):
             # Handle text chunks
             if isinstance(chunk, str):
@@ -181,7 +171,9 @@ async def query_with_feedback(
         # Show KG save feedback if entities were saved
         kg_saved_count = agent.get_last_kg_saved_count()
         if kg_saved_count > 0:
-            console.print(f"[dim]💾 Saved {kg_saved_count} entit{'y' if kg_saved_count == 1 else 'ies'} to knowledge graph[/dim]")
+            console.print(
+                f"[dim]💾 Saved {kg_saved_count} entit{'y' if kg_saved_count == 1 else 'ies'} to knowledge graph[/dim]"
+            )
 
         # Clear tool calls for next query
         agent.clear_tool_calls()
@@ -190,11 +182,7 @@ async def query_with_feedback(
 
 
 async def handle_prompt_command(
-    command: str,
-    agent: AiAssistAgent,
-    conversation_history: list,
-    console: Console,
-    prompt_session: PromptSession
+    command: str, agent: AiAssistAgent, conversation_history: list, console: Console, prompt_session: PromptSession
 ) -> bool:
     """Handle /server/prompt slash commands
 
@@ -226,7 +214,7 @@ async def handle_prompt_command(
         console.print(f"[yellow]Unknown prompt: {prompt_name}[/yellow]")
         prompts = agent.available_prompts[server_name].keys()
         console.print(f"Available prompts from {server_name}: {', '.join(prompts)}")
-        console.print(f"\nTip: Use /prompts to see all available prompts")
+        console.print("\nTip: Use /prompts to see all available prompts")
         return True
 
     # Get prompt definition to check for arguments
@@ -234,7 +222,7 @@ async def handle_prompt_command(
 
     # Collect arguments if needed
     arguments = None
-    if hasattr(prompt_def, 'arguments') and prompt_def.arguments:
+    if hasattr(prompt_def, "arguments") and prompt_def.arguments:
         console.print(f"\n[cyan]Prompt '{prompt_name}' requires arguments:[/cyan]")
         console.print("[dim]Press Enter without a value to cancel[/dim]\n")
 
@@ -242,6 +230,7 @@ async def handle_prompt_command(
 
         # Create a separate session for argument collection to avoid state pollution
         from prompt_toolkit import PromptSession as ArgPromptSession
+
         arg_session = ArgPromptSession()
 
         for arg in prompt_def.arguments:
@@ -264,7 +253,7 @@ async def handle_prompt_command(
                 arguments[arg.name] = value
 
             except (KeyboardInterrupt, EOFError):
-                console.print(f"\n[yellow]Cancelled[/yellow]\n")
+                console.print("\n[yellow]Cancelled[/yellow]\n")
                 return True
 
         console.print()  # Blank line after input
@@ -278,26 +267,29 @@ async def handle_prompt_command(
         prompt_content = []
         for msg in result.messages:
             # Extract text content
-            if hasattr(msg.content, 'text'):
+            if hasattr(msg.content, "text"):
                 content = msg.content.text
             else:
                 content = str(msg.content)
 
             # Add to conversation history
-            conversation_history.append({
-                "role": msg.role,
-                "content": content
-            })
+            conversation_history.append({"role": msg.role, "content": content})
             prompt_content.append(content)
 
         # Display prompt content to user
-        console.print(Panel(
-            f"[green]Injected prompt: {prompt_name}[/green]\n"
-            f"From: {server_name}\n"
-            f"Messages added: {len(result.messages)}\n\n"
-            f"[dim]{prompt_content[0][:200]}...[/dim]" if prompt_content else "",
-            title="Prompt Loaded"
-        ))
+        console.print(
+            Panel(
+                (
+                    f"[green]Injected prompt: {prompt_name}[/green]\n"
+                    f"From: {server_name}\n"
+                    f"Messages added: {len(result.messages)}\n\n"
+                    f"[dim]{prompt_content[0][:200]}...[/dim]"
+                    if prompt_content
+                    else ""
+                ),
+                title="Prompt Loaded",
+            )
+        )
 
     except Exception as e:
         console.print(f"[red]Error executing prompt: {e}[/red]")
@@ -319,31 +311,33 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     # - Meta-Enter (Alt-Enter) adds a newline for multi-line input
     kb = KeyBindings()
 
-    @kb.add('escape', 'enter')  # Esc-Enter adds newline
-    @kb.add('c-j')  # Ctrl-J also adds newline (alternative)
+    @kb.add("escape", "enter")  # Esc-Enter adds newline
+    @kb.add("c-j")  # Ctrl-J also adds newline (alternative)
     def _(event):
-        event.current_buffer.insert_text('\n')
+        event.current_buffer.insert_text("\n")
 
     session = PromptSession(
         message="You> ",
         multiline=False,  # Enter submits by default
         completer=AiAssistCompleter(agent=agent),
         history=FileHistory(str(history_file)),
-        key_bindings=kb
+        key_bindings=kb,
     )
 
     # Display welcome banner
-    console.print(Panel.fit(
-        f"[bold cyan]ai-assist - {identity.get_greeting()}[/bold cyan]\n\n"
-        "Type your questions or commands.\n"
-        "Commands: [yellow]/status[/yellow], [yellow]/history[/yellow], "
-        "[yellow]/clear-cache[/yellow], [yellow]/kg-save[/yellow], [yellow]/prompts[/yellow], [yellow]/help[/yellow]\n"
-        "Type [yellow]/exit[/yellow] or [yellow]/quit[/yellow] to exit\n\n"
-        "[dim]🧠 Auto-learning enabled - Tool results saved to knowledge graph[/dim]\n"
-        "[dim]🎯 MCP prompts available - Use /prompts to see them[/dim]\n"
-        "[dim]Press Enter to submit • Esc-Enter or Ctrl-J for multi-line input • Tab for completion[/dim]",
-        border_style="cyan"
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold cyan]ai-assist - {identity.get_greeting()}[/bold cyan]\n\n"
+            "Type your questions or commands.\n"
+            "Commands: [yellow]/status[/yellow], [yellow]/history[/yellow], "
+            "[yellow]/clear-cache[/yellow], [yellow]/kg-save[/yellow], [yellow]/prompts[/yellow], [yellow]/help[/yellow]\n"
+            "Type [yellow]/exit[/yellow] or [yellow]/quit[/yellow] to exit\n\n"
+            "[dim]🧠 Auto-learning enabled - Tool results saved to knowledge graph[/dim]\n"
+            "[dim]🎯 MCP prompts available - Use /prompts to see them[/dim]\n"
+            "[dim]Press Enter to submit • Esc-Enter or Ctrl-J for multi-line input • Tab for completion[/dim]",
+            border_style="cyan",
+        )
+    )
 
     # Initialize conversation memory for context-aware responses
     conversation_memory = ConversationMemory(max_exchanges=10)
@@ -369,10 +363,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                 continue
 
             if user_input.lower() in ["/exit", "/quit"]:
-                state_manager.save_conversation_context(
-                    "last_interactive_session",
-                    {"messages": conversation_context}
-                )
+                state_manager.save_conversation_context("last_interactive_session", {"messages": conversation_context})
                 console.print("\n[cyan]Goodbye![/cyan]")
                 break
 
@@ -391,10 +382,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                         response_started = False
                         identity = get_identity()
 
-                        async for chunk in agent.query_streaming(
-                            messages=messages,
-                            progress_callback=None
-                        ):
+                        async for chunk in agent.query_streaming(messages=messages, progress_callback=None):
                             # Handle text chunks
                             if isinstance(chunk, str):
                                 if not response_started:
@@ -438,21 +426,27 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                         # Show KG save feedback if entities were saved
                         kg_saved_count = agent.get_last_kg_saved_count()
                         if kg_saved_count > 0:
-                            console.print(f"[dim]💾 Saved {kg_saved_count} entit{'y' if kg_saved_count == 1 else 'ies'} to knowledge graph[/dim]")
+                            console.print(
+                                f"[dim]💾 Saved {kg_saved_count} entit{'y' if kg_saved_count == 1 else 'ies'} to knowledge graph[/dim]"
+                            )
                         agent.clear_tool_calls()
 
                         # Extract the prompt content (last user message) for conversation tracking
-                        prompt_content = messages[-1]["content"] if messages and messages[-1]["role"] == "user" else user_input
+                        prompt_content = (
+                            messages[-1]["content"] if messages and messages[-1]["role"] == "user" else user_input
+                        )
 
                         # Add the exchange to conversation memory
                         conversation_memory.add_exchange(prompt_content, full_response)
 
                         # Track for state manager
-                        conversation_context.append({
-                            "user": user_input,  # Original /dci/rca command
-                            "assistant": full_response,
-                            "timestamp": str(asyncio.get_event_loop().time())
-                        })
+                        conversation_context.append(
+                            {
+                                "user": user_input,  # Original /dci/rca command
+                                "assistant": full_response,
+                                "timestamp": str(asyncio.get_event_loop().time()),
+                            }
+                        )
 
                     except Exception as e:
                         console.print(f"\n[red]Error: {e}[/red]\n")
@@ -511,36 +505,27 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
             try:
                 # Show feedback while processing and stream response
                 response = await query_with_feedback(
-                    agent,
-                    user_input,
-                    console,
-                    conversation_memory=conversation_memory,
-                    kg_context=kg_context
+                    agent, user_input, console, conversation_memory=conversation_memory, kg_context=kg_context
                 )
 
                 # Response is already printed via streaming
                 # Just add final newline if not already there
-                if response and not response.endswith('\n'):
+                if response and not response.endswith("\n"):
                     console.print()
 
                 # Add to conversation memory for context
                 conversation_memory.add_exchange(user_input, response)
 
                 # Track conversation in context list for state manager
-                conversation_context.append({
-                    "user": user_input,
-                    "assistant": response,
-                    "timestamp": str(asyncio.get_event_loop().time())
-                })
+                conversation_context.append(
+                    {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
+                )
 
             except Exception as e:
                 console.print(f"\n[red]Error: {e}[/red]\n")
 
         except (EOFError, KeyboardInterrupt):
-            state_manager.save_conversation_context(
-                "last_interactive_session",
-                {"messages": conversation_context}
-            )
+            state_manager.save_conversation_context("last_interactive_session", {"messages": conversation_context})
             console.print("\n[cyan]Goodbye![/cyan]")
             break
         except Exception as e:

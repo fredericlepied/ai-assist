@@ -11,14 +11,13 @@ Solution: Use a small buffer (10) to allow messages to queue.
 import logging
 import sys
 from contextlib import asynccontextmanager
-from typing import Literal, TextIO
+from typing import TextIO
 
 import anyio
 import anyio.lowlevel
+import mcp.types as types
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from anyio.streams.text import TextReceiveStream
-
-import mcp.types as types
 from mcp.client import stdio as mcp_stdio
 from mcp.shared.message import SessionMessage
 

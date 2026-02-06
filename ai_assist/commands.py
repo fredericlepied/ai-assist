@@ -72,8 +72,6 @@ def get_command_suggestion(user_input: str, is_interactive: bool = False) -> str
     Returns:
         Error message string
     """
-    valid_commands = INTERACTIVE_COMMANDS if is_interactive else CLI_COMMANDS
-
     msg = f"Unknown command '{user_input}'\n\n"
 
     if is_interactive:

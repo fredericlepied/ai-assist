@@ -1,8 +1,10 @@
 """Tests for task file watcher"""
 
-import pytest
 import asyncio
 from pathlib import Path
+
+import pytest
+
 from ai_assist.task_watcher import TaskFileWatcher
 
 

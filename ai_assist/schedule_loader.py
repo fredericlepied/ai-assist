@@ -2,7 +2,8 @@
 
 import json
 from pathlib import Path
-from .tasks import TaskDefinition, MonitorDefinition
+
+from .tasks import MonitorDefinition, TaskDefinition
 
 
 class ScheduleLoader:
@@ -34,7 +35,7 @@ class ScheduleLoader:
                     description=monitor_data.get("description"),
                     enabled=monitor_data.get("enabled", True),
                     conditions=monitor_data.get("conditions", []),
-                    knowledge_graph=monitor_data.get("knowledge_graph")
+                    knowledge_graph=monitor_data.get("knowledge_graph"),
                 )
                 monitor.validate()
                 monitors.append(monitor)
@@ -60,7 +61,7 @@ class ScheduleLoader:
                     interval=task_data["interval"],
                     description=task_data.get("description"),
                     enabled=task_data.get("enabled", True),
-                    conditions=task_data.get("conditions", [])
+                    conditions=task_data.get("conditions", []),
                 )
                 task.validate()
                 tasks.append(task)
