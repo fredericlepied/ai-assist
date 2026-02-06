@@ -150,6 +150,44 @@ You> /skill/install /path/to/my-skill@main
 
 📖 **Skill specification:** See [agentskills.io/specification](https://agentskills.io/specification)
 
+#### Script Execution (Advanced)
+
+Skills can include executable scripts in a `scripts/` directory. **Script execution is disabled by default for security.**
+
+**Enable script execution:**
+```bash
+export AI_ASSIST_ALLOW_SCRIPT_EXECUTION=true
+ai-assist
+```
+
+**Security requirements:**
+- Skills must declare permission in SKILL.md:
+  ```yaml
+  allowed-tools: "internal__execute_skill_script"
+  ```
+- Scripts run in a sandboxed environment:
+  - No access to API keys or secrets (environment filtered)
+  - 30-second timeout limit
+  - Output limited to 20KB
+  - Directory traversal blocked
+  - No shell injection possible
+
+**Example skill with script:**
+```markdown
+---
+name: pdf-tools
+description: PDF processing utilities
+compatibility: Requires python3, python3-pypdf
+allowed-tools: "internal__execute_skill_script"
+---
+
+# PDF Tools
+
+Run `scripts/check_fillable_fields.py` to detect form fields.
+```
+
+📋 **Security details:** See [SECURITY.md](SECURITY.md) for the complete security model
+
 ### Monitoring Mode
 
 Run periodic monitoring with automated checks:

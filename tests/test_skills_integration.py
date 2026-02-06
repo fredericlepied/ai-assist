@@ -8,6 +8,8 @@ from ai_assist.config import AiAssistConfig
 
 def test_skills_integration_with_agent():
     """Test that skills are loaded and integrated into agent"""
+    import tempfile
+
     # Create minimal config
     config = AiAssistConfig(
         anthropic_api_key="test-key",
@@ -17,6 +19,11 @@ def test_skills_integration_with_agent():
 
     # Create agent
     agent = AiAssistAgent(config)
+
+    # Use temporary file for testing to avoid overwriting user's config
+    temp_dir = Path(tempfile.mkdtemp())
+    installed_file = temp_dir / "installed-skills.json"
+    agent.skills_manager.installed_skills_file = installed_file
 
     # Verify skills system is initialized
     assert agent.skills_loader is not None
@@ -38,6 +45,9 @@ def test_skills_integration_with_agent():
 
     # Clean up
     agent.skills_manager.uninstall_skill("hello")
+    if installed_file.exists():
+        installed_file.unlink()
+    temp_dir.rmdir()
 
 
 def test_skills_persistence_across_sessions():

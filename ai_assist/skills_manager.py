@@ -187,8 +187,11 @@ class SkillsManager:
 
         return "\n".join(lines)
 
-    def get_system_prompt_section(self) -> str:
+    def get_system_prompt_section(self, script_execution_enabled: bool = False) -> str:
         """Generate system prompt with all installed skills' instructions
+
+        Args:
+            script_execution_enabled: Whether script execution is enabled
 
         Returns:
             Formatted system prompt section with all skills
@@ -198,6 +201,27 @@ class SkillsManager:
 
         sections = ["# Agent Skills\n"]
         sections.append("You have access to the following specialized skills:\n")
+
+        # Add script execution instructions if enabled
+        if script_execution_enabled:
+            skills_with_scripts = [(name, content) for name, content in self.loaded_skills.items() if content.scripts]
+            if skills_with_scripts:
+                sections.append("\n## Script Execution")
+                sections.append(
+                    "Some skills include executable scripts. When a skill mentions running a script "
+                    "(e.g., 'python scripts/script_name.py'), use the internal__execute_skill_script tool instead:\n"
+                )
+                for skill_name, content in skills_with_scripts:
+                    script_names = list(content.scripts.keys())
+                    sections.append(f"\n**{skill_name}** has {len(script_names)} script(s):")
+                    for script_name in script_names[:5]:  # Limit to first 5
+                        sections.append(f"  - {script_name}")
+                    if len(script_names) > 5:
+                        sections.append(f"  - ... and {len(script_names) - 5} more")
+                sections.append(
+                    "\nTo execute a script, use: internal__execute_skill_script(skill_name='skill-name', "
+                    "script_name='script.py', args=['arg1', 'arg2'])\n"
+                )
 
         for skill_name, content in self.loaded_skills.items():
             sections.append(f"\n## Skill: {skill_name}")

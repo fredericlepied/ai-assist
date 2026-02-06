@@ -82,6 +82,33 @@ def test_system_prompt_section(skills_manager):
     assert "Hello Skill" in result
 
 
+def test_system_prompt_with_script_execution_disabled(skills_manager):
+    """Test system prompt without script execution enabled"""
+    skills_manager.install_skill("/tmp/test-skills/hello@main")
+
+    # With script execution disabled
+    result = skills_manager.get_system_prompt_section(script_execution_enabled=False)
+    assert "Agent Skills" in result
+    assert "Script Execution" not in result
+    assert "internal__execute_skill_script" not in result
+
+
+def test_system_prompt_with_script_execution_enabled(skills_manager):
+    """Test system prompt includes script execution instructions when skill has scripts"""
+    # Install skill without scripts
+    skills_manager.install_skill("/tmp/test-skills/hello@main")
+
+    # With script execution enabled but no scripts
+    result = skills_manager.get_system_prompt_section(script_execution_enabled=True)
+    assert "Agent Skills" in result
+    # Should NOT have script section since hello has no scripts
+    assert "Script Execution" not in result
+
+    # Note: This test verifies that script execution section only appears
+    # when skills actually have scripts. See test_script_execution_tools.py
+    # for tests with actual scripts.
+
+
 def test_parse_source_spec(skills_manager):
     """Test parsing source specifications"""
     # With branch

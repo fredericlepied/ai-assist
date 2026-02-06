@@ -15,6 +15,7 @@ from .introspection_tools import IntrospectionTools
 from .mcp_stdio_fix import stdio_client_fixed
 from .report_tools import ReportTools
 from .schedule_tools import ScheduleTools
+from .script_execution_tools import ScriptExecutionTools
 from .skills_loader import SkillsLoader
 from .skills_manager import SkillsManager
 
@@ -50,6 +51,9 @@ class AiAssistAgent:
         self.skills_loader = SkillsLoader()
         self.skills_manager = SkillsManager(self.skills_loader)
 
+        # Initialize script execution tools for Agent Skills
+        self.script_execution_tools = ScriptExecutionTools(self.skills_manager, config)
+
         if config.use_vertex:
             vertex_kwargs = {"project_id": config.vertex_project_id}
             if config.vertex_region:
@@ -78,15 +82,14 @@ class AiAssistAgent:
                 self._server_tasks.append(task)
 
                 # Wait for server initialization (up to 5 seconds)
-                for _ in range(10):
+                for _ in range(20):  # Wait up to 10 seconds
                     await asyncio.sleep(0.5)
                     if server_name in self.sessions:
                         print(
                             f"✓ Connected to {server_name} MCP server with {len([t for t in self.available_tools if t['_server'] == server_name])} tools"
                         )
                         break
-                else:
-                    print(f"⚠ Warning: {server_name} did not initialize within 5 seconds")
+                # No warning if not connected yet - it may still connect later
 
             except Exception as e:
                 print(f"✗ Failed to connect to {server_name}: {e}")
@@ -118,6 +121,12 @@ class AiAssistAgent:
             self.available_tools.extend(filesystem_tool_defs)
             print(f"✓ Added {len(filesystem_tool_defs)} filesystem tools")
 
+        # Add script execution tools if enabled
+        script_tool_defs = self.script_execution_tools.get_tool_definitions()
+        if script_tool_defs:
+            self.available_tools.extend(script_tool_defs)
+            print(f"✓ Added {len(script_tool_defs)} script execution tools (SECURITY: enabled)")
+
         # Load installed skills
         self.skills_manager.load_installed_skills()
         if self.skills_manager.installed_skills:
@@ -126,36 +135,28 @@ class AiAssistAgent:
     async def _run_server(self, name: str, config: MCPServerConfig):
         """Run an MCP server connection (as a background task)"""
         try:
-            print(f"[{name}] Creating server parameters...", flush=True)
             server_params = StdioServerParameters(
                 command=config.command,
                 args=config.args,
                 env=config.env if config.env else None,
             )
 
-            print(f"[{name}] Starting FIXED stdio_client...", flush=True)
             # Use FIXED stdio_client with proper buffering
             async with stdio_client_fixed(server_params) as (read_stream, write_stream):
-                print(f"[{name}] Got streams, creating session...", flush=True)
-
                 # CRITICAL: ClientSession must be used as async context manager
                 # to start the _receive_loop task that processes incoming messages!
                 async with ClientSession(read_stream, write_stream) as session:
-                    print(f"[{name}] Initializing session...", flush=True)
                     try:
-                        result = await asyncio.wait_for(session.initialize(), timeout=10.0)
-                        print(f"[{name}] Session initialized! Result: {result}", flush=True)
+                        await asyncio.wait_for(session.initialize(), timeout=10.0)
                     except TimeoutError:
-                        print(f"[{name}] TIMEOUT waiting for initialize response!", flush=True)
+                        print(f"⚠ Warning: {name} timed out during initialization", flush=True)
                         raise
                     except Exception as e:
-                        print(f"[{name}] ERROR during initialize: {e}", flush=True)
+                        print(f"✗ Error connecting to {name}: {e}", flush=True)
                         raise
                     self.sessions[name] = session
 
-                    print(f"[{name}] Listing tools...", flush=True)
                     tools_list = await session.list_tools()
-                    print(f"[{name}] Got {len(tools_list.tools)} tools", flush=True)
                     for tool in tools_list.tools:
                         tool_def = {
                             "name": f"{name}__{tool.name}",
@@ -168,16 +169,12 @@ class AiAssistAgent:
 
                     # Discover prompts from this server
                     try:
-                        print(f"[{name}] Listing prompts...", flush=True)
                         prompts_result = await session.list_prompts()
                         if prompts_result.prompts:
                             self.available_prompts[name] = {prompt.name: prompt for prompt in prompts_result.prompts}
-                            print(f"[{name}] Got {len(prompts_result.prompts)} prompt(s)", flush=True)
                     except Exception:
                         # Prompts are optional - silently skip if not supported
-                        print(f"[{name}] No prompts available (this is normal)", flush=True)
-
-                    print(f"[{name}] Connection ready, keeping alive...", flush=True)
+                        pass
                     # Keep the connection alive by waiting indefinitely
                     try:
                         await asyncio.Event().wait()
@@ -199,7 +196,9 @@ class AiAssistAgent:
         identity_prompt = self.identity.get_system_prompt()
 
         # Add skills section
-        skills_section = self.skills_manager.get_system_prompt_section()
+        skills_section = self.skills_manager.get_system_prompt_section(
+            script_execution_enabled=self.script_execution_tools.enabled
+        )
 
         if skills_section:
             return f"{identity_prompt}\n\n{skills_section}"
@@ -462,10 +461,14 @@ class AiAssistAgent:
                     "execute_command",
                 ]
 
+                script_tools = ["execute_skill_script"]
+
                 if original_tool_name in schedule_tools:
                     result_text = await self.schedule_tools.execute_tool(original_tool_name, arguments)
                 elif original_tool_name in filesystem_tools:
                     result_text = await self.filesystem_tools.execute_tool(original_tool_name, arguments)
+                elif original_tool_name in script_tools:
+                    result_text = await self.script_execution_tools.execute_tool(original_tool_name, arguments)
                 else:
                     # Default to report tools
                     result_text = await self.report_tools.execute_tool(original_tool_name, arguments)

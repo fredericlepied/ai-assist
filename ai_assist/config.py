@@ -42,6 +42,12 @@ class AiAssistConfig(BaseModel):
     enable_notifications: bool = Field(default=True)
     notification_channel: str = Field(default="console", description="console, email, slack, etc.")
 
+    # Script execution security (disabled by default)
+    allow_skill_script_execution: bool = Field(
+        default_factory=lambda: os.getenv("AI_ASSIST_ALLOW_SCRIPT_EXECUTION", "false").lower() == "true",
+        description="Enable script execution from Agent Skills (security risk if enabled)",
+    )
+
     @classmethod
     def from_env(cls, mcp_servers_file: Path | None = None) -> "AiAssistConfig":
         """Load configuration from environment variables and YAML files"""

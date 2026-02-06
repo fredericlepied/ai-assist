@@ -591,6 +591,9 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                     {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
                 )
 
+            except (EOFError, KeyboardInterrupt):
+                # Re-raise to be caught by outer handler which breaks the loop
+                raise
             except Exception as e:
                 console.print(f"\n[red]Error: {e}[/red]\n")
 
