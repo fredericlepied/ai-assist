@@ -68,6 +68,23 @@ export ANTHROPIC_API_KEY='sk-ant-...'  # Get from console.anthropic.com
 
 📖 **Vertex AI setup:** See [VERTEX_AI_SETUP.md](VERTEX_AI_SETUP.md)
 
+**Personalization** (Optional):
+
+Customize the assistant's personality and communication style:
+
+```bash
+ai-assist /identity-init  # Create template
+ai-assist /identity-show  # View current settings
+```
+
+Edit `~/.ai-assist/identity.yaml` to configure:
+- Your name, role, and organization
+- Assistant nickname and personality
+- Communication preferences (formality, verbosity, emoji usage)
+- Work context for better assistance
+
+📖 **Full identity guide:** See [docs/IDENTITY.md](docs/IDENTITY.md)
+
 ## Usage
 
 ### Interactive Mode
@@ -394,6 +411,8 @@ ai-assist/
 
 ## Documentation
 
+- **[docs/IDENTITY.md](docs/IDENTITY.md)** - Complete guide to identity.yaml configuration
+- **[docs/MULTI_INSTANCE.md](docs/MULTI_INSTANCE.md)** - Running multiple ai-assist instances
 - **[VERTEX_AI_SETUP.md](VERTEX_AI_SETUP.md)** - Vertex AI configuration and troubleshooting
 - **[SECURITY.md](SECURITY.md)** - Security model for skill script execution
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development setup with pre-commit hooks
