@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "tasks": [
+    {
+      "name": "Daily DCI RCA Report",
+      "description": "Generate root cause analysis for DCI failures in the last day",
+      "prompt": "mcp://dci/rca",
+      "prompt_arguments": {
+        "days": "1",
+        "status": "failure"
+      },
+      "interval": "8:00 on weekdays",
+      "enabled": true
+    },
+    {
+      "name": "Legacy Natural Language Task",
+      "description": "Example of traditional natural language task",
+      "prompt": "Find system failures in the last 24 hours and summarize them",
+      "interval": "1h",
+      "enabled": true
+    },
+    {
+      "name": "Weekly System Health Check",
+      "description": "MCP prompt without arguments",
+      "prompt": "mcp://server/health_check",
+      "interval": "9:00 on monday",
+      "enabled": false
+    }
+  ],
+  "monitors": [
+    {
+      "name": "CI/CD Monitor",
+      "description": "Monitor CI/CD pipeline with MCP prompt",
+      "prompt": "mcp://dci/pipeline_status",
+      "prompt_arguments": {
+        "environment": "production"
+      },
+      "interval": "5m",
+      "enabled": true,
+      "knowledge_graph": {
+        "enabled": true,
+        "extract_entities": true
+      }
+    }
+  ]
+}

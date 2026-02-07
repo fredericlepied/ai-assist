@@ -3,7 +3,7 @@
 import asyncio
 import json
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from anthropic import Anthropic, AnthropicVertex
 from mcp import ClientSession, StdioServerParameters
@@ -73,6 +73,11 @@ class AiAssistAgent:
 
         # Track tool calls for KG storage
         self.last_tool_calls: list[dict] = []
+
+        # Update introspection tools with reference to available_prompts and agent
+        # (will be populated during server connection)
+        self.introspection_tools.available_prompts = self.available_prompts
+        self.introspection_tools.agent = self  # Allow introspection tools to execute prompts
 
     async def connect_to_servers(self):
         """Connect to all configured MCP servers"""
@@ -409,6 +414,71 @@ class AiAssistAgent:
 
         # Max turns reached
         yield {"type": "error", "message": "Maximum turns reached without final answer"}
+
+    async def execute_mcp_prompt(
+        self, server_name: str, prompt_name: str, arguments: dict[str, Any] | None = None
+    ) -> str:
+        """Execute an MCP prompt directly
+
+        Args:
+            server_name: MCP server name
+            prompt_name: Name of prompt to execute
+            arguments: Arguments to pass to prompt
+
+        Returns:
+            Combined content from prompt messages
+
+        Raises:
+            ValueError: If server/prompt not found or arguments invalid
+        """
+        # Validate server exists
+        if server_name not in self.sessions:
+            available = ", ".join(self.sessions.keys())
+            raise ValueError(f"MCP server '{server_name}' not connected. " f"Available servers: {available}")
+
+        # Validate server has prompts
+        if server_name not in self.available_prompts:
+            raise ValueError(f"Server '{server_name}' has no prompts")
+
+        # Validate prompt exists
+        if prompt_name not in self.available_prompts[server_name]:
+            available = ", ".join(self.available_prompts[server_name].keys())
+            raise ValueError(
+                f"Prompt '{prompt_name}' not found in server '{server_name}'. " f"Available prompts: {available}"
+            )
+
+        # Get prompt definition
+        prompt_def = self.available_prompts[server_name][prompt_name]
+
+        # Validate arguments
+        if hasattr(prompt_def, "arguments") and prompt_def.arguments:
+            self._validate_prompt_arguments(prompt_def, arguments or {})
+
+        # Execute prompt
+        session = self.sessions[server_name]
+        result = await session.get_prompt(prompt_name, arguments=arguments)
+
+        # Convert messages to text
+        content_parts = []
+        for msg in result.messages:
+            if hasattr(msg.content, "text"):
+                content_parts.append(msg.content.text)
+            else:
+                content_parts.append(str(msg.content))
+
+        return "\n\n".join(content_parts)
+
+    def _validate_prompt_arguments(self, prompt_def, arguments: dict):
+        """Validate arguments against prompt definition
+
+        Raises:
+            ValueError: If required arguments missing
+        """
+        provided_args = set(arguments.keys())
+
+        for arg in prompt_def.arguments:
+            if arg.required and arg.name not in provided_args:
+                raise ValueError(f"Required argument '{arg.name}' missing. " f"Description: {arg.description}")
 
     async def _execute_tool(self, tool_name: str, arguments: dict) -> str:
         """Execute a tool call on the appropriate MCP server, introspection, or internal tool"""

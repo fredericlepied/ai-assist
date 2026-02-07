@@ -41,7 +41,13 @@ class TaskRunner:
         timestamp = datetime.now()
 
         try:
-            output = await self.agent.query(self.task_def.prompt)
+            # Detect and execute MCP prompts vs natural language
+            if self.task_def.is_mcp_prompt:
+                server_name, prompt_name = self.task_def.parse_mcp_prompt()
+                output = await self.agent.execute_mcp_prompt(server_name, prompt_name, self.task_def.prompt_arguments)
+            else:
+                # Existing natural language path
+                output = await self.agent.query(self.task_def.prompt)
 
             evaluator = ConditionEvaluator()
             metadata = evaluator.extract_metadata(output)

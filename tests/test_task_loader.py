@@ -223,3 +223,110 @@ def test_task_definition_validation():
     with pytest.raises(ValueError, match="Task interval is required"):
         task = TaskDefinition(name="Test", prompt="Test", interval="")
         task.validate()
+
+
+# Phase 1: MCP Prompt Schema Tests
+
+
+def test_is_mcp_prompt_true():
+    """Test detection of MCP prompt references"""
+    task = TaskDefinition(name="Test", prompt="mcp://dci/rca", interval="5m")
+    assert task.is_mcp_prompt is True
+
+
+def test_is_mcp_prompt_false():
+    """Test detection of natural language prompts"""
+    task = TaskDefinition(name="Test", prompt="Find failures in the system", interval="5m")
+    assert task.is_mcp_prompt is False
+
+
+def test_parse_mcp_prompt_valid():
+    """Test parsing valid MCP prompt reference"""
+    task = TaskDefinition(name="Test", prompt="mcp://dci/rca", interval="5m")
+    server, prompt = task.parse_mcp_prompt()
+    assert server == "dci"
+    assert prompt == "rca"
+
+
+def test_parse_mcp_prompt_invalid_no_slash():
+    """Test rejection of MCP prompt without slash"""
+    task = TaskDefinition(name="Test", prompt="mcp://dci", interval="5m")
+    with pytest.raises(ValueError, match="must be 'mcp://server/prompt'"):
+        task.parse_mcp_prompt()
+
+
+def test_parse_mcp_prompt_invalid_empty_parts():
+    """Test rejection of MCP prompt with empty parts"""
+    task1 = TaskDefinition(name="Test", prompt="mcp:///prompt", interval="5m")
+    with pytest.raises(ValueError, match="must be 'mcp://server/prompt'"):
+        task1.parse_mcp_prompt()
+
+    task2 = TaskDefinition(name="Test", prompt="mcp://server/", interval="5m")
+    with pytest.raises(ValueError, match="must be 'mcp://server/prompt'"):
+        task2.parse_mcp_prompt()
+
+
+def test_parse_mcp_prompt_natural_language_raises():
+    """Test that parsing natural language prompt raises error"""
+    task = TaskDefinition(name="Test", prompt="Find failures", interval="5m")
+    with pytest.raises(ValueError, match="Not an MCP prompt reference"):
+        task.parse_mcp_prompt()
+
+
+def test_validate_mcp_prompt_format():
+    """Test validation catches malformed MCP prompts"""
+    # Invalid format should fail validation
+    task = TaskDefinition(name="Test", prompt="mcp://invalid", interval="5m")
+    with pytest.raises(ValueError, match="Invalid MCP prompt reference"):
+        task.validate()
+
+
+def test_backward_compatibility_natural_language():
+    """Test that existing natural language prompts still work"""
+    task = TaskDefinition(name="Legacy Task", prompt="Find system failures in the last 24 hours", interval="1h")
+    task.validate()  # Should not raise
+    assert task.is_mcp_prompt is False
+
+
+def test_load_task_with_prompt_arguments():
+    """Test loading task with prompt_arguments from YAML"""
+    yaml_content = """
+tasks:
+  - name: "MCP Task"
+    prompt: "mcp://dci/rca"
+    interval: "8:00 on weekdays"
+    prompt_arguments:
+      days: "1"
+      status: "failure"
+"""
+    loader = TaskLoader()
+    tasks = loader.load_from_yaml_string(yaml_content)
+
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task.name == "MCP Task"
+    assert task.prompt == "mcp://dci/rca"
+    assert task.prompt_arguments == {"days": "1", "status": "failure"}
+
+
+def test_load_task_without_prompt_arguments():
+    """Test that prompt_arguments defaults to None when not specified"""
+    yaml_content = """
+tasks:
+  - name: "Regular Task"
+    prompt: "Find failures"
+    interval: "1h"
+"""
+    loader = TaskLoader()
+    tasks = loader.load_from_yaml_string(yaml_content)
+
+    assert len(tasks) == 1
+    assert tasks[0].prompt_arguments is None
+
+
+def test_mcp_prompt_with_nested_path():
+    """Test MCP prompts with paths containing slashes"""
+    task = TaskDefinition(name="Test", prompt="mcp://server/category/subcategory/prompt", interval="5m")
+    server, prompt = task.parse_mcp_prompt()
+    assert server == "server"
+    assert prompt == "category/subcategory/prompt"

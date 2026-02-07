@@ -94,7 +94,8 @@ ai-assist
 - `/history` - Recent monitoring history
 - `/clear` - Clear conversation memory
 - `/kg-save [on|off]` - Toggle knowledge graph auto-save
-- `/prompts` - List available MCP prompts
+- `/prompts` - List available MCP prompts with arguments
+- `/prompt-info <server/prompt>` - Show detailed prompt info
 - `/skill/install <source>@<branch>` - Install an Agent Skill
 - `/skill/uninstall <name>` - Uninstall an Agent Skill
 - `/skill/list` - List installed Agent Skills
@@ -221,6 +222,73 @@ ai-assist /monitor
 ai-assist
 You: Create a monitor to check for failed DCI jobs every 5 minutes
 ```
+
+#### MCP Prompts in Tasks
+
+Execute MCP prompts directly from periodic tasks for consistent, automated workflows:
+
+**Natural Language (Traditional):**
+```json
+{
+  "tasks": [
+    {
+      "name": "System Check",
+      "prompt": "Find failures in the last 24 hours",
+      "interval": "1h"
+    }
+  ]
+}
+```
+
+**MCP Prompts (New):**
+```json
+{
+  "tasks": [
+    {
+      "name": "Daily RCA Report",
+      "prompt": "mcp://dci/rca",
+      "prompt_arguments": {
+        "days": "1",
+        "status": "failure"
+      },
+      "interval": "8:00 on weekdays"
+    }
+  ]
+}
+```
+
+**Format:** `mcp://server_name/prompt_name`
+
+**Benefits:**
+- Direct execution - no interpretation needed
+- Consistent results - same prompt, same output
+- Argument support - pass structured data
+- Less token usage - no translation layer
+
+**Creating via Interactive Mode:**
+```bash
+ai-assist /interactive
+
+# Natural language task
+You: Create a task to check for failures every hour
+
+# MCP prompt task (be specific about format)
+You: Create a task named "Weekly Report" that runs mcp://tpci/weekly_report
+     with argument "for" set to "Semih" at 10:45 on monday
+```
+
+**Discovery:**
+```bash
+ai-assist /interactive
+
+# List all prompts with their arguments
+/prompts
+
+# See detailed info about a specific prompt (arguments, descriptions, examples)
+/prompt-info tpci/weekly_report
+```
+
+See `.ai-assist/schedules.json.example` for complete examples.
 
 ### One-off Queries
 

@@ -143,3 +143,84 @@ async def test_task_result_creation():
     assert result.success is True
     assert result.output == "Test output"
     assert result.metadata["count"] == 5
+
+
+# Phase 4: MCP Prompt Task Execution Tests
+
+
+@pytest.mark.asyncio
+async def test_run_mcp_prompt_task(mock_agent, state_manager):
+    """Test executing task with MCP prompt"""
+    task = TaskDefinition(
+        name="DCI RCA", prompt="mcp://dci/rca", interval="8:00 on weekdays", prompt_arguments={"days": "1"}
+    )
+
+    # Mock execute_mcp_prompt instead of query
+    mock_agent.execute_mcp_prompt = AsyncMock(return_value="RCA analysis completed")
+
+    runner = TaskRunner(task, mock_agent, state_manager)
+    result = await runner.run()
+
+    assert result.success is True
+    assert result.output == "RCA analysis completed"
+    mock_agent.execute_mcp_prompt.assert_called_once_with("dci", "rca", {"days": "1"})
+    mock_agent.query.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_mcp_prompt_without_arguments(mock_agent, state_manager):
+    """Test executing MCP prompt task without arguments"""
+    task = TaskDefinition(name="Simple Prompt", prompt="mcp://server/prompt", interval="1h")
+
+    mock_agent.execute_mcp_prompt = AsyncMock(return_value="Prompt result")
+
+    runner = TaskRunner(task, mock_agent, state_manager)
+    result = await runner.run()
+
+    assert result.success is True
+    mock_agent.execute_mcp_prompt.assert_called_once_with("server", "prompt", None)
+
+
+@pytest.mark.asyncio
+async def test_run_natural_language_task_unchanged(mock_agent, state_manager):
+    """Test that natural language tasks still work after MCP changes"""
+    task = TaskDefinition(name="Natural Task", prompt="Find failures in the system", interval="1h")
+
+    mock_agent.query.return_value = "Found 3 failures"
+
+    runner = TaskRunner(task, mock_agent, state_manager)
+    result = await runner.run()
+
+    assert result.success is True
+    assert result.output == "Found 3 failures"
+    mock_agent.query.assert_called_once_with("Find failures in the system")
+
+
+@pytest.mark.asyncio
+async def test_run_mcp_prompt_invalid_server(mock_agent, state_manager):
+    """Test handling of invalid MCP server"""
+    task = TaskDefinition(name="Bad Server", prompt="mcp://invalid/prompt", interval="1h")
+
+    mock_agent.execute_mcp_prompt = AsyncMock(side_effect=ValueError("MCP server 'invalid' not connected"))
+
+    runner = TaskRunner(task, mock_agent, state_manager)
+    result = await runner.run()
+
+    assert result.success is False
+    assert "MCP server 'invalid' not connected" in result.output
+
+
+@pytest.mark.asyncio
+async def test_run_mcp_prompt_invalid_arguments(mock_agent, state_manager):
+    """Test handling of invalid MCP prompt arguments"""
+    task = TaskDefinition(
+        name="Bad Args", prompt="mcp://dci/rca", interval="1h", prompt_arguments={}  # Missing required args
+    )
+
+    mock_agent.execute_mcp_prompt = AsyncMock(side_effect=ValueError("Required argument 'days' missing"))
+
+    runner = TaskRunner(task, mock_agent, state_manager)
+    result = await runner.run()
+
+    assert result.success is False
+    assert "Required argument 'days' missing" in result.output

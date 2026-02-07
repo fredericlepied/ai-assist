@@ -26,7 +26,7 @@ class ScheduleTools:
         return [
             {
                 "name": "internal__create_monitor",
-                "description": "Create a new monitor schedule with knowledge graph integration",
+                "description": "Create a new monitor schedule with knowledge graph integration. When user references an MCP prompt (like '/server/prompt'), convert it to 'mcp://server/prompt' format and extract any arguments.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -36,7 +36,11 @@ class ScheduleTools:
                         },
                         "prompt": {
                             "type": "string",
-                            "description": "Monitoring prompt to execute",
+                            "description": "Monitoring prompt to execute. IMPORTANT: For MCP prompts use format 'mcp://server/prompt' (e.g., user says '/dci/rca' → use 'mcp://dci/rca'). For natural language, use plain text (e.g., 'Find failures').",
+                        },
+                        "prompt_arguments": {
+                            "type": "object",
+                            "description": 'Arguments for MCP prompts. Extract from user\'s request (e.g., \'for Semih\' → {"for": "Semih"}, \'last 7 days\' → {"days": "7"}). Leave empty for natural language prompts.',
                         },
                         "interval": {
                             "type": "string",
@@ -66,7 +70,7 @@ class ScheduleTools:
             },
             {
                 "name": "internal__create_task",
-                "description": "Create a new periodic task schedule",
+                "description": "Create a new periodic task schedule. When user references an MCP prompt (like '/server/prompt'), convert it to 'mcp://server/prompt' format and extract any arguments.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -76,7 +80,11 @@ class ScheduleTools:
                         },
                         "prompt": {
                             "type": "string",
-                            "description": "Task prompt to execute",
+                            "description": "Task prompt to execute. IMPORTANT: For MCP prompts use format 'mcp://server/prompt' (e.g., user says '/dci/rca' → use 'mcp://dci/rca'). For natural language, use plain text (e.g., 'Find failures').",
+                        },
+                        "prompt_arguments": {
+                            "type": "object",
+                            "description": 'Arguments for MCP prompts. Extract from user\'s request (e.g., \'for Semih\' → {"for": "Semih"}, \'last 7 days\' → {"days": "7"}). Leave empty for natural language prompts.',
                         },
                         "interval": {
                             "type": "string",
@@ -245,6 +253,7 @@ class ScheduleTools:
                 enabled=arguments.get("enabled", True),
                 conditions=arguments.get("conditions", []),
                 knowledge_graph=arguments.get("knowledge_graph"),
+                prompt_arguments=arguments.get("prompt_arguments"),
             )
 
         elif tool_name == "create_task":
@@ -255,6 +264,7 @@ class ScheduleTools:
                 description=arguments.get("description"),
                 enabled=arguments.get("enabled", True),
                 conditions=arguments.get("conditions", []),
+                prompt_arguments=arguments.get("prompt_arguments"),
             )
 
         elif tool_name == "list_schedules":
@@ -290,6 +300,7 @@ class ScheduleTools:
         enabled: bool = True,
         conditions: list = None,
         knowledge_graph: dict | None = None,
+        prompt_arguments: dict | None = None,
     ) -> str:
         """Create a new monitor schedule"""
         if conditions is None:
@@ -305,6 +316,7 @@ class ScheduleTools:
                 enabled=enabled,
                 conditions=conditions,
                 knowledge_graph=knowledge_graph,
+                prompt_arguments=prompt_arguments,
             )
             monitor_def.validate()
         except ValueError as e:
@@ -335,6 +347,8 @@ class ScheduleTools:
             monitor_data["conditions"] = conditions
         if knowledge_graph:
             monitor_data["knowledge_graph"] = knowledge_graph
+        if prompt_arguments:
+            monitor_data["prompt_arguments"] = prompt_arguments
 
         schedules["monitors"].append(monitor_data)
 
@@ -351,6 +365,7 @@ class ScheduleTools:
         description: str | None = None,
         enabled: bool = True,
         conditions: list = None,
+        prompt_arguments: dict | None = None,
     ) -> str:
         """Create a new task schedule"""
         if conditions is None:
@@ -365,6 +380,7 @@ class ScheduleTools:
                 description=description,
                 enabled=enabled,
                 conditions=conditions,
+                prompt_arguments=prompt_arguments,
             )
             task_def.validate()
         except ValueError as e:
@@ -393,6 +409,8 @@ class ScheduleTools:
             task_data["description"] = description
         if conditions:
             task_data["conditions"] = conditions
+        if prompt_arguments:
+            task_data["prompt_arguments"] = prompt_arguments
 
         schedules["tasks"].append(task_data)
 

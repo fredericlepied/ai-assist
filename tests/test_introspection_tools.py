@@ -52,13 +52,14 @@ def test_get_tool_definitions_with_kg(introspection_tools_with_kg):
     """Test tool definitions with KG only"""
     tools_defs = introspection_tools_with_kg.get_tool_definitions()
 
-    # Should have 3 KG tools
-    assert len(tools_defs) == 3
+    # Should have 3 KG tools + 1 MCP prompt inspection tool
+    assert len(tools_defs) == 4
 
     tool_names = [t["name"] for t in tools_defs]
-    assert "search_knowledge_graph" in tool_names
-    assert "get_kg_entity" in tool_names
-    assert "get_kg_stats" in tool_names
+    assert "introspection__search_knowledge_graph" in tool_names
+    assert "introspection__get_kg_entity" in tool_names
+    assert "introspection__get_kg_stats" in tool_names
+    assert "introspection__inspect_mcp_prompt" in tool_names
 
     # All should be from introspection server
     for tool in tools_defs:
@@ -69,14 +70,15 @@ def test_get_tool_definitions_with_both(introspection_tools_full):
     """Test tool definitions with both KG and conversation"""
     tools_defs = introspection_tools_full.get_tool_definitions()
 
-    # Should have 4 tools (3 KG + 1 conversation)
-    assert len(tools_defs) == 4
+    # Should have 3 KG + 1 MCP prompt inspection + 1 conversation
+    assert len(tools_defs) == 5
 
     tool_names = [t["name"] for t in tools_defs]
-    assert "search_knowledge_graph" in tool_names
-    assert "get_kg_entity" in tool_names
-    assert "get_kg_stats" in tool_names
-    assert "search_conversation_history" in tool_names
+    assert "introspection__search_knowledge_graph" in tool_names
+    assert "introspection__get_kg_entity" in tool_names
+    assert "introspection__get_kg_stats" in tool_names
+    assert "introspection__inspect_mcp_prompt" in tool_names
+    assert "introspection__search_conversation_history" in tool_names
 
 
 def test_tool_definitions_have_schemas(introspection_tools_full):

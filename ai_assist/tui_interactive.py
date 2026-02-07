@@ -528,6 +528,11 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                 await handle_prompts_command(agent, console)
                 continue
 
+            if user_input.lower().startswith("/prompt-info "):
+                prompt_ref = user_input[13:].strip()  # Remove "/prompt-info "
+                await handle_prompt_info_command(agent, console, prompt_ref)
+                continue
+
             if user_input.lower() == "/status":
                 await handle_status_command(state_manager, console)
                 continue
@@ -641,14 +646,83 @@ async def handle_prompts_command(agent: AiAssistAgent, console: Console):
     table.add_column("Command", style="cyan")
     table.add_column("Server", style="green")
     table.add_column("Description", style="white")
+    table.add_column("Arguments", style="yellow")
 
     for server_name, prompts in agent.available_prompts.items():
         for prompt_name, prompt in prompts.items():
             command = f"/{server_name}/{prompt_name}"
             description = prompt.description or "(no description)"
-            table.add_row(command, server_name, description)
+
+            # Format arguments
+            args_list = []
+            if hasattr(prompt, "arguments") and prompt.arguments:
+                for arg in prompt.arguments:
+                    arg_name = arg.name
+                    if arg.required:
+                        args_list.append(f"{arg_name}* (required)")
+                    else:
+                        args_list.append(f"{arg_name} (optional)")
+
+            args_display = "\n".join(args_list) if args_list else "-"
+            table.add_row(command, server_name, description, args_display)
 
     console.print(table)
+    console.print("\n[dim]* = required argument[/dim]")
+    console.print("[dim]Use /server/prompt to execute (e.g., /dci/rca)[/dim]\n")
+
+
+async def handle_prompt_info_command(agent: AiAssistAgent, console: Console, prompt_ref: str):
+    """Handle /prompt-info <server/prompt> command - show detailed prompt information"""
+    # Parse server/prompt
+    parts = prompt_ref.strip("/").split("/")
+    if len(parts) != 2:
+        console.print("[yellow]Usage: /prompt-info <server>/<prompt>[/yellow]")
+        console.print("[dim]Example: /prompt-info dci/rca[/dim]\n")
+        return
+
+    server_name, prompt_name = parts
+
+    # Validate server and prompt exist
+    if server_name not in agent.available_prompts:
+        console.print(f"[yellow]Unknown server: {server_name}[/yellow]")
+        console.print(f"Available servers: {', '.join(agent.available_prompts.keys())}\n")
+        return
+
+    if prompt_name not in agent.available_prompts[server_name]:
+        console.print(f"[yellow]Unknown prompt: {prompt_name}[/yellow]")
+        prompts = agent.available_prompts[server_name].keys()
+        console.print(f"Available prompts: {', '.join(prompts)}\n")
+        return
+
+    # Get prompt definition
+    prompt_def = agent.available_prompts[server_name][prompt_name]
+
+    # Display prompt information
+    console.print(f"\n[bold cyan]Prompt: {server_name}/{prompt_name}[/bold cyan]")
+    console.print(f"[dim]MCP format: mcp://{server_name}/{prompt_name}[/dim]\n")
+
+    if prompt_def.description:
+        console.print(f"[white]{prompt_def.description}[/white]\n")
+
+    # Display arguments
+    if hasattr(prompt_def, "arguments") and prompt_def.arguments:
+        console.print("[bold yellow]Arguments:[/bold yellow]")
+        for arg in prompt_def.arguments:
+            required = "[red]REQUIRED[/red]" if arg.required else "[dim]optional[/dim]"
+            console.print(f"  • [cyan]{arg.name}[/cyan] ({required})")
+            if arg.description:
+                console.print(f"    [dim]{arg.description}[/dim]")
+        console.print()
+    else:
+        console.print("[dim]No arguments required[/dim]\n")
+
+    # Show example usage
+    console.print("[bold]Example Usage:[/bold]")
+    console.print(f"[dim]Interactive:[/dim] /{server_name}/{prompt_name}")
+    if hasattr(prompt_def, "arguments") and prompt_def.arguments:
+        example_args = {arg.name: f"<{arg.name}>" for arg in prompt_def.arguments if arg.required}
+        console.print(f"[dim]In task:[/dim] mcp://{server_name}/{prompt_name}")
+        console.print(f"[dim]Arguments:[/dim] {example_args}")
     console.print()
 
 
@@ -664,6 +738,7 @@ async def handle_help_command(console: Console):
 - `/clear` - Clear conversation memory (start fresh)
 - `/kg-save [on|off]` - Toggle knowledge graph auto-save
 - `/prompts` - List available MCP prompts
+- `/prompt-info <server/prompt>` - Show detailed prompt info
 - `/server/prompt` - Load an MCP prompt (e.g., `/dci/rca`)
 - `/skill/install <source>@<branch>` - Install an Agent Skill
 - `/skill/uninstall <name>` - Uninstall an Agent Skill

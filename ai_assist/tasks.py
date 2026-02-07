@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from datetime import time as dt_time
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -19,6 +20,7 @@ class TaskDefinition:
     description: str | None = None
     enabled: bool = True
     conditions: list[dict] = field(default_factory=list)
+    prompt_arguments: dict[str, Any] | None = None
 
     @property
     def interval_seconds(self) -> int:
@@ -30,6 +32,33 @@ class TaskDefinition:
         """Check if this is a time-based schedule"""
         return " on " in self.interval.lower()
 
+    @property
+    def is_mcp_prompt(self) -> bool:
+        """Check if prompt is an MCP prompt reference"""
+        return self.prompt.startswith("mcp://")
+
+    def parse_mcp_prompt(self) -> tuple[str, str]:
+        """Parse 'mcp://server/prompt' into (server, prompt)
+
+        Raises:
+            ValueError: If format is invalid
+        """
+        if not self.is_mcp_prompt:
+            raise ValueError("Not an MCP prompt reference")
+
+        # Remove mcp:// prefix
+        ref = self.prompt[6:]
+
+        # Split server/prompt
+        if "/" not in ref:
+            raise ValueError("MCP prompt must be 'mcp://server/prompt'")
+
+        parts = ref.split("/", 1)
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError("MCP prompt must be 'mcp://server/prompt'")
+
+        return parts[0], parts[1]
+
     def validate(self):
         """Validate task definition"""
         if not self.name:
@@ -38,6 +67,13 @@ class TaskDefinition:
             raise ValueError("Task prompt is required")
         if not self.interval:
             raise ValueError("Task interval is required")
+
+        # Validate MCP prompt format if applicable
+        if self.is_mcp_prompt:
+            try:
+                self.parse_mcp_prompt()
+            except ValueError as e:
+                raise ValueError(f"Invalid MCP prompt reference: {e}") from e
 
         # Validate interval format
         try:
@@ -251,6 +287,7 @@ class TaskLoader:
                     description=task_data.get("description"),
                     enabled=task_data.get("enabled", True),
                     conditions=task_data.get("conditions", []),
+                    prompt_arguments=task_data.get("prompt_arguments"),
                 )
 
                 # Validate task
@@ -281,6 +318,7 @@ class TaskLoader:
                     description=task_data.get("description"),
                     enabled=task_data.get("enabled", True),
                     conditions=task_data.get("conditions", []),
+                    prompt_arguments=task_data.get("prompt_arguments"),
                 )
 
                 task.validate()
@@ -315,6 +353,7 @@ class TaskLoader:
                     enabled=monitor_data.get("enabled", True),
                     conditions=monitor_data.get("conditions", []),
                     knowledge_graph=monitor_data.get("knowledge_graph"),
+                    prompt_arguments=monitor_data.get("prompt_arguments"),
                 )
 
                 monitor.validate()

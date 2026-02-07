@@ -36,6 +36,7 @@ class ScheduleLoader:
                     enabled=monitor_data.get("enabled", True),
                     conditions=monitor_data.get("conditions", []),
                     knowledge_graph=monitor_data.get("knowledge_graph"),
+                    prompt_arguments=monitor_data.get("prompt_arguments"),
                 )
                 monitor.validate()
                 monitors.append(monitor)
@@ -62,6 +63,7 @@ class ScheduleLoader:
                     description=task_data.get("description"),
                     enabled=task_data.get("enabled", True),
                     conditions=task_data.get("conditions", []),
+                    prompt_arguments=task_data.get("prompt_arguments"),
                 )
                 task.validate()
                 tasks.append(task)
