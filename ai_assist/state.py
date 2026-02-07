@@ -1,6 +1,7 @@
 """State management for persisting knowledge and monitoring history"""
 
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -86,15 +87,20 @@ class StateManager:
         return current_items - state.seen_items
 
     def cache_query_result(self, query_key: str, result: Any, ttl_seconds: int = 300):
-        """Cache a query result with TTL"""
+        """Cache a query result with TTL using monotonic time"""
         cache_file = self.cache_dir / f"{self._sanitize_key(query_key)}.json"
-        cache_data = {"result": result, "timestamp": datetime.now().isoformat(), "ttl_seconds": ttl_seconds}
+        cache_data = {
+            "result": result,
+            "timestamp": datetime.now().isoformat(),  # For backward compatibility
+            "cached_at_mono": time.monotonic(),  # Monotonic time for TTL
+            "ttl_seconds": ttl_seconds,
+        }
 
         with open(cache_file, "w") as f:
             json.dump(cache_data, f, indent=2, default=str)
 
     def get_cached_query(self, query_key: str) -> Any | None:
-        """Get cached query result if not expired"""
+        """Get cached query result if not expired (using monotonic time)"""
         cache_file = self.cache_dir / f"{self._sanitize_key(query_key)}.json"
 
         if not cache_file.exists():
@@ -103,9 +109,15 @@ class StateManager:
         with open(cache_file) as f:
             cache_data = json.load(f)
 
-        cached_time = datetime.fromisoformat(cache_data["timestamp"])
         ttl = cache_data.get("ttl_seconds", 300)
-        age = (datetime.now() - cached_time).total_seconds()
+
+        # Use monotonic time if available (new format)
+        if "cached_at_mono" in cache_data:
+            age = time.monotonic() - cache_data["cached_at_mono"]
+        else:
+            # Fallback to wall-clock time for old cache entries
+            cached_time = datetime.fromisoformat(cache_data["timestamp"])
+            age = (datetime.now() - cached_time).total_seconds()
 
         if age > ttl:
             cache_file.unlink()  # Delete expired cache
@@ -177,16 +189,22 @@ class StateManager:
         }
 
     def cleanup_expired_cache(self):
-        """Remove all expired cache entries"""
+        """Remove all expired cache entries (using monotonic time)"""
         removed = 0
         for cache_file in self.cache_dir.glob("*.json"):
             try:
                 with open(cache_file) as f:
                     cache_data = json.load(f)
 
-                cached_time = datetime.fromisoformat(cache_data["timestamp"])
                 ttl = cache_data.get("ttl_seconds", 300)
-                age = (datetime.now() - cached_time).total_seconds()
+
+                # Use monotonic time if available (new format)
+                if "cached_at_mono" in cache_data:
+                    age = time.monotonic() - cache_data["cached_at_mono"]
+                else:
+                    # Fallback to wall-clock time for old cache entries
+                    cached_time = datetime.fromisoformat(cache_data["timestamp"])
+                    age = (datetime.now() - cached_time).total_seconds()
 
                 if age > ttl:
                     cache_file.unlink()

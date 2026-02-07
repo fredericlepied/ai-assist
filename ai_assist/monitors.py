@@ -5,12 +5,14 @@ from datetime import datetime
 from pathlib import Path
 
 from .agent import AiAssistAgent
+from .file_watchdog import FileWatchdog
 from .knowledge_graph import KnowledgeGraph
 from .monitor_runner import MonitorRunner
 from .schedule_loader import ScheduleLoader
+from .schedule_recalculator import ScheduleRecalculator
 from .state import StateManager
+from .suspend_detector import SuspendDetector
 from .task_runner import TaskRunner
-from .task_watcher import TaskFileWatcher
 from .tasks import TaskLoader
 
 
@@ -42,6 +44,11 @@ class MonitoringScheduler:
         self.monitor_handles: list[asyncio.Task] = []
         self.user_task_handles: list[asyncio.Task] = []
         self.running = False
+
+        # Suspension detection and recovery
+        self.suspend_detector: SuspendDetector | None = None
+        self.schedule_recalculator = ScheduleRecalculator()
+        self.file_watchdog: FileWatchdog | None = None
 
         # Load initial schedules
         self.monitors = self._load_monitors()
@@ -178,11 +185,20 @@ class MonitoringScheduler:
         if self.user_tasks:
             print(f"Scheduled {len(self.user_tasks)} user-defined tasks")
 
-        # Watch schedules.json for changes
+        # Watch schedules.json for changes using OS-level file watching
         if self.schedule_file and self.schedule_file.exists():
-            watcher = TaskFileWatcher(self.schedule_file, self.reload_schedules)
-            tasks.append(asyncio.create_task(watcher.watch()))
+            self.file_watchdog = FileWatchdog(self.schedule_file, self.reload_schedules, debounce_seconds=0.5)
+            await self.file_watchdog.start()
             print(f"Watching {self.schedule_file} for changes...")
+
+        # Start suspension detection
+        self.suspend_detector = SuspendDetector(
+            suspend_threshold_seconds=30.0,
+            poll_interval_seconds=5.0,
+        )
+        suspend_task = asyncio.create_task(self.suspend_detector.watch(self._handle_wake_event))
+        tasks.append(suspend_task)
+        print("Suspension detection enabled")
 
         await asyncio.gather(*tasks)
 
@@ -243,7 +259,60 @@ class MonitoringScheduler:
             print(f"\n{result['summary']}")
             print(f"{'-'*60}")
 
-    def stop(self):
+    async def _handle_wake_event(self, wall_jump_seconds: float, now: datetime | None = None) -> None:
+        """Handle system wake event after suspension.
+
+        Args:
+            wall_jump_seconds: How many seconds the wall clock jumped
+            now: Current time (for testing, defaults to datetime.now())
+        """
+        if now is None:
+            now = datetime.now()
+
+        print("\n" + "=" * 60)
+        print(f"⚠️  Suspension detected: {abs(wall_jump_seconds):.0f} seconds")
+        print("Checking for missed scheduled runs...")
+        print("=" * 60)
+
+        # Collect all scheduled items (monitors + user tasks)
+        all_scheduled = []
+
+        for monitor in self.monitors:
+            if monitor.monitor_def.is_time_based:
+                # Create adapter object with execute method
+                adapter = type(
+                    "MonitorAdapter",
+                    (),
+                    {
+                        "schedule": monitor.monitor_def.interval,
+                        "execute": monitor.run,
+                    },
+                )()
+                all_scheduled.append(adapter)
+
+        for task_runner in self.user_tasks:
+            if task_runner.task_def.is_time_based:
+                adapter = type(
+                    "TaskAdapter",
+                    (),
+                    {
+                        "schedule": task_runner.task_def.interval,
+                        "execute": task_runner.run,
+                    },
+                )()
+                all_scheduled.append(adapter)
+
+        # Check for and execute missed runs
+        await self.schedule_recalculator.handle_wake_event(wall_jump_seconds, all_scheduled, now=now)
+
+        print("✓ Suspension recovery complete")
+        print("=" * 60 + "\n")
+
+    async def stop(self):
         """Stop the monitoring loop"""
         self.running = False
         print("Stopping monitoring scheduler...")
+
+        # Stop file watchdog
+        if self.file_watchdog:
+            await self.file_watchdog.stop()

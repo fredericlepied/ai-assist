@@ -1,11 +1,17 @@
 # ai-assist - AI Assistant for Managers
 
-An intelligent AI assistant powered by Claude and MCP (Model Context Protocol) that helps managers with periodic automated monitoring and interactive querying.
+An intelligent AI assistant powered by Claude, Skills and MCP (Model Context Protocol) that helps managers with periodic automated monitoring and interactive querying.
 
 Works with MCP servers like:
 - [DCI MCP Server](https://github.com/redhat-community-ai-tools/dci-mcp-server) for DCI and Jira
 - [Second Brain](https://github.com/flepied/second-brain-agent) for personal notes
 - Any other MCP-compatible server
+
+Works with skills like:
+
+- [pdf](https://github.com/anthropics/skills/blob/main/skills/pdf/SKILL.md)
+- [markdown-converter](https://github.com/intellectronica/agent-skills/blob/main/skills/markdown-converter/SKILL.md)
+- Any other [skills](https://skills.sh/)
 
 ## Features
 
@@ -200,6 +206,7 @@ ai-assist /monitor
 - Auto-saves findings to knowledge graph
 - Hot-reloads when schedules change
 - Sends notifications on important updates
+- Handles laptop suspension gracefully (catches up missed runs)
 
 **Create monitors via interactive mode:**
 ```bash
@@ -303,7 +310,7 @@ ai-assist/
 │   ├── state.py           # State management and caching
 │   ├── knowledge_graph.py # Temporal knowledge graph
 │   └── filesystem_tools.py # Filesystem operations
-├── tests/                  # Test suite (265 tests)
+├── tests/                  # Test suite (321 tests)
 ├── .env.example           # Example environment variables
 └── docs/
     ├── QUICKSTART.md      # Detailed setup guide
