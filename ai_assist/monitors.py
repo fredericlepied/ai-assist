@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 
 from .agent import AiAssistAgent
+from .config import get_config_dir
+from .config_watcher import ConfigWatcher
 from .file_watchdog import FileWatchdog
 from .knowledge_graph import KnowledgeGraph
 from .monitor_runner import MonitorRunner
@@ -36,7 +38,7 @@ class MonitoringScheduler:
         if schedule_file:
             self.schedule_file = schedule_file
         else:
-            self.schedule_file = Path.home() / ".ai-assist" / "schedules.json"
+            self.schedule_file = get_config_dir() / "schedules.json"
 
         self.loader = ScheduleLoader(self.schedule_file)
         self.monitors: list[MonitorRunner] = []
@@ -49,6 +51,7 @@ class MonitoringScheduler:
         self.suspend_detector: SuspendDetector | None = None
         self.schedule_recalculator = ScheduleRecalculator()
         self.file_watchdog: FileWatchdog | None = None
+        self.config_watcher: ConfigWatcher | None = None
 
         # Load initial schedules
         self.monitors = self._load_monitors()
@@ -191,6 +194,10 @@ class MonitoringScheduler:
             await self.file_watchdog.start()
             print(f"Watching {self.schedule_file} for changes...")
 
+        # Start config watching (mcp_servers.yaml, identity.yaml, installed-skills.json)
+        self.config_watcher = ConfigWatcher(self.agent)
+        await self.config_watcher.start()
+
         # Start suspension detection
         self.suspend_detector = SuspendDetector(
             suspend_threshold_seconds=30.0,
@@ -316,3 +323,7 @@ class MonitoringScheduler:
         # Stop file watchdog
         if self.file_watchdog:
             await self.file_watchdog.stop()
+
+        # Stop config watcher
+        if self.config_watcher:
+            await self.config_watcher.stop()

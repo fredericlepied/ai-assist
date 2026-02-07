@@ -399,6 +399,33 @@ ai-assist/
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development setup with pre-commit hooks
 - **[AGENTS.md](AGENTS.md)** - Development philosophy (TDD/DRY/Tracer Bullet)
 
+## Development
+
+### Auto-Reload
+
+Configuration files are automatically watched and reloaded in both monitor and interactive modes:
+
+- **`mcp_servers.yaml`** - Reconnects to changed MCP servers
+- **`identity.yaml`** - Updates identity and system prompt
+- **`installed-skills.json`** - Reloads Agent Skills
+- **`schedules.json`** - Restarts monitors and tasks (monitor mode only)
+
+Changes take effect immediately without manual restart.
+
+### Code Auto-Reload (Dev Mode)
+
+Use the `--dev` flag to enable automatic process restart when Python code changes:
+
+```bash
+# Monitor mode with code watching
+ai-assist --dev /monitor
+
+# Interactive mode with code watching
+ai-assist --dev /interactive
+```
+
+This is useful during development to see code changes immediately.
+
 ## Requirements
 
 - Python 3.12+

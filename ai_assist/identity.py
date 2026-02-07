@@ -5,6 +5,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
+from .config import get_config_dir
+
 
 class UserIdentity(BaseModel):
     """User identity information"""
@@ -44,13 +46,13 @@ class Identity(BaseModel):
         """Load identity from YAML file
 
         Args:
-            path: Path to identity.yaml file. If None, uses ~/.ai-assist/identity.yaml
+            path: Path to identity.yaml file. If None, uses <config_dir>/identity.yaml
 
         Returns:
             Identity object (uses defaults if file doesn't exist)
         """
         if path is None:
-            path = Path.home() / ".ai-assist" / "identity.yaml"
+            path = get_config_dir() / "identity.yaml"
 
         if not path.exists():
             # Return default identity
@@ -74,10 +76,10 @@ class Identity(BaseModel):
         """Save identity to YAML file
 
         Args:
-            path: Path to identity.yaml file. If None, uses ~/.ai-assist/identity.yaml
+            path: Path to identity.yaml file. If None, uses <config_dir>/identity.yaml
         """
         if path is None:
-            path = Path.home() / ".ai-assist" / "identity.yaml"
+            path = get_config_dir() / "identity.yaml"
 
         # Ensure directory exists
         path.parent.mkdir(parents=True, exist_ok=True)

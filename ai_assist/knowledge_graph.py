@@ -4,9 +4,10 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
+
+from .config import get_config_dir
 
 
 @dataclass
@@ -120,12 +121,11 @@ class KnowledgeGraph:
         """Initialize the knowledge graph
 
         Args:
-            db_path: Path to SQLite database file. If None, uses ~/.ai-assist/knowledge_graph.db
+            db_path: Path to SQLite database file. If None, uses <config_dir>/knowledge_graph.db
                     If ":memory:", uses in-memory database for testing
         """
         if db_path is None:
-            db_path = str(Path.home() / ".ai-assist" / "knowledge_graph.db")
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            db_path = str(get_config_dir() / "knowledge_graph.db")
 
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path)

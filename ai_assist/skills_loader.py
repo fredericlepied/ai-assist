@@ -7,6 +7,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from .config import get_config_dir
+
 
 class SkillMetadata(BaseModel):
     """Skill metadata from YAML frontmatter (progressive disclosure)"""
@@ -69,7 +71,7 @@ class SkillsLoader:
 
     def __init__(self):
         """Initialize skills loader"""
-        self.cache_dir = Path.home() / ".ai-assist" / "skills-cache"
+        self.cache_dir = get_config_dir() / "skills-cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def load_skill_from_local(self, skill_path: Path) -> SkillContent:

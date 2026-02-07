@@ -1,7 +1,6 @@
 """TUI-enhanced interactive mode for ai-assist"""
 
 import asyncio
-from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -15,6 +14,8 @@ from rich.table import Table
 
 from .agent import AiAssistAgent
 from .commands import get_command_suggestion, is_valid_interactive_command
+from .config import get_config_dir
+from .config_watcher import ConfigWatcher
 from .context import ConversationMemory, KnowledgeGraphContext
 from .identity import get_identity
 from .knowledge_graph import KnowledgeGraph
@@ -361,7 +362,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     identity = get_identity()
 
     # Setup history file
-    history_file = Path.home() / ".ai-assist" / "interactive_history.txt"
+    history_file = get_config_dir() / "interactive_history.txt"
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Create key bindings for better UX
@@ -420,194 +421,206 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         # If KG fails to load, disable enrichment
         kg_context = KnowledgeGraphContext(None)
 
-    while True:
-        try:
-            user_input = await session.prompt_async()
-            user_input = user_input.strip()
+    # Start config watching (mcp_servers.yaml, identity.yaml, installed-skills.json)
+    config_watcher = ConfigWatcher(agent)
+    await config_watcher.start()
 
-            if not user_input:
-                continue
+    try:
+        while True:
+            try:
+                user_input = await session.prompt_async()
+                user_input = user_input.strip()
 
-            if user_input.lower() in ["/exit", "/quit"]:
+                if not user_input:
+                    continue
+
+                if user_input.lower() in ["/exit", "/quit"]:
+                    state_manager.save_conversation_context(
+                        "last_interactive_session", {"messages": conversation_context}
+                    )
+                    console.print("\n[cyan]Goodbye![/cyan]")
+                    break
+
+                # Handle slash commands
+                if user_input.startswith("/"):
+                    # Try skill management commands: /skill/install, /skill/uninstall, /skill/list
+                    if await handle_skill_management_command(user_input, agent, console):
+                        continue
+
+                    # Convert conversation_memory to messages for prompt injection
+                    messages = conversation_memory.to_messages()
+                    if await handle_prompt_command(user_input, agent, messages, console, session):
+                        # Automatically send the loaded prompt to Claude
+                        # The prompt has been injected into 'messages' and is the last user message
+                        try:
+                            console.print()  # Blank line before response
+
+                            # Use streaming query with the messages that now include the prompt
+                            full_response = ""
+                            response_started = False
+                            identity = get_identity()
+
+                            async for chunk in agent.query_streaming(messages=messages, progress_callback=None):
+                                # Handle text chunks
+                                if isinstance(chunk, str):
+                                    if not response_started:
+                                        console.print()  # Blank line before agent message
+                                        console.print(f"[bold cyan]{identity.assistant.nickname}:[/bold cyan] ", end="")
+                                        response_started = True
+                                    console.print(chunk, end="")
+                                    full_response += chunk
+
+                                # Handle tool use notifications
+                                elif isinstance(chunk, dict):
+                                    if chunk.get("type") == "tool_use":
+                                        if response_started:
+                                            console.print()
+                                        tool_name = chunk["name"]
+                                        display_name = (
+                                            tool_name.replace("mcp__", "").replace("__", " → ").replace("_", " ")
+                                        )
+
+                                        # Show tool call with arguments
+                                        console.print(f"\n[dim]🔧 {display_name}[/dim]")
+
+                                        # Display arguments if present
+                                        if chunk.get("input"):
+                                            args_display = []
+                                            for key, value in chunk["input"].items():
+                                                # Truncate long values
+                                                value_str = str(value)
+                                                if len(value_str) > 100:
+                                                    value_str = value_str[:100] + "..."
+                                                args_display.append(f"{key}={value_str}")
+                                            console.print(f"[dim]   {', '.join(args_display)}[/dim]")
+                                    elif chunk.get("type") == "done":
+                                        if response_started:
+                                            console.print()
+                                        break
+                                    elif chunk.get("type") == "error":
+                                        if response_started:
+                                            console.print()
+                                        console.print(f"\n[red]{chunk.get('message')}[/red]")
+                                        break
+
+                            # Show KG save feedback if entities were saved
+                            kg_saved_count = agent.get_last_kg_saved_count()
+                            if kg_saved_count > 0:
+                                console.print(
+                                    f"[dim]💾 Saved {kg_saved_count} entit{'y' if kg_saved_count == 1 else 'ies'} to knowledge graph[/dim]"
+                                )
+                            agent.clear_tool_calls()
+
+                            # Extract the prompt content (last user message) for conversation tracking
+                            prompt_content = (
+                                messages[-1]["content"] if messages and messages[-1]["role"] == "user" else user_input
+                            )
+
+                            # Add the exchange to conversation memory
+                            conversation_memory.add_exchange(prompt_content, full_response)
+
+                            # Track for state manager
+                            conversation_context.append(
+                                {
+                                    "user": user_input,  # Original /dci/rca command
+                                    "assistant": full_response,
+                                    "timestamp": str(asyncio.get_event_loop().time()),
+                                }
+                            )
+
+                        except Exception as e:
+                            console.print(f"\n[red]Error: {e}[/red]\n")
+
+                        continue
+
+                # Handle commands
+                if user_input.lower() == "/prompts":
+                    await handle_prompts_command(agent, console)
+                    continue
+
+                if user_input.lower().startswith("/prompt-info "):
+                    prompt_ref = user_input[13:].strip()  # Remove "/prompt-info "
+                    await handle_prompt_info_command(agent, console, prompt_ref)
+                    continue
+
+                if user_input.lower() == "/status":
+                    await handle_status_command(state_manager, console)
+                    continue
+
+                if user_input.lower() == "/history":
+                    await handle_history_command(state_manager, console)
+                    continue
+
+                if user_input.lower() == "/clear-cache":
+                    await handle_clear_cache_command(state_manager, console)
+                    continue
+
+                if user_input.lower() == "/help":
+                    await handle_help_command(console)
+                    continue
+
+                if user_input.lower() == "/clear":
+                    conversation_memory.clear()
+                    console.print("\n[green]✓ Conversation memory cleared[/green]\n")
+                    continue
+
+                if user_input.lower().startswith("/kg-save"):
+                    parts = user_input.split()
+                    if len(parts) > 1:
+                        if parts[1].lower() in ["on", "true", "1", "yes"]:
+                            agent.kg_save_enabled = True
+                            console.print("\n[green]✓ Knowledge graph auto-save enabled[/green]\n")
+                        elif parts[1].lower() in ["off", "false", "0", "no"]:
+                            agent.kg_save_enabled = False
+                            console.print("\n[yellow]Knowledge graph auto-save disabled[/yellow]\n")
+                        else:
+                            console.print("\n[red]Usage: /kg-save [on|off][/red]\n")
+                    else:
+                        status = "enabled" if agent.kg_save_enabled else "disabled"
+                        console.print(f"\n[cyan]Knowledge graph auto-save is currently {status}[/cyan]\n")
+                    continue
+
+                # Validate command before sending to agent
+                if not is_valid_interactive_command(user_input):
+                    error_msg = get_command_suggestion(user_input, is_interactive=True)
+                    console.print(f"\n[red]{error_msg}[/red]\n")
+                    continue
+
+                # Regular query
+                try:
+                    # Show feedback while processing and stream response
+                    response = await query_with_feedback(
+                        agent, user_input, console, conversation_memory=conversation_memory, kg_context=kg_context
+                    )
+
+                    # Response is already printed via streaming
+                    # Just add final newline if not already there
+                    if response and not response.endswith("\n"):
+                        console.print()
+
+                    # Add to conversation memory for context
+                    conversation_memory.add_exchange(user_input, response)
+
+                    # Track conversation in context list for state manager
+                    conversation_context.append(
+                        {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
+                    )
+
+                except (EOFError, KeyboardInterrupt):
+                    # Re-raise to be caught by outer handler which breaks the loop
+                    raise
+                except Exception as e:
+                    console.print(f"\n[red]Error: {e}[/red]\n")
+
+            except (EOFError, KeyboardInterrupt):
                 state_manager.save_conversation_context("last_interactive_session", {"messages": conversation_context})
                 console.print("\n[cyan]Goodbye![/cyan]")
                 break
-
-            # Handle slash commands
-            if user_input.startswith("/"):
-                # Try skill management commands: /skill/install, /skill/uninstall, /skill/list
-                if await handle_skill_management_command(user_input, agent, console):
-                    continue
-
-                # Convert conversation_memory to messages for prompt injection
-                messages = conversation_memory.to_messages()
-                if await handle_prompt_command(user_input, agent, messages, console, session):
-                    # Automatically send the loaded prompt to Claude
-                    # The prompt has been injected into 'messages' and is the last user message
-                    try:
-                        console.print()  # Blank line before response
-
-                        # Use streaming query with the messages that now include the prompt
-                        full_response = ""
-                        response_started = False
-                        identity = get_identity()
-
-                        async for chunk in agent.query_streaming(messages=messages, progress_callback=None):
-                            # Handle text chunks
-                            if isinstance(chunk, str):
-                                if not response_started:
-                                    console.print()  # Blank line before agent message
-                                    console.print(f"[bold cyan]{identity.assistant.nickname}:[/bold cyan] ", end="")
-                                    response_started = True
-                                console.print(chunk, end="")
-                                full_response += chunk
-
-                            # Handle tool use notifications
-                            elif isinstance(chunk, dict):
-                                if chunk.get("type") == "tool_use":
-                                    if response_started:
-                                        console.print()
-                                    tool_name = chunk["name"]
-                                    display_name = tool_name.replace("mcp__", "").replace("__", " → ").replace("_", " ")
-
-                                    # Show tool call with arguments
-                                    console.print(f"\n[dim]🔧 {display_name}[/dim]")
-
-                                    # Display arguments if present
-                                    if chunk.get("input"):
-                                        args_display = []
-                                        for key, value in chunk["input"].items():
-                                            # Truncate long values
-                                            value_str = str(value)
-                                            if len(value_str) > 100:
-                                                value_str = value_str[:100] + "..."
-                                            args_display.append(f"{key}={value_str}")
-                                        console.print(f"[dim]   {', '.join(args_display)}[/dim]")
-                                elif chunk.get("type") == "done":
-                                    if response_started:
-                                        console.print()
-                                    break
-                                elif chunk.get("type") == "error":
-                                    if response_started:
-                                        console.print()
-                                    console.print(f"\n[red]{chunk.get('message')}[/red]")
-                                    break
-
-                        # Show KG save feedback if entities were saved
-                        kg_saved_count = agent.get_last_kg_saved_count()
-                        if kg_saved_count > 0:
-                            console.print(
-                                f"[dim]💾 Saved {kg_saved_count} entit{'y' if kg_saved_count == 1 else 'ies'} to knowledge graph[/dim]"
-                            )
-                        agent.clear_tool_calls()
-
-                        # Extract the prompt content (last user message) for conversation tracking
-                        prompt_content = (
-                            messages[-1]["content"] if messages and messages[-1]["role"] == "user" else user_input
-                        )
-
-                        # Add the exchange to conversation memory
-                        conversation_memory.add_exchange(prompt_content, full_response)
-
-                        # Track for state manager
-                        conversation_context.append(
-                            {
-                                "user": user_input,  # Original /dci/rca command
-                                "assistant": full_response,
-                                "timestamp": str(asyncio.get_event_loop().time()),
-                            }
-                        )
-
-                    except Exception as e:
-                        console.print(f"\n[red]Error: {e}[/red]\n")
-
-                    continue
-
-            # Handle commands
-            if user_input.lower() == "/prompts":
-                await handle_prompts_command(agent, console)
-                continue
-
-            if user_input.lower().startswith("/prompt-info "):
-                prompt_ref = user_input[13:].strip()  # Remove "/prompt-info "
-                await handle_prompt_info_command(agent, console, prompt_ref)
-                continue
-
-            if user_input.lower() == "/status":
-                await handle_status_command(state_manager, console)
-                continue
-
-            if user_input.lower() == "/history":
-                await handle_history_command(state_manager, console)
-                continue
-
-            if user_input.lower() == "/clear-cache":
-                await handle_clear_cache_command(state_manager, console)
-                continue
-
-            if user_input.lower() == "/help":
-                await handle_help_command(console)
-                continue
-
-            if user_input.lower() == "/clear":
-                conversation_memory.clear()
-                console.print("\n[green]✓ Conversation memory cleared[/green]\n")
-                continue
-
-            if user_input.lower().startswith("/kg-save"):
-                parts = user_input.split()
-                if len(parts) > 1:
-                    if parts[1].lower() in ["on", "true", "1", "yes"]:
-                        agent.kg_save_enabled = True
-                        console.print("\n[green]✓ Knowledge graph auto-save enabled[/green]\n")
-                    elif parts[1].lower() in ["off", "false", "0", "no"]:
-                        agent.kg_save_enabled = False
-                        console.print("\n[yellow]Knowledge graph auto-save disabled[/yellow]\n")
-                    else:
-                        console.print("\n[red]Usage: /kg-save [on|off][/red]\n")
-                else:
-                    status = "enabled" if agent.kg_save_enabled else "disabled"
-                    console.print(f"\n[cyan]Knowledge graph auto-save is currently {status}[/cyan]\n")
-                continue
-
-            # Validate command before sending to agent
-            if not is_valid_interactive_command(user_input):
-                error_msg = get_command_suggestion(user_input, is_interactive=True)
-                console.print(f"\n[red]{error_msg}[/red]\n")
-                continue
-
-            # Regular query
-            try:
-                # Show feedback while processing and stream response
-                response = await query_with_feedback(
-                    agent, user_input, console, conversation_memory=conversation_memory, kg_context=kg_context
-                )
-
-                # Response is already printed via streaming
-                # Just add final newline if not already there
-                if response and not response.endswith("\n"):
-                    console.print()
-
-                # Add to conversation memory for context
-                conversation_memory.add_exchange(user_input, response)
-
-                # Track conversation in context list for state manager
-                conversation_context.append(
-                    {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
-                )
-
-            except (EOFError, KeyboardInterrupt):
-                # Re-raise to be caught by outer handler which breaks the loop
-                raise
             except Exception as e:
-                console.print(f"\n[red]Error: {e}[/red]\n")
-
-        except (EOFError, KeyboardInterrupt):
-            state_manager.save_conversation_context("last_interactive_session", {"messages": conversation_context})
-            console.print("\n[cyan]Goodbye![/cyan]")
-            break
-        except Exception as e:
-            console.print(f"[red]Error: {e}[/red]\n")
+                console.print(f"[red]Error: {e}[/red]\n")
+    finally:
+        # Stop config watcher on exit
+        await config_watcher.stop()
 
 
 async def handle_status_command(state_manager: StateManager, console: Console):

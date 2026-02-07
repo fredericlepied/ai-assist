@@ -2,10 +2,10 @@
 
 import re
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from .agent import AiAssistAgent
+from .config import get_config_dir
 from .state import StateManager
 
 
@@ -186,7 +186,7 @@ class ActionExecutor:
 
         message = self._replace_placeholders(message, context)
 
-        log_dir = Path.home() / ".ai-assist" / "logs"
+        log_dir = get_config_dir() / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
         log_file = log_dir / log_file_name

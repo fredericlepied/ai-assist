@@ -191,6 +191,101 @@ class AiAssistAgent:
 
             traceback.print_exc()
 
+    async def reload_mcp_servers(self):
+        """Reload MCP server configuration and reconnect changed servers
+
+        This method:
+        1. Loads the latest mcp_servers.yaml configuration
+        2. Disconnects servers that were removed
+        3. Connects new servers
+        4. Reconnects servers with modified configuration
+        """
+        from .config import get_config_dir, load_mcp_servers_from_yaml
+
+        print("\n🔄 Reloading MCP server configuration...")
+
+        # Load new configuration
+        mcp_file = get_config_dir() / "mcp_servers.yaml"
+        new_servers = load_mcp_servers_from_yaml(mcp_file)
+
+        old_names = set(self.config.mcp_servers.keys())
+        new_names = set(new_servers.keys())
+
+        # Remove deleted servers
+        removed = old_names - new_names
+        for name in removed:
+            print(f"  Disconnecting {name}...")
+
+            # Remove session
+            if name in self.sessions:
+                self.sessions.pop(name)
+
+            # Remove tools from this server
+            self.available_tools = [t for t in self.available_tools if t.get("_server") != name]
+
+            # Remove prompts from this server
+            if name in self.available_prompts:
+                self.available_prompts.pop(name)
+
+            # Cancel server task
+            for task in self._server_tasks:
+                if task.get_name() == f"mcp_{name}":
+                    task.cancel()
+
+        # Add new servers
+        added = new_names - old_names
+        for name in added:
+            print(f"  Connecting {name}...")
+            task = asyncio.create_task(self._run_server(name, new_servers[name]), name=f"mcp_{name}")
+            self._server_tasks.append(task)
+
+            # Wait briefly for server initialization
+            for _ in range(10):
+                await asyncio.sleep(0.5)
+                if name in self.sessions:
+                    tool_count = len([t for t in self.available_tools if t.get("_server") == name])
+                    print(f"    ✓ Connected with {tool_count} tools")
+                    break
+
+        # Reconnect modified servers (simple: disconnect + connect)
+        common = old_names & new_names
+        for name in common:
+            # Compare configurations (convert to dict for comparison)
+            old_config = self.config.mcp_servers[name].model_dump()
+            new_config = new_servers[name].model_dump()
+
+            if old_config != new_config:
+                print(f"  Reconnecting {name} (config changed)...")
+
+                # Disconnect
+                if name in self.sessions:
+                    self.sessions.pop(name)
+                self.available_tools = [t for t in self.available_tools if t.get("_server") != name]
+                if name in self.available_prompts:
+                    self.available_prompts.pop(name)
+
+                # Cancel task
+                for task in self._server_tasks:
+                    if task.get_name() == f"mcp_{name}":
+                        task.cancel()
+
+                # Reconnect
+                task = asyncio.create_task(self._run_server(name, new_servers[name]), name=f"mcp_{name}")
+                self._server_tasks.append(task)
+
+                # Wait briefly for server initialization
+                for _ in range(10):
+                    await asyncio.sleep(0.5)
+                    if name in self.sessions:
+                        tool_count = len([t for t in self.available_tools if t.get("_server") == name])
+                        print(f"    ✓ Reconnected with {tool_count} tools")
+                        break
+
+        # Update config
+        self.config.mcp_servers = new_servers
+
+        print("✅ MCP server reload complete\n")
+
     def _build_system_prompt(self) -> str:
         """Build complete system prompt including identity and skills
 

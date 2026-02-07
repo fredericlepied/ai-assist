@@ -10,6 +10,35 @@ from pydantic import BaseModel, Field
 load_dotenv()
 
 
+def get_config_dir(override: str | None = None) -> Path:
+    """Get the ai-assist configuration directory
+
+    Priority (highest to lowest):
+    1. override parameter
+    2. AI_ASSIST_CONFIG_DIR environment variable
+    3. Default: ~/.ai-assist
+
+    Args:
+        override: Optional path to override config directory
+
+    Returns:
+        Path to configuration directory (created if it doesn't exist)
+    """
+    if override:
+        config_dir = Path(os.path.expanduser(override))
+    else:
+        config_dir_str = os.getenv("AI_ASSIST_CONFIG_DIR")
+        if config_dir_str:
+            config_dir = Path(os.path.expanduser(config_dir_str))
+        else:
+            config_dir = Path.home() / ".ai-assist"
+
+    # Create directory if it doesn't exist
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    return config_dir
+
+
 class MCPServerConfig(BaseModel):
     """MCP Server configuration"""
 
@@ -49,10 +78,18 @@ class AiAssistConfig(BaseModel):
     )
 
     @classmethod
-    def from_env(cls, mcp_servers_file: Path | None = None) -> "AiAssistConfig":
-        """Load configuration from environment variables and YAML files"""
+    def from_env(cls, mcp_servers_file: Path | None = None, config_dir: Path | None = None) -> "AiAssistConfig":
+        """Load configuration from environment variables and YAML files
+
+        Args:
+            mcp_servers_file: Optional path to MCP servers config file
+            config_dir: Optional config directory (defaults to get_config_dir())
+        """
+        if config_dir is None:
+            config_dir = get_config_dir()
+
         if mcp_servers_file is None:
-            mcp_servers_file = Path.home() / ".ai-assist" / "mcp_servers.yaml"
+            mcp_servers_file = config_dir / "mcp_servers.yaml"
 
         mcp_servers = load_mcp_servers_from_yaml(mcp_servers_file)
 

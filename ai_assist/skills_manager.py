@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from .config import get_config_dir
 from .skills_loader import SkillContent, SkillsLoader
 
 
@@ -32,8 +33,7 @@ class SkillsManager:
             skills_loader: SkillsLoader instance for loading skills
         """
         self.skills_loader = skills_loader
-        self.installed_skills_file = Path.home() / ".ai-assist" / "installed-skills.json"
-        self.installed_skills_file.parent.mkdir(parents=True, exist_ok=True)
+        self.installed_skills_file = get_config_dir() / "installed-skills.json"
 
         self.installed_skills: list[InstalledSkill] = []
         self.loaded_skills: dict[str, SkillContent] = {}

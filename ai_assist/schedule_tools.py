@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+from .config import get_config_dir
 from .tasks import MonitorDefinition, TaskDefinition
 
 
@@ -16,7 +17,7 @@ class ScheduleTools:
             schedules_file: Path to schedules JSON file (defaults to ~/.ai-assist/schedules.json)
         """
         if schedules_file is None:
-            schedules_file = Path.home() / ".ai-assist" / "schedules.json"
+            schedules_file = get_config_dir() / "schedules.json"
 
         self.schedules_file = Path(schedules_file)
         self.schedules_file.parent.mkdir(parents=True, exist_ok=True)

@@ -5,11 +5,10 @@ import json
 import os
 import sys
 from datetime import datetime
-from pathlib import Path
 
 from .agent import AiAssistAgent
 from .commands import get_command_suggestion, is_valid_cli_command, is_valid_interactive_command
-from .config import get_config
+from .config import get_config, get_config_dir
 from .identity import AssistantIdentity, Identity, UserIdentity, get_identity
 from .kg_queries import KnowledgeGraphQueries
 from .knowledge_graph import KnowledgeGraph
@@ -278,7 +277,7 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
 
 async def monitoring_mode(agent: AiAssistAgent, config, state_manager: StateManager, knowledge_graph: KnowledgeGraph):
     """Run in monitoring mode"""
-    schedule_file = Path.home() / ".ai-assist" / "schedules.json"
+    schedule_file = get_config_dir() / "schedules.json"
 
     scheduler = MonitoringScheduler(agent, config, state_manager, knowledge_graph, schedule_file=schedule_file)
 
@@ -495,13 +494,24 @@ def identity_init_command():
 
     # Save
     identity.save_to_file()
-    print(f"\n✓ Identity saved to {Path.home() / '.ai-assist' / 'identity.yaml'}")
+    print(f"\n✓ Identity saved to {get_config_dir() / 'identity.yaml'}")
     print(f"\n{identity.get_greeting()}")
     print()
 
 
 async def main_async():
     """Async main function"""
+    # Check for --dev flag and enable code watching
+    dev_mode = "--dev" in sys.argv
+    if dev_mode:
+        sys.argv.remove("--dev")
+        from pathlib import Path
+
+        from .code_watcher import CodeWatcher
+
+        watcher = CodeWatcher(Path(__file__).parent)
+        watcher.start()
+
     config = get_config()
 
     # Parse command - must start with /
