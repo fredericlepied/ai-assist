@@ -11,7 +11,7 @@ from ai_assist.config import get_config
 
 # All known Claude models on Vertex AI (as of Feb 2026)
 KNOWN_MODELS = [
-    ("claude-opus-4-6@20250514", "Claude Opus 4.6 (newest, best for coding/agents)"),
+    ("claude-opus-4-6@default", "Claude Opus 4.6 (newest, best for coding/agents)"),
     ("claude-sonnet-4-5@20250929", "Claude Sonnet 4.5 (balanced, great for coding)"),
     ("claude-haiku-4-5@20251001", "Claude Haiku 4.5 (efficient, fast)"),
     ("claude-opus-4-1@20250805", "Claude Opus 4.1 (agentic search)"),
@@ -57,7 +57,11 @@ def test_models():
             print(f"  {description}")
 
             client = AnthropicVertex(**vertex_kwargs)
-            client.messages.create(model=model_id, max_tokens=10, messages=[{"role": "user", "content": "Hi"}])
+            client.messages.create(
+                model=model_id,
+                max_tokens=10,
+                messages=[{"role": "user", "content": "Hi"}],
+            )
 
             print("  ✅ Available")
             available_models.append((model_id, description))

@@ -22,7 +22,7 @@ Works with skills like:
 - 🧠 **Knowledge Graph**: Temporal database tracking entities and changes
 - 📝 **Report Generation**: Create and manage markdown reports
 - ⚡ **Hot Reload**: Schedule changes take effect immediately
-- 🚀 **Agent Skills**: Install specialized skills following agentskills.io specification
+- 🚀 **Agent Skills**: Install specialized skills following [agentskills.io](https://agentskills.io/) specification
 
 ## Quick Start
 
@@ -34,10 +34,18 @@ Choose ONE authentication method:
 
 ### Installation
 
+First, install [uv](https://docs.astral.sh/uv/getting-started/installation/) if you don't have it:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then install ai-assist:
+
 ```bash
 git clone https://github.com/fredericlepied/ai-assist
 cd ai-assist
-pip install -e .
+uv sync
 ```
 
 ### Configuration
@@ -58,7 +66,7 @@ gcloud auth application-default login
 export ANTHROPIC_API_KEY='sk-ant-...'  # Get from console.anthropic.com
 ```
 
-📖 **Detailed setup:** See [QUICKSTART.md](QUICKSTART.md) and [VERTEX_AI_SETUP.md](VERTEX_AI_SETUP.md)
+📖 **Vertex AI setup:** See [VERTEX_AI_SETUP.md](VERTEX_AI_SETUP.md)
 
 ## Usage
 
@@ -214,8 +222,6 @@ ai-assist
 You: Create a monitor to check for failed DCI jobs every 5 minutes
 ```
 
-📖 **Monitor details:** See [TASKS.md](TASKS.md)
-
 ### One-off Queries
 
 ```bash
@@ -312,20 +318,16 @@ ai-assist/
 │   └── filesystem_tools.py # Filesystem operations
 ├── tests/                  # Test suite (321 tests)
 ├── .env.example           # Example environment variables
-└── docs/
-    ├── QUICKSTART.md      # Detailed setup guide
-    ├── VERTEX_AI_SETUP.md # Vertex AI troubleshooting
-    ├── TASKS.md           # Monitor and task details
-    ├── COMMANDS.md        # CLI commands reference
-    └── CONTRIBUTING.md    # Development guide
+├── VERTEX_AI_SETUP.md     # Vertex AI troubleshooting
+├── SECURITY.md            # Security model
+├── CONTRIBUTING.md        # Development setup
+└── AGENTS.md              # Development philosophy
 ```
 
 ## Documentation
 
-- **[QUICKSTART.md](QUICKSTART.md)** - Detailed installation and setup
 - **[VERTEX_AI_SETUP.md](VERTEX_AI_SETUP.md)** - Vertex AI configuration and troubleshooting
-- **[TASKS.md](TASKS.md)** - Creating monitors and tasks
-- **[COMMANDS.md](COMMANDS.md)** - CLI commands reference
+- **[SECURITY.md](SECURITY.md)** - Security model for skill script execution
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development setup with pre-commit hooks
 - **[AGENTS.md](AGENTS.md)** - Development philosophy (TDD/DRY/Tracer Bullet)
 
