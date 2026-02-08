@@ -53,6 +53,11 @@ class MonitoringScheduler:
         self.file_watchdog: FileWatchdog | None = None
         self.config_watcher: ConfigWatcher | None = None
 
+        # Scheduled actions (one-shot future executions)
+        self.action_manager = None
+        self.action_task_handle = None
+        self.action_file_watchdog: FileWatchdog | None = None
+
         # Load initial schedules
         self.monitors = self._load_monitors()
         self.user_tasks = self._load_user_tasks()
@@ -207,6 +212,27 @@ class MonitoringScheduler:
         tasks.append(suspend_task)
         print("Suspension detection enabled")
 
+        # Start scheduled action executor
+        from ai_assist.scheduled_actions import ScheduledActionManager
+
+        action_file = get_config_dir() / "scheduled-actions.json"
+        self.action_manager = ScheduledActionManager(action_file, self.agent)
+        await self.action_manager.load_actions()
+
+        # Start executor (event-driven, no polling)
+        action_task = asyncio.create_task(self.action_manager.start_executor())
+        tasks.append(action_task)
+        self.action_task_handle = action_task
+        print("Scheduled action executor started (event-driven)")
+
+        # Watch scheduled-actions.json for changes
+        if action_file.exists() or True:  # Watch even if doesn't exist yet
+            self.action_file_watchdog = FileWatchdog(
+                action_file, self.action_manager.on_file_change, debounce_seconds=0.5
+            )
+            await self.action_file_watchdog.start()
+            print(f"Watching {action_file} for changes...")
+
         await asyncio.gather(*tasks)
 
     async def _schedule_task(self, name: str, task_func, interval: int, task_def=None):
@@ -319,6 +345,18 @@ class MonitoringScheduler:
         """Stop the monitoring loop"""
         self.running = False
         print("Stopping monitoring scheduler...")
+
+        # Stop scheduled action executor
+        if self.action_task_handle:
+            self.action_task_handle.cancel()
+            try:
+                await self.action_task_handle
+            except asyncio.CancelledError:
+                pass
+
+        # Stop action file watchdog
+        if self.action_file_watchdog:
+            await self.action_file_watchdog.stop()
 
         # Stop file watchdog
         if self.file_watchdog:

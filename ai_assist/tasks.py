@@ -22,6 +22,10 @@ class TaskDefinition:
     conditions: list[dict] = field(default_factory=list)
     prompt_arguments: dict[str, Any] | None = None
 
+    # Notification configuration
+    notify: bool = False
+    notification_channels: list[str] = field(default_factory=lambda: ["console"])
+
     @property
     def interval_seconds(self) -> int:
         """Convert interval string to seconds (for simple intervals)"""

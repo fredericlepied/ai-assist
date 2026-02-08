@@ -18,6 +18,7 @@ Works with skills like:
 - 🤖 **AI-Powered**: Claude Sonnet 4.5 for intelligent analysis
 - 🔌 **MCP Integration**: Connect to any MCP server for tools and data
 - 📊 **Monitoring**: Automated scheduled checks with smart notifications
+- ⏰ **Scheduled Actions**: One-shot future actions with notifications
 - 💬 **Interactive Mode**: Rich TUI with streaming responses and history
 - 🧠 **Knowledge Graph**: Temporal database tracking entities and changes
 - 📝 **Report Generation**: Create and manage markdown reports
@@ -154,6 +155,8 @@ Install specialized skills following the [agentskills.io](https://agentskills.io
 - Specialized instructions for Claude following agentskills.io standard
 - Automatically loaded into system prompt (no activation needed)
 - Can include scripts, references, and assets
+
+📖 **Creating personal skills:** See [docs/PERSONAL_SKILLS.md](docs/PERSONAL_SKILLS.md)
 - Persistent across sessions
 
 **Example skills:**
@@ -230,14 +233,110 @@ ai-assist /monitor
 
 - Runs monitors and tasks from `~/.ai-assist/schedules.json`
 - Auto-saves findings to knowledge graph
-- Hot-reloads when schedules change
+- Hot-reloads when schedules or actions change (FileWatchdog)
 - Sends notifications on important updates
 - Handles laptop suspension gracefully (catches up missed runs)
+- **Executes scheduled one-shot actions** (event-driven, no polling)
 
 **Create monitors via interactive mode:**
 ```bash
 ai-assist
 You: Create a monitor to check for failed DCI jobs every 5 minutes
+```
+
+**Enable notifications for periodic tasks:**
+
+Add `notify` and `notification_channels` to any task or monitor in `schedules.json`:
+
+```json
+{
+  "monitors": [
+    {
+      "name": "critical-failures",
+      "prompt": "Check for critical DCI failures",
+      "interval": "1h",
+      "notify": true,
+      "notification_channels": ["desktop", "file"]
+    }
+  ],
+  "tasks": [
+    {
+      "name": "daily-summary",
+      "prompt": "Summarize yesterday's DCI jobs",
+      "interval": "9:00 on weekdays",
+      "notify": true,
+      "notification_channels": ["console"]
+    }
+  ]
+}
+```
+
+When `notify` is true, you'll receive notifications on task completion via:
+- **desktop**: System notifications (notify-send on Linux)
+- **file**: Append to `~/.ai-assist/notifications.log`
+- **console**: Display in /monitor output
+- Interactive mode automatically shows notifications from any channel in the TUI
+
+### Scheduled Actions
+
+Schedule one-time future actions that execute automatically with notifications:
+
+```bash
+ai-assist /interactive
+You: Remind me in 2 hours to check the DCI job status for job-456
+```
+
+The agent will:
+- Schedule the action for execution in 2 hours
+- Execute it automatically when due (via `/monitor` process)
+- Send desktop notification + file log when complete
+
+**Supported Time Formats:**
+- `in X hours/minutes/days` - Relative time
+- `tomorrow at 9am` - Next day specific time
+- `next monday 10:00` - Specific day and time
+
+**Notification Channels:**
+- **desktop**: System notifications (notify-send on Linux)
+- **file**: Append to `~/.ai-assist/notifications.log`
+- **console**: Display in /monitor output
+- **TUI**: Automatically displayed in interactive mode (watches notification log)
+
+**Agent Decision Making:**
+The agent intelligently decides how to execute scheduled actions:
+- "Remind me to watch TV" → Simple notification (no agent query)
+- "Tell me what's in my Gmail inbox" → Query via agent, notify with results
+- "Check failed jobs and save report" → Query via agent, save to report
+
+**View scheduled actions:**
+```bash
+cat ~/.ai-assist/scheduled-actions.json
+```
+
+**View notification history:**
+```bash
+tail -f ~/.ai-assist/notifications.log
+```
+
+**Managing Scheduled Actions:**
+
+Completed and failed actions older than 7 days are automatically archived to `~/.ai-assist/scheduled-actions-archive.jsonl`.
+
+```bash
+# Manual cleanup
+ai-assist /cleanup-actions
+
+# View archive
+cat ~/.ai-assist/scheduled-actions-archive.jsonl | jq
+```
+
+**File Structure:**
+- `scheduled-actions.json` - Active and recent (≤7 days) actions
+- `scheduled-actions-archive.jsonl` - Historical actions (>7 days old)
+
+**⚠️ Important:** The `/monitor` process must be running for scheduled actions to execute:
+```bash
+ai-assist /monitor  # Keep running in background
 ```
 
 #### MCP Prompts in Tasks
@@ -411,6 +510,7 @@ ai-assist/
 
 ## Documentation
 
+- **[docs/PERSONAL_SKILLS.md](docs/PERSONAL_SKILLS.md)** - Creating and managing personal Agent Skills
 - **[docs/IDENTITY.md](docs/IDENTITY.md)** - Complete guide to identity.yaml configuration
 - **[docs/MULTI_INSTANCE.md](docs/MULTI_INSTANCE.md)** - Running multiple ai-assist instances
 - **[VERTEX_AI_SETUP.md](VERTEX_AI_SETUP.md)** - Vertex AI configuration and troubleshooting

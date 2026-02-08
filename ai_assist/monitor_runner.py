@@ -63,10 +63,20 @@ class MonitorRunner:
                 f"monitor_{self.monitor_def.name}", {"last_run": datetime.now().isoformat()}
             )
 
+            # Dispatch notification if configured
+            if self.monitor_def.notify:
+                await self._send_notification(success=True, output=output)
+
             return [result_data]
 
         except Exception as e:
+            error_msg = str(e)
             print(f"Error running monitor {self.monitor_def.name}: {e}")
+
+            # Dispatch notification on error if configured
+            if self.monitor_def.notify:
+                await self._send_notification(success=False, output=error_msg)
+
             return []
 
     async def _store_in_kg(self):
@@ -206,3 +216,29 @@ class MonitorRunner:
         self.knowledge_graph.insert_entity(
             entity_type=entity_type, entity_id=entity_id, valid_from=valid_from, tx_from=tx_time, data=data
         )
+
+    async def _send_notification(self, success: bool, output: str):
+        """Send notification for monitor completion"""
+        from ai_assist.notification_dispatcher import Notification, NotificationDispatcher
+
+        # Determine notification level
+        level = "success" if success else "error"
+
+        # Truncate output for notification (max 200 chars)
+        message = output[:200] if output else "No output"
+
+        # Create notification
+        notification = Notification(
+            id=f"monitor-{self.monitor_def.name}-{int(datetime.now().timestamp() * 1000)}",
+            action_id=self.monitor_def.name,
+            title=f"Monitor: {self.monitor_def.name}",
+            message=message,
+            level=level,
+            timestamp=datetime.now(),
+            channels=self.monitor_def.notification_channels,
+            delivered={},
+        )
+
+        # Dispatch
+        dispatcher = NotificationDispatcher()
+        await dispatcher.dispatch(notification)

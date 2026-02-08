@@ -47,6 +47,11 @@ class AiAssistAgent:
         # Initialize internal filesystem tools
         self.filesystem_tools = FilesystemTools()
 
+        # Initialize schedule action tools (one-shot future actions)
+        from ai_assist.schedule_action_tools import ScheduleActionTools
+
+        self.schedule_action_tools = ScheduleActionTools(self)
+
         # Initialize skills system
         self.skills_loader = SkillsLoader()
         self.skills_manager = SkillsManager(self.skills_loader)
@@ -125,6 +130,12 @@ class AiAssistAgent:
         if filesystem_tool_defs:
             self.available_tools.extend(filesystem_tool_defs)
             print(f"✓ Added {len(filesystem_tool_defs)} filesystem tools")
+
+        # Add schedule action tools
+        schedule_action_tool_defs = self.schedule_action_tools.get_tool_definitions()
+        if schedule_action_tool_defs:
+            self.available_tools.extend(schedule_action_tool_defs)
+            print(f"✓ Added {len(schedule_action_tool_defs)} schedule action tools")
 
         # Add script execution tools if enabled
         script_tool_defs = self.script_execution_tools.get_tool_definitions()
@@ -627,6 +638,7 @@ class AiAssistAgent:
                 ]
 
                 script_tools = ["execute_skill_script"]
+                schedule_action_tools = ["schedule_action"]
 
                 if original_tool_name in schedule_tools:
                     result_text = await self.schedule_tools.execute_tool(original_tool_name, arguments)
@@ -634,6 +646,10 @@ class AiAssistAgent:
                     result_text = await self.filesystem_tools.execute_tool(original_tool_name, arguments)
                 elif original_tool_name in script_tools:
                     result_text = await self.script_execution_tools.execute_tool(original_tool_name, arguments)
+                elif original_tool_name in schedule_action_tools:
+                    result_text = await self.schedule_action_tools.execute_tool(
+                        f"internal__{original_tool_name}", arguments
+                    )
                 else:
                     # Default to report tools
                     result_text = await self.report_tools.execute_tool(original_tool_name, arguments)

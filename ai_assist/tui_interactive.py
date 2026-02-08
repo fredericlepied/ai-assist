@@ -1,6 +1,7 @@
 """TUI-enhanced interactive mode for ai-assist"""
 
 import asyncio
+import json
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -17,10 +18,92 @@ from .commands import get_command_suggestion, is_valid_interactive_command
 from .config import get_config_dir
 from .config_watcher import ConfigWatcher
 from .context import ConversationMemory, KnowledgeGraphContext
+from .file_watchdog import FileWatchdog
 from .identity import get_identity
 from .knowledge_graph import KnowledgeGraph
 from .state import StateManager
 from .tui import AiAssistCompleter
+
+
+async def display_notification(console: Console, notification: dict):
+    """Display a notification in the TUI"""
+    # Icon based on level
+    icons = {
+        "info": "ℹ️",
+        "success": "✅",
+        "warning": "⚠️",
+        "error": "❌",
+    }
+    icon = icons.get(notification.get("level", "info"), "🔔")
+
+    # Color based on level
+    colors = {
+        "info": "cyan",
+        "success": "green",
+        "warning": "yellow",
+        "error": "red",
+    }
+    color = colors.get(notification.get("level", "info"), "white")
+
+    panel = Panel(
+        f"{notification['message']}\n\n[dim]{notification['timestamp']}[/dim]",
+        title=f"{icon} {notification['title']}",
+        border_style=color,
+    )
+
+    console.print("\n")
+    console.print(panel)
+    console.print("\n")
+
+
+class NotificationWatcher:
+    """Watch notification log and display new notifications in TUI"""
+
+    def __init__(self, console: Console):
+        self.console = console
+        self.notification_log = get_config_dir() / "notifications.log"
+        self.watchdog = None
+        self.last_position = 0
+
+        # Initialize last position to end of file
+        if self.notification_log.exists():
+            with open(self.notification_log) as f:
+                f.seek(0, 2)  # Seek to end
+                self.last_position = f.tell()
+
+    async def on_file_change(self):
+        """Called when notifications.log changes"""
+        if not self.notification_log.exists():
+            return
+
+        try:
+            with open(self.notification_log) as f:
+                # Seek to last known position
+                f.seek(self.last_position)
+
+                # Read new lines
+                new_lines = f.readlines()
+                self.last_position = f.tell()
+
+                # Display each new notification
+                for line in new_lines:
+                    try:
+                        notification = json.loads(line.strip())
+                        await display_notification(self.console, notification)
+                    except json.JSONDecodeError:
+                        pass  # Skip malformed lines
+        except Exception as e:
+            print(f"Error reading notification log: {e}")
+
+    async def start(self):
+        """Start watching notification log"""
+        self.watchdog = FileWatchdog(self.notification_log, self.on_file_change, debounce_seconds=0.1)
+        await self.watchdog.start()
+
+    async def stop(self):
+        """Stop watching notification log"""
+        if self.watchdog:
+            await self.watchdog.stop()
 
 
 async def query_with_feedback(
@@ -425,6 +508,10 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     config_watcher = ConfigWatcher(agent)
     await config_watcher.start()
 
+    # Start notification watching for cross-process notifications
+    notification_watcher = NotificationWatcher(console)
+    await notification_watcher.start()
+
     try:
         while True:
             try:
@@ -619,8 +706,9 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
             except Exception as e:
                 console.print(f"[red]Error: {e}[/red]\n")
     finally:
-        # Stop config watcher on exit
+        # Stop watchers on exit
         await config_watcher.stop()
+        await notification_watcher.stop()
 
 
 async def handle_status_command(state_manager: StateManager, console: Console):

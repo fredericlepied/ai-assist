@@ -26,6 +26,7 @@ CLI_COMMANDS = [
     "/kg-late",
     "/kg-changes",
     "/kg-show",
+    "/cleanup-actions",
     "/help",
 ]
 

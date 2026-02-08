@@ -535,7 +535,8 @@ async def main_async():
     kg_commands = ["kg-stats", "kg-asof", "kg-late", "kg-changes", "kg-show"]
     identity_commands = ["identity-show", "identity-init"]
     state_commands = ["status", "clear-cache"]
-    no_agent_commands = kg_commands + identity_commands + state_commands + ["help"]
+    action_commands = ["cleanup-actions"]
+    no_agent_commands = kg_commands + identity_commands + state_commands + action_commands + ["help"]
 
     needs_agent = command not in no_agent_commands
 
@@ -590,6 +591,7 @@ async def main_async():
                 print("  /kg-late [min]     - Show late discoveries (default: 30 min)")
                 print("  /kg-changes [hrs]  - Show recent changes (default: 1 hour)")
                 print("  /kg-show <id>      - Show entity details with context")
+                print("  /cleanup-actions   - Archive old completed/failed actions")
                 print("\nRun without arguments for interactive mode\n")
                 sys.exit(0)
 
@@ -639,6 +641,15 @@ async def main_async():
                     sys.exit(1)
                 entity_id = sys.argv[2]
                 kg_show_command(knowledge_graph, entity_id)
+            elif command == "cleanup-actions":
+                from .scheduled_actions import ScheduledActionManager
+
+                action_file = get_config_dir() / "scheduled-actions.json"
+                manager = ScheduledActionManager(action_file, agent=None)
+                await manager.load_actions()
+
+                archived = await manager.cleanup_old_actions(max_age_days=7)
+                print(f"✓ Archived {archived} old actions")
             # Note: Unknown commands are caught earlier, before agent initialization
         else:
             # Default to interactive mode

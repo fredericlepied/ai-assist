@@ -85,9 +85,15 @@ class TaskRunner:
                 },
             )
 
-            return TaskResult(
+            result = TaskResult(
                 task_name=self.task_def.name, success=True, output=output, timestamp=timestamp, metadata=metadata
             )
+
+            # Dispatch notification if configured
+            if self.task_def.notify:
+                await self._send_notification(result)
+
+            return result
 
         except Exception as e:
             error_msg = str(e)
@@ -110,9 +116,15 @@ class TaskRunner:
                 },
             )
 
-            return TaskResult(
+            result = TaskResult(
                 task_name=self.task_def.name, success=False, output=error_msg, timestamp=timestamp, metadata={}
             )
+
+            # Dispatch notification if configured
+            if self.task_def.notify:
+                await self._send_notification(result)
+
+            return result
 
     def get_last_run(self) -> datetime | None:
         """Get timestamp of last successful run"""
@@ -122,3 +134,29 @@ class TaskRunner:
     def get_history(self, limit: int = 10) -> list[dict]:
         """Get historical execution results"""
         return self.state_manager.get_history(self.state_key, limit=limit)
+
+    async def _send_notification(self, result: TaskResult):
+        """Send notification for task completion"""
+        from ai_assist.notification_dispatcher import Notification, NotificationDispatcher
+
+        # Determine notification level
+        level = "success" if result.success else "error"
+
+        # Truncate output for notification (max 200 chars)
+        message = result.output[:200] if result.output else "No output"
+
+        # Create notification
+        notification = Notification(
+            id=f"task-{self.task_def.name}-{int(result.timestamp.timestamp() * 1000)}",
+            action_id=self.task_def.name,
+            title=f"Task: {self.task_def.name}",
+            message=message,
+            level=level,
+            timestamp=result.timestamp,
+            channels=self.task_def.notification_channels,
+            delivered={},
+        )
+
+        # Dispatch
+        dispatcher = NotificationDispatcher()
+        await dispatcher.dispatch(notification)
