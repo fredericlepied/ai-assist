@@ -547,6 +547,122 @@ class KnowledgeGraph:
 
         return results
 
+    def insert_knowledge(
+        self,
+        entity_type: str,
+        key: str,
+        content: str,
+        metadata: dict | None = None,
+        valid_from: datetime | None = None,
+        confidence: float = 1.0,
+    ) -> str:
+        """Insert a knowledge entity (preference, lesson, context, rationale)
+
+        Args:
+            entity_type: One of user_preference, lesson_learned, project_context, decision_rationale
+            key: Unique identifier (e.g., "python_testing_framework")
+            content: The actual knowledge (text)
+            metadata: Additional context (tags, source, etc.)
+            valid_from: When this became true (defaults to now)
+            confidence: Agent's confidence (0.0-1.0)
+
+        Returns:
+            Entity ID
+        """
+        valid_types = ["user_preference", "lesson_learned", "project_context", "decision_rationale"]
+        if entity_type not in valid_types:
+            raise ValueError(f"Invalid knowledge entity type: {entity_type}")
+
+        if valid_from is None:
+            valid_from = datetime.now()
+
+        if metadata is None:
+            metadata = {}
+        metadata["confidence"] = confidence
+
+        entity_id = f"{entity_type}:{key}"
+
+        data = {"key": key, "content": content, "metadata": metadata}
+
+        self.insert_entity(entity_id=entity_id, entity_type=entity_type, data=data, valid_from=valid_from)
+
+        return entity_id
+
+    def search_knowledge(
+        self,
+        entity_type: str | None = None,
+        key_pattern: str | None = None,
+        tags: list[str] | None = None,
+        since: datetime | None = None,
+        min_confidence: float = 0.0,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Search knowledge entities
+
+        Args:
+            entity_type: Filter by entity type
+            key_pattern: Search keys with LIKE pattern
+            tags: Filter by tags (must have all)
+            since: Only return knowledge learned since this time
+            min_confidence: Minimum confidence threshold
+            limit: Max results
+
+        Returns:
+            List of dicts with entity_id, key, content, metadata, timestamps
+        """
+        query = """
+            SELECT id, entity_type, data, valid_from, tx_from
+            FROM entities
+            WHERE tx_to IS NULL
+        """
+
+        params = []
+
+        if entity_type:
+            query += " AND entity_type = ?"
+            params.append(entity_type)
+
+        if key_pattern:
+            query += " AND json_extract(data, '$.key') LIKE ?"
+            params.append(key_pattern)
+
+        if since:
+            query += " AND tx_from >= ?"
+            params.append(since.isoformat())
+
+        if min_confidence > 0.0:
+            query += " AND CAST(json_extract(data, '$.metadata.confidence') AS REAL) >= ?"
+            params.append(min_confidence)
+
+        if tags:
+            for tag in tags:
+                query += " AND json_extract(data, '$.metadata.tags') LIKE ?"
+                params.append(f"%{tag}%")
+
+        query += " ORDER BY tx_from DESC LIMIT ?"
+        params.append(limit)
+
+        cursor = self.conn.execute(query, params)
+
+        results = []
+        for row in cursor.fetchall():
+            entity_id, entity_type, data_json, valid_from, tx_from = row
+            data = json.loads(data_json)
+
+            results.append(
+                {
+                    "entity_id": entity_id,
+                    "entity_type": entity_type,
+                    "key": data.get("key"),
+                    "content": data.get("content"),
+                    "metadata": data.get("metadata", {}),
+                    "valid_from": valid_from,
+                    "learned_at": tx_from,
+                }
+            )
+
+        return results
+
     def get_stats(self) -> dict[str, Any]:
         """Get statistics about the knowledge graph
 

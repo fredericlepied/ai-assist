@@ -84,6 +84,18 @@ class AiAssistAgent:
         self.introspection_tools.available_prompts = self.available_prompts
         self.introspection_tools.agent = self  # Allow introspection tools to execute prompts
 
+        # Initialize knowledge management tools
+        if self.knowledge_graph:
+            from ai_assist.knowledge_tools import KnowledgeTools
+
+            self.knowledge_tools = KnowledgeTools(self.knowledge_graph)
+            self.knowledge_tools.agent = self
+        else:
+            self.knowledge_tools = None
+
+        # Track synthesis flag
+        self._pending_synthesis = None
+
     async def connect_to_servers(self):
         """Connect to all configured MCP servers"""
         for server_name, server_config in self.config.mcp_servers.items():
@@ -112,6 +124,13 @@ class AiAssistAgent:
         if introspection_tool_defs:
             self.available_tools.extend(introspection_tool_defs)
             print(f"✓ Added {len(introspection_tool_defs)} introspection tools (self-awareness)")
+
+        # Add knowledge management tools
+        if self.knowledge_tools:
+            knowledge_tool_defs = self.knowledge_tools.get_tool_definitions()
+            if knowledge_tool_defs:
+                self.available_tools.extend(knowledge_tool_defs)
+                print(f"✓ Added {len(knowledge_tool_defs)} knowledge management tools")
 
         # Add internal report tools
         report_tool_defs = self.report_tools.get_tool_definitions()
@@ -639,6 +658,7 @@ class AiAssistAgent:
 
                 script_tools = ["execute_skill_script"]
                 schedule_action_tools = ["schedule_action"]
+                knowledge_tools = ["save_knowledge", "search_knowledge", "trigger_synthesis"]
 
                 if original_tool_name in schedule_tools:
                     result_text = await self.schedule_tools.execute_tool(original_tool_name, arguments)
@@ -650,6 +670,11 @@ class AiAssistAgent:
                     result_text = await self.schedule_action_tools.execute_tool(
                         f"internal__{original_tool_name}", arguments
                     )
+                elif original_tool_name in knowledge_tools:
+                    if self.knowledge_tools:
+                        result_text = await self.knowledge_tools.execute_tool(original_tool_name, arguments)
+                    else:
+                        result_text = "Error: Knowledge tools not available (knowledge graph disabled)"
                 else:
                     # Default to report tools
                     result_text = await self.report_tools.execute_tool(original_tool_name, arguments)
@@ -863,6 +888,118 @@ class AiAssistAgent:
     def clear_tool_calls(self):
         """Clear tracked tool calls"""
         self.last_tool_calls = []
+
+    async def _run_synthesis(self, conversation_memory: "ConversationMemory", focus: str = "all"):
+        """Agent reflects on conversation and extracts learnings
+
+        Args:
+            conversation_memory: Conversation to analyze
+            focus: What to focus on (all, preferences, lessons, context)
+        """
+        if not self.knowledge_graph or not self.knowledge_tools:
+            return
+
+        history_parts = []
+        for ex in conversation_memory.exchanges:
+            history_parts.append(f"User: {ex['user']}")
+            history_parts.append(f"Assistant: {ex['assistant']}")
+        history_text = "\n\n".join(history_parts)
+
+        synthesis_prompt = f"""Review this conversation and identify learnings to save.
+
+Extract:
+- **User Preferences**: Stated preferences about code style, workflows, tools
+- **Lessons Learned**: Insights about bugs, patterns, best practices, gotchas
+- **Project Context**: Background about projects, goals, teams, constraints
+- **Decision Rationale**: Why certain implementation choices were made
+
+For each learning:
+- Write 1-2 sentence summary
+- Suggest unique key (e.g., "python_test_framework", "dci_friday_failures")
+- Assign confidence (0.0-1.0 based on how explicit/clear it was)
+- Add relevant tags
+
+Focus: {focus if focus != 'all' else 'everything'}
+
+Conversation:
+{history_text}
+
+Output valid JSON only (no markdown):
+{{
+  "insights": [
+    {{
+      "category": "user_preference|lesson_learned|project_context|decision_rationale",
+      "key": "unique_identifier",
+      "content": "1-2 sentence summary",
+      "confidence": 0.9,
+      "tags": ["tag1", "tag2"]
+    }}
+  ]
+}}
+
+If no learnings, return {{"insights": []}}
+"""
+
+        try:
+            response = self.anthropic.messages.create(
+                model="claude-3-5-haiku-20241022",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": synthesis_prompt}],
+            )
+
+            response_text = response.content[0].text.strip()
+
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+
+            insights_data = json.loads(response_text)
+            insights = insights_data.get("insights", [])
+
+            if not insights:
+                print("💭 Synthesis complete - no new learnings to save")
+                return
+
+            saved_count = 0
+            for insight in insights:
+                try:
+                    self.knowledge_graph.insert_knowledge(
+                        entity_type=insight["category"],
+                        key=insight["key"],
+                        content=insight["content"],
+                        metadata={
+                            "tags": insight.get("tags", []),
+                            "source": "auto_synthesis",
+                            "synthesized_at": datetime.now().isoformat(),
+                        },
+                        confidence=insight.get("confidence", 1.0),
+                    )
+                    saved_count += 1
+
+                    print(f"💡 Learned: {insight['category']}:{insight['key']}")
+
+                except Exception as e:
+                    print(f"⚠️  Failed to save insight {insight.get('key')}: {e}")
+
+            print(f"✓ Saved {saved_count} new learnings to knowledge base")
+
+        except json.JSONDecodeError as e:
+            print(f"⚠️  Synthesis failed - invalid JSON: {e}")
+        except Exception as e:
+            print(f"⚠️  Synthesis failed: {e}")
+
+    async def check_and_run_synthesis(self, conversation_memory: "ConversationMemory"):
+        """Check if synthesis was triggered and run it
+
+        Args:
+            conversation_memory: Current conversation
+        """
+        if self._pending_synthesis:
+            focus = self._pending_synthesis.get("focus", "all")
+            self._pending_synthesis = None
+
+            await self._run_synthesis(conversation_memory, focus)
 
     def set_conversation_memory(self, conversation_memory: Optional["ConversationMemory"]):
         """Set conversation memory for introspection tools

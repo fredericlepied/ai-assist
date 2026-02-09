@@ -1,0 +1,168 @@
+"""Tests for agent knowledge management tools"""
+
+import json
+
+import pytest
+
+from ai_assist.knowledge_graph import KnowledgeGraph
+from ai_assist.knowledge_tools import KnowledgeTools
+
+
+@pytest.fixture
+def kg():
+    """Create in-memory knowledge graph for testing"""
+    return KnowledgeGraph(":memory:")
+
+
+@pytest.fixture
+def knowledge_tools(kg):
+    """Create knowledge tools instance"""
+    return KnowledgeTools(kg)
+
+
+class TestSaveKnowledge:
+    """Test saving knowledge to graph"""
+
+    async def test_save_user_preference(self, knowledge_tools, kg):
+        """Save a user preference"""
+        result = await knowledge_tools.save_knowledge(
+            entity_type="user_preference",
+            key="python_test_framework",
+            content="User prefers pytest over unittest",
+            tags=["python", "testing"],
+            confidence=1.0,
+        )
+
+        assert "Saved" in result
+        assert "user_preference" in result
+
+        entities = kg.search_knowledge(entity_type="user_preference")
+        assert len(entities) == 1
+        assert entities[0]["key"] == "python_test_framework"
+        assert "pytest" in entities[0]["content"]
+
+    async def test_save_lesson_learned(self, knowledge_tools, kg):
+        """Save a lesson learned"""
+        result = await knowledge_tools.save_knowledge(
+            entity_type="lesson_learned",
+            key="dci_friday_failures",
+            content="DCI job failures spike on Fridays due to upstream CI runs",
+            tags=["dci", "patterns"],
+            confidence=0.8,
+        )
+
+        assert "Saved" in result
+
+        entities = kg.search_knowledge(entity_type="lesson_learned")
+        assert len(entities) == 1
+        assert entities[0]["metadata"]["confidence"] == 0.8
+
+    async def test_save_project_context(self, knowledge_tools, kg):
+        """Save project context"""
+        result = await knowledge_tools.save_knowledge(
+            entity_type="project_context",
+            key="telco_ci_goals",
+            content="Reduce failure notification noise by 50%",
+            tags=["telco-partner-ci"],
+        )
+
+        assert "Saved" in result
+        entities = kg.search_knowledge(entity_type="project_context")
+        assert len(entities) == 1
+
+    async def test_save_decision_rationale(self, knowledge_tools, kg):
+        """Save decision rationale"""
+        result = await knowledge_tools.save_knowledge(
+            entity_type="decision_rationale",
+            key="use_async_io",
+            content="Using async/await for concurrent MCP server connections",
+            tags=["architecture"],
+        )
+
+        assert "Saved" in result
+        entities = kg.search_knowledge(entity_type="decision_rationale")
+        assert len(entities) == 1
+
+
+class TestSearchKnowledge:
+    """Test searching knowledge"""
+
+    async def test_search_by_type(self, knowledge_tools, kg):
+        """Search knowledge by entity type"""
+        await knowledge_tools.save_knowledge("user_preference", "key1", "content1", tags=["tag1"])
+        await knowledge_tools.save_knowledge("lesson_learned", "key2", "content2", tags=["tag2"])
+
+        result = await knowledge_tools.search_knowledge(entity_type="user_preference")
+        data = json.loads(result)
+
+        assert data["count"] == 1
+        assert data["results"][0]["type"] == "user_preference"
+
+    async def test_search_by_query(self, knowledge_tools, kg):
+        """Search knowledge by query pattern"""
+        await knowledge_tools.save_knowledge("user_preference", "python_style", "Use black formatting")
+        await knowledge_tools.save_knowledge("user_preference", "javascript_style", "Use prettier")
+
+        result = await knowledge_tools.search_knowledge(query="%python%")
+        data = json.loads(result)
+
+        assert data["count"] == 1
+        assert "python" in data["results"][0]["key"]
+
+    async def test_search_by_tags(self, knowledge_tools, kg):
+        """Search knowledge by tags"""
+        await knowledge_tools.save_knowledge("lesson_learned", "key1", "content1", tags=["python", "testing"])
+        await knowledge_tools.save_knowledge("lesson_learned", "key2", "content2", tags=["javascript"])
+
+        result = await knowledge_tools.search_knowledge(tags=["python"])
+        data = json.loads(result)
+
+        assert data["count"] == 1
+        assert "python" in data["results"][0]["tags"]
+
+    async def test_search_all(self, knowledge_tools, kg):
+        """Search all knowledge"""
+        await knowledge_tools.save_knowledge("user_preference", "key1", "content1")
+        await knowledge_tools.save_knowledge("lesson_learned", "key2", "content2")
+
+        result = await knowledge_tools.search_knowledge(entity_type="all")
+        data = json.loads(result)
+
+        assert data["count"] == 2
+
+    async def test_search_empty(self, knowledge_tools, kg):
+        """Search returns empty when no matches"""
+        result = await knowledge_tools.search_knowledge(query="%nonexistent%")
+        data = json.loads(result)
+
+        assert data["count"] == 0
+        assert data["results"] == []
+
+
+class TestTriggerSynthesis:
+    """Test synthesis trigger mechanism"""
+
+    async def test_trigger_sets_flag(self, knowledge_tools):
+        """Triggering synthesis sets flag on agent"""
+        from unittest.mock import MagicMock
+
+        mock_agent = MagicMock()
+        knowledge_tools.agent = mock_agent
+
+        result = await knowledge_tools.trigger_synthesis(focus="preferences")
+
+        assert "Synthesis scheduled" in result
+        assert mock_agent._pending_synthesis is not None
+        assert mock_agent._pending_synthesis["focus"] == "preferences"
+
+    async def test_trigger_all_focus(self, knowledge_tools):
+        """Trigger synthesis with all focus"""
+        from unittest.mock import MagicMock
+
+        mock_agent = MagicMock()
+        knowledge_tools.agent = mock_agent
+
+        result = await knowledge_tools.trigger_synthesis(focus="all")
+
+        assert "all" in result.lower()
+        assert mock_agent._pending_synthesis["focus"] == "all"
