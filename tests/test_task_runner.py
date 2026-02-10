@@ -163,7 +163,7 @@ async def test_run_mcp_prompt_task(mock_agent, state_manager):
 
     assert result.success is True
     assert result.output == "RCA analysis completed"
-    mock_agent.execute_mcp_prompt.assert_called_once_with("dci", "rca", {"days": "1"})
+    mock_agent.execute_mcp_prompt.assert_called_once_with("dci", "rca", {"days": "1"}, max_turns=100)
     mock_agent.query.assert_not_called()
 
 
@@ -178,7 +178,7 @@ async def test_run_mcp_prompt_without_arguments(mock_agent, state_manager):
     result = await runner.run()
 
     assert result.success is True
-    mock_agent.execute_mcp_prompt.assert_called_once_with("server", "prompt", None)
+    mock_agent.execute_mcp_prompt.assert_called_once_with("server", "prompt", None, max_turns=100)
 
 
 @pytest.mark.asyncio
@@ -193,7 +193,7 @@ async def test_run_natural_language_task_unchanged(mock_agent, state_manager):
 
     assert result.success is True
     assert result.output == "Found 3 failures"
-    mock_agent.query.assert_called_once_with("Find failures in the system")
+    mock_agent.query.assert_called_once_with("Find failures in the system", max_turns=100)
 
 
 @pytest.mark.asyncio
@@ -224,3 +224,47 @@ async def test_run_mcp_prompt_invalid_arguments(mock_agent, state_manager):
 
     assert result.success is False
     assert "Required argument 'days' missing" in result.output
+
+
+# Phase 0: Tests for Monitor/Task Unification
+
+
+@pytest.mark.asyncio
+async def test_task_runner_handles_monitors(mock_agent, state_manager):
+    """TaskRunner should work with former monitor definitions"""
+    task_def = TaskDefinition(
+        name="test-monitor",
+        interval="30m",
+        prompt="Check DCI jobs",
+    )
+
+    mock_agent.query.return_value = "Found 3 failing jobs"
+
+    runner = TaskRunner(task_def, mock_agent, state_manager)
+    result = await runner.run()
+
+    assert result.success is True
+    assert result.output == "Found 3 failing jobs"
+
+
+@pytest.mark.asyncio
+async def test_notification_truncates_at_500_chars(mock_agent, state_manager):
+    """Notifications should truncate at 500 chars consistently"""
+    from unittest.mock import patch
+
+    long_output = "x" * 1000
+    task_def = TaskDefinition(name="test", interval="5m", prompt="test", notify=True)
+
+    mock_agent.query.return_value = long_output
+
+    with patch("ai_assist.notification_dispatcher.NotificationDispatcher") as mock_dispatcher_class:
+        mock_dispatcher = MagicMock()
+        mock_dispatcher.dispatch = AsyncMock(return_value={"console": True})
+        mock_dispatcher_class.return_value = mock_dispatcher
+
+        runner = TaskRunner(task_def, mock_agent, state_manager)
+        await runner.run()
+
+        # Notification should be truncated to 500 chars
+        notification = mock_dispatcher.dispatch.call_args[0][0]
+        assert len(notification.message) == 500

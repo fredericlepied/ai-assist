@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from .tasks import MonitorDefinition, TaskDefinition
+from .tasks import TaskDefinition
 
 
 class ScheduleLoader:
@@ -17,33 +17,34 @@ class ScheduleLoader:
         """
         self.json_file = Path(json_file)
 
-    def load_monitors(self) -> list[MonitorDefinition]:
-        """Load monitor definitions from JSON file
+    def load_monitors(self) -> list[TaskDefinition]:
+        """Load monitor definitions from JSON file as regular tasks
 
         Returns:
-            List of MonitorDefinition objects
+            List of TaskDefinition objects
         """
         data = self._load_json()
-        monitors = []
+        tasks = []
 
         for monitor_data in data.get("monitors", []):
             try:
-                monitor = MonitorDefinition(
+                task = TaskDefinition(
                     name=monitor_data["name"],
                     prompt=monitor_data["prompt"],
                     interval=monitor_data["interval"],
                     description=monitor_data.get("description"),
                     enabled=monitor_data.get("enabled", True),
                     conditions=monitor_data.get("conditions", []),
-                    knowledge_graph=monitor_data.get("knowledge_graph"),
                     prompt_arguments=monitor_data.get("prompt_arguments"),
+                    notify=monitor_data.get("notify", False),
+                    notification_channels=monitor_data.get("notification_channels", ["console"]),
                 )
-                monitor.validate()
-                monitors.append(monitor)
+                task.validate()
+                tasks.append(task)
             except (KeyError, ValueError) as e:
                 print(f"Warning: Skipping invalid monitor '{monitor_data.get('name', 'unknown')}': {e}")
 
-        return monitors
+        return tasks
 
     def load_tasks(self) -> list[TaskDefinition]:
         """Load task definitions from JSON file
@@ -64,6 +65,8 @@ class ScheduleLoader:
                     enabled=task_data.get("enabled", True),
                     conditions=task_data.get("conditions", []),
                     prompt_arguments=task_data.get("prompt_arguments"),
+                    notify=task_data.get("notify", False),
+                    notification_channels=task_data.get("notification_channels", ["console"]),
                 )
                 task.validate()
                 tasks.append(task)

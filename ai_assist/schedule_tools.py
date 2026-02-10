@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from .config import get_config_dir
-from .tasks import MonitorDefinition, TaskDefinition
+from .tasks import TaskDefinition
 
 
 class ScheduleTools:
@@ -307,17 +307,18 @@ class ScheduleTools:
         if conditions is None:
             conditions = []
 
-        # Validate monitor definition
+        # Validate monitor definition (now just a task with notification support)
         try:
-            monitor_def = MonitorDefinition(
+            monitor_def = TaskDefinition(
                 name=name,
                 prompt=prompt,
                 interval=interval,
                 description=description,
                 enabled=enabled,
                 conditions=conditions,
-                knowledge_graph=knowledge_graph,
                 prompt_arguments=prompt_arguments,
+                notify=False,  # Default notify for monitors
+                notification_channels=["console"],
             )
             monitor_def.validate()
         except ValueError as e:
@@ -482,12 +483,19 @@ class ScheduleTools:
 
         # Validate updated schedule
         try:
-            if schedule_type == "monitor":
-                monitor_def = MonitorDefinition(**schedule)
-                monitor_def.validate()
-            else:
-                task_def = TaskDefinition(**schedule)
-                task_def.validate()
+            # Both monitors and tasks are now TaskDefinition
+            task_def = TaskDefinition(
+                name=schedule["name"],
+                prompt=schedule["prompt"],
+                interval=schedule["interval"],
+                description=schedule.get("description"),
+                enabled=schedule.get("enabled", True),
+                conditions=schedule.get("conditions", []),
+                prompt_arguments=schedule.get("prompt_arguments"),
+                notify=schedule.get("notify", False),
+                notification_channels=schedule.get("notification_channels", ["console"]),
+            )
+            task_def.validate()
         except (ValueError, TypeError) as e:
             return f"Error: Invalid update: {e}"
 

@@ -27,6 +27,30 @@ if TYPE_CHECKING:
 class AiAssistAgent:
     """AI Agent with MCP capabilities"""
 
+    # Model-specific max output tokens
+    # Source: https://docs.anthropic.com/en/docs/about-claude/models
+    MODEL_MAX_TOKENS = {
+        # Claude 4.6 series (Feb 2026)
+        "claude-opus-4-6@20260205": 128000,  # 128K output tokens!
+        "claude-opus-4-6-20260205": 128000,
+        "claude-opus-4-6@default": 128000,  # Vertex AI default version
+        # Claude 4.5 series (Nov 2025)
+        "claude-opus-4-5@20251101": 64000,  # 64K output tokens
+        "claude-opus-4-5-20251101": 64000,
+        "claude-opus-4-5@default": 64000,  # Vertex AI default version
+        "claude-sonnet-4-5@20250929": 8192,
+        "claude-sonnet-4-5-20250929": 8192,
+        "claude-sonnet-4-5@default": 8192,  # Vertex AI default version
+        # Claude 3.5 series
+        "claude-3-5-sonnet-20241022": 8192,
+        "claude-3-5-sonnet-20240620": 8192,
+        "claude-3-5-haiku-20241022": 8192,
+        # Claude 3 series
+        "claude-3-opus-20240229": 4096,
+        "claude-3-sonnet-20240229": 4096,
+        "claude-3-haiku-20240307": 4096,
+    }
+
     def __init__(self, config: AiAssistConfig, knowledge_graph: Optional["KnowledgeGraph"] = None):
         self.config = config
         self.knowledge_graph = knowledge_graph
@@ -71,6 +95,10 @@ class AiAssistAgent:
         else:
             self.anthropic = Anthropic(api_key=config.anthropic_api_key)
 
+        # Display model configuration
+        max_tokens = self.get_max_tokens()
+        print(f"🤖 Model: {config.model} (max output tokens: {max_tokens:,})")
+
         self.sessions: dict[str, ClientSession] = {}
         self.available_tools: list[dict] = []
         self.available_prompts: dict[str, dict] = {}  # {server_name: {prompt_name: Prompt}}
@@ -95,6 +123,32 @@ class AiAssistAgent:
 
         # Track synthesis flag
         self._pending_synthesis = None
+
+    def get_max_tokens(self) -> int:
+        """Get max output tokens for the current model
+
+        Returns:
+            Maximum output tokens supported by the model
+        """
+        model = self.config.model
+        max_tokens = self.MODEL_MAX_TOKENS.get(model)
+
+        if max_tokens is None:
+            # Unknown model - try to infer from name patterns
+            if "opus-4-6" in model.lower() or "opus-4.6" in model.lower():
+                max_tokens = 128000  # Opus 4.6 and later
+            elif "opus-4-5" in model.lower() or "opus-4.5" in model.lower():
+                max_tokens = 64000  # Opus 4.5
+            elif "opus-4" in model.lower():
+                max_tokens = 64000  # Conservative default for Opus 4.x
+            elif "sonnet-4" in model.lower() or "3-5-" in model:
+                max_tokens = 8192
+            else:
+                # Conservative default for unknown models
+                max_tokens = 4096
+                print(f"⚠️  Unknown model '{model}', using conservative max_tokens={max_tokens}")
+
+        return max_tokens
 
     async def connect_to_servers(self):
         """Connect to all configured MCP servers"""
@@ -336,7 +390,7 @@ class AiAssistAgent:
             return identity_prompt
 
     async def query(
-        self, prompt: str = None, messages: list[dict] = None, max_turns: int = 50, progress_callback=None
+        self, prompt: str = None, messages: list[dict] = None, max_turns: int = 100, progress_callback=None
     ) -> str:
         """Query the agent with a prompt or message history
 
@@ -345,13 +399,17 @@ class AiAssistAgent:
             messages: Full message history in Claude format (optional).
                      If provided, this is used instead of prompt.
                      Format: [{"role": "user", "content": "..."}, ...]
-            max_turns: Maximum number of agentic turns
+            max_turns: Maximum number of agentic turns (safety limit, default: 100)
             progress_callback: Optional callback function for progress updates
                               Called with (status: str, turn: int, max_turns: int, tool_name: str | None)
 
         Returns:
             The assistant's response text
         """
+        import hashlib
+        import json
+        import time
+
         # Build messages list
         if messages is None:
             if prompt is None:
@@ -371,16 +429,29 @@ class AiAssistAgent:
             for tool in self.available_tools
         ]
 
+        # Loop detection tracking
+        start_time = time.time()
+        max_time_seconds = 600  # 10 minutes max
+        recent_tool_calls = []  # Track last 5 tool calls
+        max_recent_calls = 5
+        loop_detection_threshold = 3  # If same call appears 3 times in recent history, it's a loop
+        no_progress_count = 0  # Count turns with no text response
+        max_no_progress = 10  # Allow 10 turns without text before declaring stuck
+
         if progress_callback:
             progress_callback("thinking", 0, max_turns, None)
 
         for turn in range(max_turns):
+            # Check time-based timeout
+            elapsed = time.time() - start_time
+            if elapsed > max_time_seconds:
+                return f"Task timeout after {int(elapsed)} seconds (max: {max_time_seconds}s)"
             if progress_callback:
                 progress_callback("calling_claude", turn + 1, max_turns, None)
 
             response = self.anthropic.messages.create(
                 model=self.config.model,
-                max_tokens=4096,
+                max_tokens=self.get_max_tokens(),
                 system=self._build_system_prompt(),
                 tools=api_tools,
                 messages=messages,
@@ -395,13 +466,33 @@ class AiAssistAgent:
                         progress_callback("executing_tool", turn + 1, max_turns, block.name)
 
                     result = await self._execute_tool(block.name, block.input)
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result,
-                        }
+
+                    # Check if result is an error (starts with "Error:")
+                    is_error = isinstance(result, str) and result.startswith("Error:")
+
+                    tool_result = {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result,
+                    }
+
+                    # Mark as error if it's an error message
+                    if is_error:
+                        tool_result["is_error"] = True
+
+                    tool_results.append(tool_result)
+
+                    # Track tool call for loop detection
+                    tool_signature = (
+                        f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
                     )
+                    recent_tool_calls.append(tool_signature)
+                    if len(recent_tool_calls) > max_recent_calls:
+                        recent_tool_calls.pop(0)
+
+                    # Check for loops - same tool call repeated multiple times
+                    if recent_tool_calls.count(tool_signature) >= loop_detection_threshold:
+                        return f"Loop detected: {block.name} called repeatedly with same arguments ({recent_tool_calls.count(tool_signature)} times)"
 
             if not tool_results:
                 if progress_callback:
@@ -411,14 +502,27 @@ class AiAssistAgent:
                 for block in response.content:
                     if hasattr(block, "text"):
                         final_text += block.text
-                return final_text
+
+                # Check if we got actual content
+                if final_text.strip():
+                    return final_text
+                else:
+                    # No text and no tool calls - agent gave up
+                    no_progress_count += 1
+                    if no_progress_count >= max_no_progress:
+                        return "Agent stopped responding (no progress detected)"
+                    # Continue to next turn
+                    continue
+
+            # We have tool results - reset no-progress counter (agent is actively working)
+            no_progress_count = 0
 
             messages.append({"role": "user", "content": tool_results})
 
         return "Maximum turns reached without final answer"
 
     async def query_streaming(
-        self, prompt: str = None, messages: list[dict] = None, max_turns: int = 50, progress_callback=None
+        self, prompt: str = None, messages: list[dict] = None, max_turns: int = 100, progress_callback=None
     ):
         """Query the agent with streaming response
 
@@ -426,7 +530,7 @@ class AiAssistAgent:
             prompt: The user's question/prompt (if no messages provided)
             messages: Full message history in Claude format (optional).
                      If provided, this is used instead of prompt.
-            max_turns: Maximum number of agentic turns
+            max_turns: Maximum number of agentic turns (safety limit, default: 100)
             progress_callback: Optional callback for progress updates
 
         Yields:
@@ -434,6 +538,10 @@ class AiAssistAgent:
             dict: Tool call information {"type": "tool_use", "name": str, "id": str, "input": dict}
             dict: Final result {"type": "done", "turns": int}
         """
+        import hashlib
+        import json
+        import time
+
         # Build messages list
         if messages is None:
             if prompt is None:
@@ -442,6 +550,13 @@ class AiAssistAgent:
         else:
             # Use provided messages
             messages = messages.copy()  # Don't modify caller's list
+
+        # Loop detection tracking (same as query())
+        start_time = time.time()
+        max_time_seconds = 600  # 10 minutes max
+        recent_tool_calls = []
+        max_recent_calls = 5
+        loop_detection_threshold = 3
 
         # Filter out custom internal fields from tools before sending to API
         api_tools = [
@@ -457,13 +572,22 @@ class AiAssistAgent:
             progress_callback("thinking", 0, max_turns, None)
 
         for turn in range(max_turns):
+            # Check time-based timeout
+            elapsed = time.time() - start_time
+            if elapsed > max_time_seconds:
+                yield {
+                    "type": "error",
+                    "message": f"Task timeout after {int(elapsed)} seconds (max: {max_time_seconds}s)",
+                }
+                return
+
             if progress_callback:
                 progress_callback("calling_claude", turn + 1, max_turns, None)
 
             # Use streaming API
             with self.anthropic.messages.stream(
                 model=self.config.model,
-                max_tokens=4096,
+                max_tokens=self.get_max_tokens(),
                 system=self._build_system_prompt(),
                 tools=api_tools,
                 messages=messages,
@@ -518,13 +642,34 @@ class AiAssistAgent:
                             truncated_result += f"\n\n... [Result truncated: {len(result)} chars total, showing first {max_result_size} chars]"
                             result = truncated_result
 
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": result,
+                        # Check if result is an error
+                        is_error = isinstance(result, str) and result.startswith("Error:")
+
+                        tool_result = {
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result,
+                        }
+
+                        # Mark as error if it's an error message
+                        if is_error:
+                            tool_result["is_error"] = True
+
+                        tool_results.append(tool_result)
+
+                        # Track tool call for loop detection
+                        tool_signature = f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
+                        recent_tool_calls.append(tool_signature)
+                        if len(recent_tool_calls) > max_recent_calls:
+                            recent_tool_calls.pop(0)
+
+                        # Check for loops
+                        if recent_tool_calls.count(tool_signature) >= loop_detection_threshold:
+                            yield {
+                                "type": "error",
+                                "message": f"Loop detected: {block.name} called repeatedly with same arguments ({recent_tool_calls.count(tool_signature)} times)",
                             }
-                        )
+                            return
 
                 # If no tool calls, we're done
                 if not tool_results:
@@ -541,7 +686,7 @@ class AiAssistAgent:
         yield {"type": "error", "message": "Maximum turns reached without final answer"}
 
     async def execute_mcp_prompt(
-        self, server_name: str, prompt_name: str, arguments: dict[str, Any] | None = None
+        self, server_name: str, prompt_name: str, arguments: dict[str, Any] | None = None, max_turns: int = 100
     ) -> str:
         """Execute an MCP prompt directly
 
@@ -549,6 +694,7 @@ class AiAssistAgent:
             server_name: MCP server name
             prompt_name: Name of prompt to execute
             arguments: Arguments to pass to prompt
+            max_turns: Maximum agentic turns (currently not used for MCP prompts, reserved for future use)
 
         Returns:
             Combined content from prompt messages
@@ -605,8 +751,82 @@ class AiAssistAgent:
             if arg.required and arg.name not in provided_args:
                 raise ValueError(f"Required argument '{arg.name}' missing. " f"Description: {arg.description}")
 
+    def _validate_tool_arguments(self, tool_name: str, arguments: dict) -> str | None:
+        """Validate tool arguments against the tool's schema
+
+        Args:
+            tool_name: Full tool name (e.g., "internal__write_report")
+            arguments: Arguments provided by the agent
+
+        Returns:
+            Error message if validation fails, None if validation passes
+        """
+        # Find the tool definition
+        tool_def = None
+        for tool in self.available_tools:
+            if tool["name"] == tool_name:
+                tool_def = tool
+                break
+
+        if not tool_def:
+            return None  # Tool not found, will be handled later
+
+        # Get the input schema
+        schema = tool_def.get("input_schema", {})
+        required_params = schema.get("required", [])
+        properties = schema.get("properties", {})
+
+        # Check for missing required parameters
+        missing_params = [param for param in required_params if param not in arguments]
+
+        if missing_params:
+            # Build simple, direct error message
+            error_lines = [f"Error: Missing required parameter(s): {', '.join(missing_params)}"]
+            error_lines.append("")
+            error_lines.append("Required parameters:")
+            for param in required_params:
+                param_info = properties.get(param, {})
+                param_desc = param_info.get("description", "No description")
+                param_type = param_info.get("type", "unknown")
+                error_lines.append(f"  - {param} ({param_type}): {param_desc}")
+
+            error_lines.append("")
+            error_lines.append("You provided:")
+            if arguments:
+                for key, value in arguments.items():
+                    value_preview = str(value)[:100]
+                    if len(str(value)) > 100:
+                        value_preview += "..."
+                    error_lines.append(f"  - {key}: {value_preview}")
+            else:
+                error_lines.append("  (no arguments)")
+
+            return "\n".join(error_lines)
+
+        # Check for empty required string parameters
+        for param in required_params:
+            if param in arguments:
+                value = arguments[param]
+                param_type = properties.get(param, {}).get("type")
+                if param_type == "string" and (not value or not str(value).strip()):
+                    param_desc = properties.get(param, {}).get("description", "")
+                    return (
+                        f"Error: Required parameter '{param}' cannot be empty.\n\n"
+                        f"Description: {param_desc}\n\n"
+                        f"Please provide a non-empty value for '{param}'."
+                    )
+
+        return None  # Validation passed
+
     async def _execute_tool(self, tool_name: str, arguments: dict) -> str:
         """Execute a tool call on the appropriate MCP server, introspection, or internal tool"""
+
+        # Validate arguments against tool schema before execution
+        validation_error = self._validate_tool_arguments(tool_name, arguments)
+        if validation_error:
+            print(f"⚠️  VALIDATION ERROR for {tool_name}: {validation_error[:150]}...")
+            return validation_error
+
         parts = tool_name.split("__", 1)
         if len(parts) != 2:
             return f"Error: Invalid tool name format: {tool_name}"

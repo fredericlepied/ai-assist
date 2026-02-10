@@ -4,9 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ai_assist.monitor_runner import MonitorRunner
 from ai_assist.task_runner import TaskRunner
-from ai_assist.tasks import MonitorDefinition, TaskDefinition
+from ai_assist.tasks import TaskDefinition
 
 
 @pytest.mark.asyncio
@@ -116,8 +115,8 @@ async def test_task_failure_sends_error_notification(tmp_path):
 
 @pytest.mark.asyncio
 async def test_monitor_with_notify_sends_notification(tmp_path):
-    """Test that monitor with notify=True sends notification"""
-    monitor_def = MonitorDefinition(
+    """Test that monitor (now a task) with notify=True sends notification"""
+    task_def = TaskDefinition(
         name="test-monitor",
         prompt="Check for failures",
         interval="30m",
@@ -129,16 +128,14 @@ async def test_monitor_with_notify_sends_notification(tmp_path):
     mock_agent = MagicMock()
     mock_agent.query = AsyncMock(return_value="No failures found")
 
-    # Mock state manager to not return cached results
     mock_state = MagicMock()
-    mock_state.get_cached_query = MagicMock(return_value=None)  # No cache
 
     with patch("ai_assist.notification_dispatcher.NotificationDispatcher") as mock_dispatcher_class:
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch = AsyncMock(return_value={"desktop": True, "file": True})
         mock_dispatcher_class.return_value = mock_dispatcher
 
-        runner = MonitorRunner(monitor_def, mock_agent, mock_state, None)
+        runner = TaskRunner(task_def, mock_agent, mock_state)
         await runner.run()
 
         # Verify notification was sent
@@ -146,7 +143,7 @@ async def test_monitor_with_notify_sends_notification(tmp_path):
         mock_dispatcher.dispatch.assert_called_once()
 
         notification = mock_dispatcher.dispatch.call_args[0][0]
-        assert notification.title == "Monitor: test-monitor"
+        assert notification.title == "Task: test-monitor"
         assert notification.channels == ["desktop", "file"]
 
 
@@ -162,8 +159,8 @@ async def test_notification_truncates_long_output(tmp_path):
         notification_channels=["console"],
     )
 
-    # Create very long output (300 chars)
-    long_output = "A" * 300
+    # Create very long output (1000 chars)
+    long_output = "A" * 1000
 
     mock_agent = MagicMock()
     mock_agent.query = AsyncMock(return_value=long_output)
@@ -178,9 +175,9 @@ async def test_notification_truncates_long_output(tmp_path):
         runner = TaskRunner(task_def, mock_agent, mock_state)
         await runner.run()
 
-        # Verify notification message is truncated
+        # Verify notification message is truncated to 500 chars
         notification = mock_dispatcher.dispatch.call_args[0][0]
-        assert len(notification.message) <= 200
+        assert len(notification.message) == 500
 
 
 @pytest.mark.asyncio

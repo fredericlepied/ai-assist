@@ -9,7 +9,6 @@ from .config import get_config_dir
 from .config_watcher import ConfigWatcher
 from .file_watchdog import FileWatchdog
 from .knowledge_graph import KnowledgeGraph
-from .monitor_runner import MonitorRunner
 from .schedule_loader import ScheduleLoader
 from .schedule_recalculator import ScheduleRecalculator
 from .state import StateManager
@@ -41,7 +40,7 @@ class MonitoringScheduler:
             self.schedule_file = get_config_dir() / "schedules.json"
 
         self.loader = ScheduleLoader(self.schedule_file)
-        self.monitors: list[MonitorRunner] = []
+        self.monitors: list[TaskRunner] = []
         self.user_tasks: list[TaskRunner] = []
         self.monitor_handles: list[asyncio.Task] = []
         self.user_task_handles: list[asyncio.Task] = []
@@ -62,22 +61,23 @@ class MonitoringScheduler:
         self.monitors = self._load_monitors()
         self.user_tasks = self._load_user_tasks()
 
-    def _load_monitors(self) -> list[MonitorRunner]:
-        """Load monitors from JSON file"""
+    def _load_monitors(self) -> list[TaskRunner]:
+        """Load monitors from JSON file as regular tasks"""
         if not self.loader:
             return []
 
         try:
-            monitor_defs = self.loader.load_monitors()
+            task_defs = self.loader.load_monitors()
 
             runners = []
-            for monitor_def in monitor_defs:
-                if monitor_def.enabled:
-                    runner = MonitorRunner(monitor_def, self.agent, self.state_manager, self.knowledge_graph)
+            for task_def in task_defs:
+                if task_def.enabled:
+                    # Use TaskRunner - agent decides automatically when to use KG
+                    runner = TaskRunner(task_def, self.agent, self.state_manager)
                     runners.append(runner)
-                    print(f"Loaded monitor: {monitor_def.name} (interval: {monitor_def.interval})")
+                    print(f"Loaded monitor: {task_def.name} (interval: {task_def.interval})")
                 else:
-                    print(f"Skipping disabled monitor: {monitor_def.name}")
+                    print(f"Skipping disabled monitor: {task_def.name}")
 
             return runners
         except Exception as e:
@@ -135,9 +135,9 @@ class MonitoringScheduler:
 
             # Restart monitor tasks
             for monitor in self.monitors:
-                interval = 0 if monitor.monitor_def.is_time_based else monitor.monitor_def.interval_seconds
+                interval = 0 if monitor.task_def.is_time_based else monitor.task_def.interval_seconds
                 task_handle = asyncio.create_task(
-                    self._schedule_task(monitor.monitor_def.name, monitor.run, interval, task_def=monitor.monitor_def)
+                    self._schedule_task(monitor.task_def.name, monitor.run, interval, task_def=monitor.task_def)
                 )
                 self.monitor_handles.append(task_handle)
 
@@ -172,9 +172,9 @@ class MonitoringScheduler:
         tasks = []
 
         for monitor in self.monitors:
-            interval = 0 if monitor.monitor_def.is_time_based else monitor.monitor_def.interval_seconds
+            interval = 0 if monitor.task_def.is_time_based else monitor.task_def.interval_seconds
             task_handle = asyncio.create_task(
-                self._schedule_task(monitor.monitor_def.name, monitor.run, interval, task_def=monitor.monitor_def)
+                self._schedule_task(monitor.task_def.name, monitor.run, interval, task_def=monitor.task_def)
             )
             tasks.append(task_handle)
             self.monitor_handles.append(task_handle)
@@ -311,13 +311,13 @@ class MonitoringScheduler:
         all_scheduled = []
 
         for monitor in self.monitors:
-            if monitor.monitor_def.is_time_based:
+            if monitor.task_def.is_time_based:
                 # Create adapter object with execute method
                 adapter = type(
                     "MonitorAdapter",
                     (),
                     {
-                        "schedule": monitor.monitor_def.interval,
+                        "schedule": monitor.task_def.interval,
                         "execute": monitor.run,
                     },
                 )()

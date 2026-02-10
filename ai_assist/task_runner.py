@@ -44,10 +44,12 @@ class TaskRunner:
             # Detect and execute MCP prompts vs natural language
             if self.task_def.is_mcp_prompt:
                 server_name, prompt_name = self.task_def.parse_mcp_prompt()
-                output = await self.agent.execute_mcp_prompt(server_name, prompt_name, self.task_def.prompt_arguments)
+                output = await self.agent.execute_mcp_prompt(
+                    server_name, prompt_name, self.task_def.prompt_arguments, max_turns=self.task_def.max_turns
+                )
             else:
                 # Existing natural language path
-                output = await self.agent.query(self.task_def.prompt)
+                output = await self.agent.query(self.task_def.prompt, max_turns=self.task_def.max_turns)
 
             evaluator = ConditionEvaluator()
             metadata = evaluator.extract_metadata(output)
@@ -142,8 +144,8 @@ class TaskRunner:
         # Determine notification level
         level = "success" if result.success else "error"
 
-        # Truncate output for notification (max 200 chars)
-        message = result.output[:200] if result.output else "No output"
+        # Truncate output for notification (max 500 chars)
+        message = result.output[:500] if result.output else "No output"
 
         # Create notification
         notification = Notification(

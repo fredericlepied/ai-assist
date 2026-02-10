@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from ai_assist.schedule_loader import ScheduleLoader
-from ai_assist.tasks import MonitorDefinition, TaskDefinition
+from ai_assist.tasks import TaskDefinition
 
 
 @pytest.fixture
@@ -55,17 +55,17 @@ class TestScheduleLoader:
         assert loader.json_file == temp_json_file
 
     def test_load_monitors_from_json(self, temp_json_file, sample_schedules):
-        """Test loading monitors from JSON file"""
+        """Test loading monitors from JSON file (now returns TaskDefinition)"""
         temp_json_file.write_text(json.dumps(sample_schedules))
 
         loader = ScheduleLoader(temp_json_file)
         monitors = loader.load_monitors()
 
         assert len(monitors) == 1
-        assert isinstance(monitors[0], MonitorDefinition)
+        assert isinstance(monitors[0], TaskDefinition)
         assert monitors[0].name == "Test Monitor"
         assert monitors[0].interval == "5m"
-        assert monitors[0].knowledge_graph == {"enabled": True}
+        # knowledge_graph is not part of TaskDefinition anymore
 
     def test_load_tasks_from_json(self, temp_json_file, sample_schedules):
         """Test loading tasks from JSON file"""
@@ -197,7 +197,7 @@ class TestScheduleLoader:
         assert tasks[1].is_time_based is True
 
     def test_conditions_and_knowledge_graph(self, temp_json_file):
-        """Test loading schedules with conditions and knowledge graph"""
+        """Test loading schedules with conditions (KG storage now automatic)"""
         data = {
             "version": "1.0",
             "monitors": [
@@ -206,7 +206,7 @@ class TestScheduleLoader:
                     "prompt": "Test",
                     "interval": "5m",
                     "conditions": [{"type": "cache", "key": "test", "max_age": "1h"}],
-                    "knowledge_graph": {"enabled": True, "save_results": True},
+                    "knowledge_graph": {"enabled": True, "save_results": True},  # Ignored now
                 }
             ],
             "tasks": [],
@@ -218,7 +218,7 @@ class TestScheduleLoader:
 
         assert len(monitors) == 1
         assert len(monitors[0].conditions) == 1
-        assert monitors[0].knowledge_graph["enabled"] is True
+        # knowledge_graph is no longer part of TaskDefinition - agent decides storage
 
     def test_multiple_monitors_and_tasks(self, temp_json_file):
         """Test loading multiple monitors and tasks"""

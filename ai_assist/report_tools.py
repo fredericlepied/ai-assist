@@ -31,7 +31,7 @@ class ReportTools:
         return [
             {
                 "name": "internal__write_report",
-                "description": "Write or overwrite a markdown report file",
+                "description": "Create or completely replace a report file with markdown content.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -41,7 +41,7 @@ class ReportTools:
                         },
                         "content": {
                             "type": "string",
-                            "description": "Markdown content to write",
+                            "description": "Complete markdown content to write to the file",
                         },
                     },
                     "required": ["name", "content"],
@@ -50,7 +50,7 @@ class ReportTools:
             },
             {
                 "name": "internal__append_to_report",
-                "description": "Append content to existing report (creates if doesn't exist)",
+                "description": "Add content to the end of a report (creates file if it doesn't exist).",
                 "input_schema": {
                     "type": "object",
                     "properties": {
