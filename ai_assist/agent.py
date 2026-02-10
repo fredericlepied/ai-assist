@@ -449,13 +449,25 @@ class AiAssistAgent:
             if progress_callback:
                 progress_callback("calling_claude", turn + 1, max_turns, None)
 
-            response = self.anthropic.messages.create(
-                model=self.config.model,
-                max_tokens=self.get_max_tokens(),
-                system=self._build_system_prompt(),
-                tools=api_tools,
-                messages=messages,
-            )
+            max_tokens = self.get_max_tokens()
+            # Use streaming for large max_tokens to avoid HTTP timeouts
+            if max_tokens > 8192:
+                with self.anthropic.messages.stream(
+                    model=self.config.model,
+                    max_tokens=max_tokens,
+                    system=self._build_system_prompt(),
+                    tools=api_tools,
+                    messages=messages,
+                ) as stream:
+                    response = stream.get_final_message()
+            else:
+                response = self.anthropic.messages.create(
+                    model=self.config.model,
+                    max_tokens=max_tokens,
+                    system=self._build_system_prompt(),
+                    tools=api_tools,
+                    messages=messages,
+                )
 
             messages.append({"role": "assistant", "content": response.content})
 

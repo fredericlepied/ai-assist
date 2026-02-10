@@ -479,7 +479,11 @@ class ScheduleTools:
         # Apply updates
         for key, value in updates.items():
             if value is not None:  # Only update if value provided
-                schedule[key] = value
+                # Merge dicts (like prompt_arguments) instead of replacing
+                if key == "prompt_arguments" and isinstance(value, dict) and isinstance(schedule.get(key), dict):
+                    schedule[key].update(value)
+                else:
+                    schedule[key] = value
 
         # Validate updated schedule
         try:
