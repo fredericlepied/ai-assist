@@ -700,16 +700,16 @@ class AiAssistAgent:
     async def execute_mcp_prompt(
         self, server_name: str, prompt_name: str, arguments: dict[str, Any] | None = None, max_turns: int = 100
     ) -> str:
-        """Execute an MCP prompt directly
+        """Execute an MCP prompt by retrieving it from the server and feeding it to Claude
 
         Args:
             server_name: MCP server name
             prompt_name: Name of prompt to execute
             arguments: Arguments to pass to prompt
-            max_turns: Maximum agentic turns (currently not used for MCP prompts, reserved for future use)
+            max_turns: Maximum agentic turns
 
         Returns:
-            Combined content from prompt messages
+            Claude's response after executing the prompt instructions
 
         Raises:
             ValueError: If server/prompt not found or arguments invalid
@@ -737,19 +737,21 @@ class AiAssistAgent:
         if hasattr(prompt_def, "arguments") and prompt_def.arguments:
             self._validate_prompt_arguments(prompt_def, arguments or {})
 
-        # Execute prompt
+        # Retrieve prompt from MCP server
         session = self.sessions[server_name]
         result = await session.get_prompt(prompt_name, arguments=arguments)
 
-        # Convert messages to text
-        content_parts = []
+        # Convert MCP prompt messages to Claude API format
+        messages = []
         for msg in result.messages:
             if hasattr(msg.content, "text"):
-                content_parts.append(msg.content.text)
+                content = msg.content.text
             else:
-                content_parts.append(str(msg.content))
+                content = str(msg.content)
+            messages.append({"role": msg.role, "content": content})
 
-        return "\n\n".join(content_parts)
+        # Feed the prompt to Claude for execution (with tools available)
+        return await self.query(messages=messages, max_turns=max_turns)
 
     def _validate_prompt_arguments(self, prompt_def, arguments: dict):
         """Validate arguments against prompt definition

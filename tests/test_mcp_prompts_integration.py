@@ -65,6 +65,7 @@ def agent_with_mcp_prompt(mock_config):
 
     # Mock get_prompt to return test result
     mock_message = MagicMock()
+    mock_message.role = "user"
     mock_message.content = MagicMock()
     mock_message.content.text = "RCA analysis: Found 5 failures"
 
@@ -72,6 +73,9 @@ def agent_with_mcp_prompt(mock_config):
     mock_result.messages = [mock_message]
 
     mock_session.get_prompt = AsyncMock(return_value=mock_result)
+
+    # Mock query() since execute_mcp_prompt feeds prompt messages to it
+    agent.query = AsyncMock(return_value="RCA analysis: Found 5 failures")
 
     return agent
 
@@ -162,7 +166,7 @@ async def test_mixed_tasks_execution(temp_schedules_file, agent_with_mcp_prompt,
     natural_task = tasks[1]
     assert natural_task.is_mcp_prompt is False
 
-    # Mock natural language execution
+    # Mock query() - called by both execute_mcp_prompt (MCP task) and directly (natural task)
     agent_with_mcp_prompt.query = AsyncMock(return_value="Found 3 failures")
 
     # Execute both tasks
@@ -176,7 +180,8 @@ async def test_mixed_tasks_execution(temp_schedules_file, agent_with_mcp_prompt,
 
     # Verify correct execution paths were used
     agent_with_mcp_prompt.sessions["dci"].get_prompt.assert_called_once()
-    agent_with_mcp_prompt.query.assert_called_once()
+    # query() called twice: once by execute_mcp_prompt for MCP task, once for natural task
+    assert agent_with_mcp_prompt.query.call_count == 2
 
 
 @pytest.mark.asyncio
