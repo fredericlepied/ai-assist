@@ -122,6 +122,56 @@ def test_parse_source_spec(skills_manager):
     assert branch == "main"
 
 
+def test_normalize_github_url(skills_manager):
+    """Test normalizing GitHub URLs to owner/repo format"""
+    # Full HTTPS URL
+    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo")
+    assert source == "owner/repo"
+    assert branch is None
+
+    # Full HTTPS URL with trailing slash
+    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo/")
+    assert source == "owner/repo"
+    assert branch is None
+
+    # URL with .git suffix
+    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo.git")
+    assert source == "owner/repo"
+    assert branch is None
+
+    # URL with /tree/branch/path
+    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo/tree/develop/skills/pdf")
+    assert source == "owner/repo/skills/pdf"
+    assert branch == "develop"
+
+    # URL with /blob/branch/path
+    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo/blob/main/skills/pdf")
+    assert source == "owner/repo/skills/pdf"
+    assert branch == "main"
+
+    # URL with /tree/branch but no subpath (top-level)
+    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo/tree/main")
+    assert source == "owner/repo"
+    assert branch == "main"
+
+    # Already in owner/repo format (no change)
+    source, branch = skills_manager._normalize_github_url("owner/repo/skills/pdf")
+    assert source == "owner/repo/skills/pdf"
+    assert branch is None
+
+    # HTTP URL
+    source, branch = skills_manager._normalize_github_url("http://github.com/owner/repo")
+    assert source == "owner/repo"
+    assert branch is None
+
+    # Top-level repo URL (the main use case)
+    source, branch = skills_manager._normalize_github_url(
+        "https://github.com/199-biotechnologies/claude-deep-research-skill"
+    )
+    assert source == "199-biotechnologies/claude-deep-research-skill"
+    assert branch is None
+
+
 def test_persistence(skills_manager, temp_installed_skills_file):
     """Test that skills are persisted to JSON"""
     # Install skill

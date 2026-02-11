@@ -47,8 +47,9 @@ class SkillMetadata(BaseModel):
         if self.compatibility and len(self.compatibility) > 500:
             raise ValueError("Compatibility must be <= 500 characters")
 
-        # Directory name must match skill name
-        if self.skill_path.name != self.name:
+        # Directory name must match skill name (skip for git repo root skills
+        # where the directory is a cache artifact, not a skill-named directory)
+        if self.source_type == "local" and self.skill_path.name != self.name:
             raise ValueError(f"Directory '{self.skill_path.name}' must match name '{self.name}'")
 
 
@@ -74,11 +75,12 @@ class SkillsLoader:
         self.cache_dir = get_config_dir() / "skills-cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def load_skill_from_local(self, skill_path: Path) -> SkillContent:
+    def load_skill_from_local(self, skill_path: Path, source_type: str = "local") -> SkillContent:
         """Load a skill from a local directory
 
         Args:
             skill_path: Path to skill directory containing SKILL.md
+            source_type: Source type for metadata ('local' or 'git')
 
         Returns:
             SkillContent with full skill data
@@ -92,7 +94,7 @@ class SkillsLoader:
             raise FileNotFoundError(f"SKILL.md not found in {skill_path}")
 
         # Parse SKILL.md
-        metadata, body = self._parse_skill_file(skill_file, skill_path, "local", None)
+        metadata, body = self._parse_skill_file(skill_file, skill_path, source_type, None)
 
         # Discover file references
         scripts = self._discover_files(skill_path / "scripts")
@@ -120,9 +122,12 @@ class SkillsLoader:
         repo_dir = self._ensure_repo_cached(repo_url, branch)
 
         # Navigate to skill directory
-        skill_path = repo_dir / skill_subpath
-        if not skill_path.exists():
-            raise FileNotFoundError(f"Skill path '{skill_subpath}' not found in repository")
+        if skill_subpath:
+            skill_path = repo_dir / skill_subpath
+            if not skill_path.exists():
+                raise FileNotFoundError(f"Skill path '{skill_subpath}' not found in repository")
+        else:
+            skill_path = repo_dir
 
         skill_file = skill_path / "SKILL.md"
         if not skill_file.exists():

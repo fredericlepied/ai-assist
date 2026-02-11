@@ -60,7 +60,9 @@ class SkillsManager:
                     # Load skill content
                     skill_path = Path(installed_skill.cache_path)
                     if skill_path.exists():
-                        content = self.skills_loader.load_skill_from_local(skill_path)
+                        content = self.skills_loader.load_skill_from_local(
+                            skill_path, source_type=installed_skill.source_type
+                        )
                         self.loaded_skills[installed_skill.name] = content
                     else:
                         print(f"Warning: Skill cache not found for '{installed_skill.name}' at {skill_path}")
@@ -79,6 +81,8 @@ class SkillsManager:
         Args:
             source_spec: Source specification in format:
                         - Git: 'owner/repo/path/to/skill@branch'
+                        - Git (top-level): 'owner/repo@branch'
+                        - Git URL: 'https://github.com/owner/repo@branch'
                         - Local: '/absolute/path/to/skill@branch'
 
         Returns:
@@ -98,14 +102,20 @@ class SkillsManager:
             else:
                 # Git repository
                 source_type = "git"
-                # Parse git spec: owner/repo/path/to/skill -> repo_url, skill_subpath
+
+                # Normalize GitHub URLs to owner/repo[/path] format
+                source, url_branch = self._normalize_github_url(source)
+                if url_branch and branch == "main":
+                    branch = url_branch
+
+                # Parse git spec: owner/repo[/path/to/skill] -> repo_url, skill_subpath
                 parts = source.split("/")
-                if len(parts) < 3:
-                    return f"Error: Invalid git source '{source}'. Expected format: owner/repo/path/to/skill"
+                if len(parts) < 2:
+                    return f"Error: Invalid git source '{source}'. Expected format: owner/repo[/path/to/skill]"
 
                 owner = parts[0]
                 repo = parts[1]
-                skill_subpath = "/".join(parts[2:])
+                skill_subpath = "/".join(parts[2:]) if len(parts) > 2 else ""
 
                 repo_url = f"{owner}/{repo}"
                 content = self.skills_loader.load_skill_from_git(repo_url, skill_subpath, branch)
@@ -230,6 +240,44 @@ class SkillsManager:
             sections.append("")
 
         return "\n".join(sections)
+
+    def _normalize_github_url(self, source: str) -> tuple[str, str | None]:
+        """Normalize GitHub URLs to owner/repo[/path] format.
+
+        Handles URLs like:
+            https://github.com/owner/repo -> owner/repo
+            https://github.com/owner/repo/tree/branch/path -> owner/repo/path (branch extracted)
+            https://github.com/owner/repo/blob/branch/path -> owner/repo/path (branch extracted)
+
+        Args:
+            source: Source string, may be a full URL or already in owner/repo format
+
+        Returns:
+            Tuple of (normalized_source, extracted_branch_or_None)
+        """
+        extracted_branch = None
+
+        # Strip full GitHub URL prefix
+        for prefix in ("https://github.com/", "http://github.com/"):
+            if source.startswith(prefix):
+                source = source[len(prefix) :]
+                break
+
+        # Remove trailing slash
+        source = source.rstrip("/")
+
+        # Remove .git suffix
+        if source.endswith(".git"):
+            source = source[:-4]
+
+        # Remove /blob/<branch>/ or /tree/<branch>/ from the path
+        parts = source.split("/")
+        if len(parts) >= 4 and parts[2] in ("blob", "tree"):
+            extracted_branch = parts[3]
+            remaining = parts[4:] if len(parts) > 4 else []
+            source = "/".join(parts[:2] + remaining)
+
+        return source, extracted_branch
 
     def _parse_source_spec(self, source_spec: str) -> tuple[str, str]:
         """Parse source specification into source and branch
