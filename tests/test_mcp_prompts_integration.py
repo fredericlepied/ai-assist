@@ -74,8 +74,12 @@ def agent_with_mcp_prompt(mock_config):
 
     mock_session.get_prompt = AsyncMock(return_value=mock_result)
 
-    # Mock query() since execute_mcp_prompt feeds prompt messages to it
-    agent.query = AsyncMock(return_value="RCA analysis: Found 5 failures")
+    # Mock query_streaming since execute_mcp_prompt uses streaming
+    async def mock_streaming(**kwargs):
+        yield "RCA analysis: Found 5 failures"
+        yield {"type": "done", "turns": 1}
+
+    agent.query_streaming = mock_streaming
 
     return agent
 
@@ -166,7 +170,14 @@ async def test_mixed_tasks_execution(temp_schedules_file, agent_with_mcp_prompt,
     natural_task = tasks[1]
     assert natural_task.is_mcp_prompt is False
 
-    # Mock query() - called by both execute_mcp_prompt (MCP task) and directly (natural task)
+    # Mock query_streaming - called by execute_mcp_prompt for MCP task
+    async def mock_streaming(**kwargs):
+        yield "Found 3 failures"
+        yield {"type": "done", "turns": 1}
+
+    agent_with_mcp_prompt.query_streaming = mock_streaming
+
+    # Mock query() - called directly for natural language task
     agent_with_mcp_prompt.query = AsyncMock(return_value="Found 3 failures")
 
     # Execute both tasks
@@ -180,8 +191,8 @@ async def test_mixed_tasks_execution(temp_schedules_file, agent_with_mcp_prompt,
 
     # Verify correct execution paths were used
     agent_with_mcp_prompt.sessions["dci"].get_prompt.assert_called_once()
-    # query() called twice: once by execute_mcp_prompt for MCP task, once for natural task
-    assert agent_with_mcp_prompt.query.call_count == 2
+    # query() called once for natural language task only
+    assert agent_with_mcp_prompt.query.call_count == 1
 
 
 @pytest.mark.asyncio

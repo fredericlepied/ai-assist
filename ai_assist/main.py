@@ -14,6 +14,7 @@ from .kg_queries import KnowledgeGraphQueries
 from .knowledge_graph import KnowledgeGraph
 from .monitors import MonitoringScheduler
 from .state import StateManager
+from .tui import format_tool_display_name
 
 
 async def handle_prompt_command_basic(command: str, agent: AiAssistAgent, conversation_history: list, identity) -> bool:
@@ -169,6 +170,17 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
 
     conversation_context = []
     messages = []  # For prompt injection
+
+    # Hook inner execution callback for MCP prompt visibility
+    def on_inner_execution(chunk):
+        if isinstance(chunk, str):
+            print(chunk, end="", flush=True)
+        elif isinstance(chunk, dict):
+            if chunk.get("type") == "tool_use":
+                display_name = format_tool_display_name(chunk["name"])
+                print(f"\n  🔧 {display_name}")
+
+    agent.on_inner_execution = on_inner_execution
 
     while True:
         try:

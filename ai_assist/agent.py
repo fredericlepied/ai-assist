@@ -107,6 +107,9 @@ class AiAssistAgent:
         # Track tool calls for KG storage
         self.last_tool_calls: list[dict] = []
 
+        # Callback for inner execution visibility (e.g., during execute_mcp_prompt)
+        self.on_inner_execution = None
+
         # Update introspection tools with reference to available_prompts and agent
         # (will be populated during server connection)
         self.introspection_tools.available_prompts = self.available_prompts
@@ -751,7 +754,23 @@ class AiAssistAgent:
             messages.append({"role": msg.role, "content": content})
 
         # Feed the prompt to Claude for execution (with tools available)
-        return await self.query(messages=messages, max_turns=max_turns)
+        # Use streaming to allow inner execution visibility via callback
+        full_response = ""
+        async for chunk in self.query_streaming(messages=messages, max_turns=max_turns):
+            if isinstance(chunk, str):
+                full_response += chunk
+                if self.on_inner_execution:
+                    self.on_inner_execution(chunk)
+            elif isinstance(chunk, dict):
+                if chunk.get("type") == "tool_use" and self.on_inner_execution:
+                    self.on_inner_execution(chunk)
+                elif chunk.get("type") == "error":
+                    if self.on_inner_execution:
+                        self.on_inner_execution(chunk)
+                    break
+                elif chunk.get("type") == "done":
+                    break
+        return full_response
 
     def _validate_prompt_arguments(self, prompt_def, arguments: dict):
         """Validate arguments against prompt definition

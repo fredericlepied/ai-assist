@@ -3,6 +3,25 @@
 from prompt_toolkit.completion import Completer, Completion
 
 
+def format_tool_display_name(tool_name: str) -> str:
+    """Format a tool name for user-friendly display.
+
+    Converts internal tool names like 'mcp__dci__search' to 'dci → search'.
+    """
+    return tool_name.replace("mcp__", "").replace("__", " → ").replace("_", " ")
+
+
+def format_tool_args(input_dict: dict, max_len: int = 100) -> str:
+    """Format tool arguments for display, truncating long values."""
+    args_display = []
+    for key, value in input_dict.items():
+        value_str = str(value)
+        if len(value_str) > max_len:
+            value_str = value_str[:max_len] + "..."
+        args_display.append(f"{key}={value_str}")
+    return ", ".join(args_display)
+
+
 class AiAssistCompleter(Completer):
     """Command completer for ai-assist interactive mode"""
 
@@ -105,6 +124,42 @@ class AiAssistCompleter(Completer):
                     yield Completion(
                         cmd, start_position=-len(word), display=cmd, display_meta=self._get_command_description(cmd)
                     )
+        else:
+            # Mid-sentence: check if cursor is on a /server/prompt token
+            words = text.split()
+            if not words:
+                return
+            last_word = words[-1]
+            if not last_word.startswith("/"):
+                return
+            # Only complete MCP prompts mid-sentence, not built-in commands
+            if not self.agent or not self.agent.available_prompts:
+                return
+
+            parts = last_word.lstrip("/").split("/")
+
+            if len(parts) == 2 and parts[0] != "skill":
+                server_name, prompt_prefix = parts
+                if server_name in self.agent.available_prompts:
+                    for prompt_name, prompt in self.agent.available_prompts[server_name].items():
+                        if prompt_name.startswith(prompt_prefix.lower()):
+                            full_token = f"/{server_name}/{prompt_name}"
+                            yield Completion(
+                                full_token,
+                                start_position=-len(last_word),
+                                display=full_token,
+                                display_meta=prompt.description[:60] if prompt.description else "MCP prompt",
+                            )
+            elif len(parts) == 1:
+                for server_name in self.agent.available_prompts.keys():
+                    server_cmd = f"/{server_name}/"
+                    if server_cmd.startswith(last_word.lower()):
+                        yield Completion(
+                            server_cmd,
+                            start_position=-len(last_word),
+                            display=server_cmd,
+                            display_meta=f"MCP server ({len(self.agent.available_prompts[server_name])} prompts)",
+                        )
 
     def _get_command_description(self, command: str) -> str:
         """Get description for a command"""

@@ -22,7 +22,7 @@ from .file_watchdog import FileWatchdog
 from .identity import get_identity
 from .knowledge_graph import KnowledgeGraph
 from .state import StateManager
-from .tui import AiAssistCompleter
+from .tui import AiAssistCompleter, format_tool_args, format_tool_display_name
 
 
 async def display_notification(console: Console, notification: dict):
@@ -147,8 +147,7 @@ async def query_with_feedback(
             feedback_state["status"] = f"💭 Thinking... (Turn {turn}/{max_turns})"
             feedback_state["streaming"] = False
         elif status == "executing_tool":
-            # Simplify tool names for display
-            display_name = tool_name.replace("mcp__", "").replace("__", " → ").replace("_", " ")
+            display_name = format_tool_display_name(tool_name)
             feedback_state["status"] = f"🔧 Using tool: {display_name}"
             feedback_state["streaming"] = False
         elif status == "complete":
@@ -208,20 +207,12 @@ async def query_with_feedback(
                     # Show tool call inline
                     if response_started:
                         console.print()  # New line before tool notification
-                    tool_name = chunk["name"]
-                    display_name = tool_name.replace("mcp__", "").replace("__", " → ").replace("_", " ")
+                    display_name = format_tool_display_name(chunk["name"])
                     console.print(f"\n[dim]🔧 {display_name}[/dim]")
 
                     # Display arguments if present
                     if chunk.get("input"):
-                        args_display = []
-                        for key, value in chunk["input"].items():
-                            # Truncate long values
-                            value_str = str(value)
-                            if len(value_str) > 100:
-                                value_str = value_str[:100] + "..."
-                            args_display.append(f"{key}={value_str}")
-                        console.print(f"[dim]   {', '.join(args_display)}[/dim]")
+                        console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
                     if not response_started:
                         live.update(create_feedback_display())  # Keep spinner going
 
@@ -512,6 +503,21 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     notification_watcher = NotificationWatcher(console)
     await notification_watcher.start()
 
+    # Hook inner execution callback for MCP prompt visibility
+    def on_inner_execution(chunk):
+        if isinstance(chunk, str):
+            console.print(chunk, end="")
+        elif isinstance(chunk, dict):
+            if chunk.get("type") == "tool_use":
+                display_name = format_tool_display_name(chunk["name"])
+                console.print(f"\n[dim]  🔧 {display_name}[/dim]")
+                if chunk.get("input"):
+                    console.print(f"[dim]     {format_tool_args(chunk['input'])}[/dim]")
+            elif chunk.get("type") == "error":
+                console.print(f"\n[red]  {chunk.get('message')}[/red]")
+
+    agent.on_inner_execution = on_inner_execution
+
     try:
         while True:
             try:
@@ -562,24 +568,14 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                                     if chunk.get("type") == "tool_use":
                                         if response_started:
                                             console.print()
-                                        tool_name = chunk["name"]
-                                        display_name = (
-                                            tool_name.replace("mcp__", "").replace("__", " → ").replace("_", " ")
-                                        )
+                                        display_name = format_tool_display_name(chunk["name"])
 
                                         # Show tool call with arguments
                                         console.print(f"\n[dim]🔧 {display_name}[/dim]")
 
                                         # Display arguments if present
                                         if chunk.get("input"):
-                                            args_display = []
-                                            for key, value in chunk["input"].items():
-                                                # Truncate long values
-                                                value_str = str(value)
-                                                if len(value_str) > 100:
-                                                    value_str = value_str[:100] + "..."
-                                                args_display.append(f"{key}={value_str}")
-                                            console.print(f"[dim]   {', '.join(args_display)}[/dim]")
+                                            console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
                                     elif chunk.get("type") == "done":
                                         if response_started:
                                             console.print()

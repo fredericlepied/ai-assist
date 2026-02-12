@@ -80,7 +80,7 @@ async def test_execute_mcp_prompt_missing_required_argument(agent):
 
 @pytest.mark.asyncio
 async def test_execute_mcp_prompt_success(agent):
-    """Test successful prompt execution feeds prompt to query()"""
+    """Test successful prompt execution feeds prompt to query_streaming()"""
     # Setup mock session
     mock_session = MagicMock()
     agent.sessions["dci"] = mock_session
@@ -103,21 +103,20 @@ async def test_execute_mcp_prompt_success(agent):
 
     mock_session.get_prompt = AsyncMock(return_value=mock_result)
 
-    # Mock query() to verify it receives the prompt messages
-    agent.query = AsyncMock(return_value="Claude executed the prompt")
+    # Mock query_streaming to yield text chunks and done
+    async def mock_streaming(**kwargs):
+        yield "Claude "
+        yield "executed "
+        yield "the prompt"
+        yield {"type": "done", "turns": 1}
+
+    agent.query_streaming = mock_streaming
 
     # Execute
     result = await agent.execute_mcp_prompt("dci", "rca", None)
 
     assert result == "Claude executed the prompt"
     mock_session.get_prompt.assert_called_once_with("rca", arguments=None)
-    # Verify query was called with the prompt messages
-    agent.query.assert_called_once()
-    call_kwargs = agent.query.call_args
-    messages = call_kwargs.kwargs["messages"]
-    assert len(messages) == 1
-    assert messages[0]["role"] == "user"
-    assert messages[0]["content"] == "Test prompt instructions"
 
 
 @pytest.mark.asyncio
@@ -151,20 +150,23 @@ async def test_execute_mcp_prompt_with_arguments(agent):
 
     mock_session.get_prompt = AsyncMock(return_value=mock_result)
 
-    # Mock query() to verify it receives the prompt messages
-    agent.query = AsyncMock(return_value="Claude analyzed RCA for 7 days")
+    # Mock query_streaming
+    async def mock_streaming(**kwargs):
+        yield "Claude analyzed RCA for 7 days"
+        yield {"type": "done", "turns": 1}
+
+    agent.query_streaming = mock_streaming
 
     # Execute with arguments
     result = await agent.execute_mcp_prompt("dci", "rca", {"days": "7"})
 
     assert result == "Claude analyzed RCA for 7 days"
     mock_session.get_prompt.assert_called_once_with("rca", arguments={"days": "7"})
-    agent.query.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_execute_mcp_prompt_multiple_messages(agent):
-    """Test prompt execution with multiple messages passes all to query()"""
+    """Test prompt execution with multiple messages passes all to query_streaming()"""
     # Setup mock session
     mock_session = MagicMock()
     agent.sessions["dci"] = mock_session
@@ -192,18 +194,153 @@ async def test_execute_mcp_prompt_multiple_messages(agent):
 
     mock_session.get_prompt = AsyncMock(return_value=mock_result)
 
-    # Mock query() to verify it receives all messages
-    agent.query = AsyncMock(return_value="Claude processed both messages")
+    # Track what messages query_streaming receives
+    received_messages = []
+
+    async def mock_streaming(**kwargs):
+        received_messages.extend(kwargs.get("messages", []))
+        yield "Claude processed both messages"
+        yield {"type": "done", "turns": 1}
+
+    agent.query_streaming = mock_streaming
 
     # Execute
     result = await agent.execute_mcp_prompt("dci", "rca", None)
 
     assert result == "Claude processed both messages"
-    # Verify query was called with both messages
-    call_kwargs = agent.query.call_args
-    messages = call_kwargs.kwargs["messages"]
-    assert len(messages) == 2
-    assert messages[0]["role"] == "user"
-    assert messages[0]["content"] == "First message"
-    assert messages[1]["role"] == "assistant"
-    assert messages[1]["content"] == "Second message"
+    # Verify query_streaming was called with both messages
+    assert len(received_messages) == 2
+    assert received_messages[0]["role"] == "user"
+    assert received_messages[0]["content"] == "First message"
+    assert received_messages[1]["role"] == "assistant"
+    assert received_messages[1]["content"] == "Second message"
+
+
+@pytest.mark.asyncio
+async def test_execute_mcp_prompt_calls_callback(agent):
+    """Test that on_inner_execution callback receives chunks during execution"""
+    # Setup mock session
+    mock_session = MagicMock()
+    agent.sessions["dci"] = mock_session
+
+    # Create mock prompt
+    mock_prompt = MagicMock()
+    mock_prompt.name = "rca"
+    mock_prompt.arguments = []
+
+    agent.available_prompts["dci"] = {"rca": mock_prompt}
+
+    # Mock get_prompt response
+    mock_message = MagicMock()
+    mock_message.role = "user"
+    mock_message.content = MagicMock()
+    mock_message.content.text = "Analyze failures"
+
+    mock_result = MagicMock()
+    mock_result.messages = [mock_message]
+    mock_session.get_prompt = AsyncMock(return_value=mock_result)
+
+    # Mock query_streaming to yield text, tool_use, and done
+    async def mock_streaming(**kwargs):
+        yield "Hello "
+        yield "world"
+        yield {"type": "tool_use", "name": "mcp__dci__search", "id": "t1", "input": {"query": "test"}}
+        yield "Result text"
+        yield {"type": "done", "turns": 1}
+
+    agent.query_streaming = mock_streaming
+
+    # Set up callback to collect received chunks
+    received_chunks = []
+    agent.on_inner_execution = lambda chunk: received_chunks.append(chunk)
+
+    # Execute
+    result = await agent.execute_mcp_prompt("dci", "rca", None)
+
+    assert result == "Hello worldResult text"
+    # Verify callback received text chunks and tool_use notification
+    assert "Hello " in received_chunks
+    assert "world" in received_chunks
+    assert "Result text" in received_chunks
+    tool_chunks = [c for c in received_chunks if isinstance(c, dict) and c.get("type") == "tool_use"]
+    assert len(tool_chunks) == 1
+    assert tool_chunks[0]["name"] == "mcp__dci__search"
+
+
+@pytest.mark.asyncio
+async def test_execute_mcp_prompt_no_callback(agent):
+    """Test that execute_mcp_prompt works fine without a callback set"""
+    # Setup mock session
+    mock_session = MagicMock()
+    agent.sessions["dci"] = mock_session
+
+    # Create mock prompt
+    mock_prompt = MagicMock()
+    mock_prompt.name = "rca"
+    mock_prompt.arguments = []
+
+    agent.available_prompts["dci"] = {"rca": mock_prompt}
+
+    # Mock get_prompt response
+    mock_message = MagicMock()
+    mock_message.role = "user"
+    mock_message.content = MagicMock()
+    mock_message.content.text = "Test"
+
+    mock_result = MagicMock()
+    mock_result.messages = [mock_message]
+    mock_session.get_prompt = AsyncMock(return_value=mock_result)
+
+    async def mock_streaming(**kwargs):
+        yield "response"
+        yield {"type": "done", "turns": 1}
+
+    agent.query_streaming = mock_streaming
+
+    # No callback set (default None)
+    assert agent.on_inner_execution is None
+
+    # Should work without errors
+    result = await agent.execute_mcp_prompt("dci", "rca", None)
+    assert result == "response"
+
+
+@pytest.mark.asyncio
+async def test_execute_mcp_prompt_error_callback(agent):
+    """Test that error chunks are forwarded to callback"""
+    # Setup mock session
+    mock_session = MagicMock()
+    agent.sessions["dci"] = mock_session
+
+    # Create mock prompt
+    mock_prompt = MagicMock()
+    mock_prompt.name = "rca"
+    mock_prompt.arguments = []
+
+    agent.available_prompts["dci"] = {"rca": mock_prompt}
+
+    # Mock get_prompt response
+    mock_message = MagicMock()
+    mock_message.role = "user"
+    mock_message.content = MagicMock()
+    mock_message.content.text = "Test"
+
+    mock_result = MagicMock()
+    mock_result.messages = [mock_message]
+    mock_session.get_prompt = AsyncMock(return_value=mock_result)
+
+    async def mock_streaming(**kwargs):
+        yield "partial"
+        yield {"type": "error", "message": "Something went wrong"}
+
+    agent.query_streaming = mock_streaming
+
+    received_chunks = []
+    agent.on_inner_execution = lambda chunk: received_chunks.append(chunk)
+
+    result = await agent.execute_mcp_prompt("dci", "rca", None)
+
+    assert result == "partial"
+    error_chunks = [c for c in received_chunks if isinstance(c, dict) and c.get("type") == "error"]
+    assert len(error_chunks) == 1
+    assert error_chunks[0]["message"] == "Something went wrong"
