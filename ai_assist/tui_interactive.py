@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -18,6 +19,7 @@ from .commands import get_command_suggestion, is_valid_interactive_command
 from .config import get_config_dir
 from .config_watcher import ConfigWatcher
 from .context import ConversationMemory, KnowledgeGraphContext
+from .escape_watcher import EscapeWatcher
 from .file_watchdog import FileWatchdog
 from .identity import get_identity
 from .knowledge_graph import KnowledgeGraph
@@ -185,48 +187,59 @@ async def query_with_feedback(
             # No conversation memory - just use prompt
             messages = None
 
-        # Use streaming query with conversation context
-        async for chunk in agent.query_streaming(
-            prompt=prompt if messages is None else None, messages=messages, progress_callback=progress_callback
-        ):
-            # Handle text chunks
-            if isinstance(chunk, str):
-                # First text chunk - stop spinner and start showing response
-                if not response_started:
-                    live.stop()
-                    console.print(f"\n[bold cyan]{identity.assistant.nickname}:[/bold cyan] ", end="")
-                    response_started = True
-
-                # Print chunk immediately
-                console.print(chunk, end="")
-                full_response += chunk
-
-            # Handle tool use notifications
-            elif isinstance(chunk, dict):
-                if chunk.get("type") == "tool_use":
-                    # Show tool call inline
-                    if response_started:
-                        console.print()  # New line before tool notification
-                    display_name = format_tool_display_name(chunk["name"])
-                    console.print(f"\n[dim]🔧 {display_name}[/dim]")
-
-                    # Display arguments if present
-                    if chunk.get("input"):
-                        console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
+        # Use streaming query with conversation context and cancellation support
+        cancel_event = threading.Event()
+        with EscapeWatcher(cancel_event):
+            async for chunk in agent.query_streaming(
+                prompt=prompt if messages is None else None,
+                messages=messages,
+                progress_callback=progress_callback,
+                cancel_event=cancel_event,
+            ):
+                # Handle text chunks
+                if isinstance(chunk, str):
+                    # First text chunk - stop spinner and start showing response
                     if not response_started:
-                        live.update(create_feedback_display())  # Keep spinner going
+                        live.stop()
+                        console.print(f"\n[bold cyan]{identity.assistant.nickname}:[/bold cyan] ", end="")
+                        response_started = True
 
-                elif chunk.get("type") == "done":
-                    # Query complete
-                    if response_started:
-                        console.print()  # Final newline
-                    break
+                    # Print chunk immediately
+                    console.print(chunk, end="")
+                    full_response += chunk
 
-                elif chunk.get("type") == "error":
-                    if response_started:
-                        console.print()
-                    console.print(f"\n[red]{chunk.get('message')}[/red]")
-                    break
+                # Handle tool use notifications
+                elif isinstance(chunk, dict):
+                    if chunk.get("type") == "tool_use":
+                        # Show tool call inline
+                        if response_started:
+                            console.print()  # New line before tool notification
+                        display_name = format_tool_display_name(chunk["name"])
+                        console.print(f"\n[dim]🔧 {display_name}[/dim]")
+
+                        # Display arguments if present
+                        if chunk.get("input"):
+                            console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
+                        if not response_started:
+                            live.update(create_feedback_display())  # Keep spinner going
+
+                    elif chunk.get("type") == "cancelled":
+                        if response_started:
+                            console.print()
+                        console.print("\n[yellow]Query cancelled[/yellow]")
+                        break
+
+                    elif chunk.get("type") == "done":
+                        # Query complete
+                        if response_started:
+                            console.print()  # Final newline
+                        break
+
+                    elif chunk.get("type") == "error":
+                        if response_started:
+                            console.print()
+                        console.print(f"\n[red]{chunk.get('message')}[/red]")
+                        break
 
     except Exception as e:
         # Handle any streaming errors
@@ -475,7 +488,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
             "[dim]🧠 Auto-learning enabled - Tool results saved to knowledge graph[/dim]\n"
             "[dim]🎯 MCP prompts available - Use /prompts to see them[/dim]\n"
             f"{skills_status}"
-            "[dim]Press Enter to submit • Esc-Enter or Ctrl-J for multi-line input • Tab for completion[/dim]",
+            "[dim]Press Enter to submit • Esc-Enter for multi-line • Escape to cancel • Tab for completion[/dim]",
             border_style="cyan",
         )
     )
@@ -553,38 +566,49 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                             response_started = False
                             identity = get_identity()
 
-                            async for chunk in agent.query_streaming(messages=messages, progress_callback=None):
-                                # Handle text chunks
-                                if isinstance(chunk, str):
-                                    if not response_started:
-                                        console.print()  # Blank line before agent message
-                                        console.print(f"[bold cyan]{identity.assistant.nickname}:[/bold cyan] ", end="")
-                                        response_started = True
-                                    console.print(chunk, end="")
-                                    full_response += chunk
+                            cancel_event = threading.Event()
+                            with EscapeWatcher(cancel_event):
+                                async for chunk in agent.query_streaming(
+                                    messages=messages, progress_callback=None, cancel_event=cancel_event
+                                ):
+                                    # Handle text chunks
+                                    if isinstance(chunk, str):
+                                        if not response_started:
+                                            console.print()  # Blank line before agent message
+                                            console.print(
+                                                f"[bold cyan]{identity.assistant.nickname}:[/bold cyan] ", end=""
+                                            )
+                                            response_started = True
+                                        console.print(chunk, end="")
+                                        full_response += chunk
 
-                                # Handle tool use notifications
-                                elif isinstance(chunk, dict):
-                                    if chunk.get("type") == "tool_use":
-                                        if response_started:
-                                            console.print()
-                                        display_name = format_tool_display_name(chunk["name"])
+                                    # Handle tool use notifications
+                                    elif isinstance(chunk, dict):
+                                        if chunk.get("type") == "tool_use":
+                                            if response_started:
+                                                console.print()
+                                            display_name = format_tool_display_name(chunk["name"])
 
-                                        # Show tool call with arguments
-                                        console.print(f"\n[dim]🔧 {display_name}[/dim]")
+                                            # Show tool call with arguments
+                                            console.print(f"\n[dim]🔧 {display_name}[/dim]")
 
-                                        # Display arguments if present
-                                        if chunk.get("input"):
-                                            console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
-                                    elif chunk.get("type") == "done":
-                                        if response_started:
-                                            console.print()
-                                        break
-                                    elif chunk.get("type") == "error":
-                                        if response_started:
-                                            console.print()
-                                        console.print(f"\n[red]{chunk.get('message')}[/red]")
-                                        break
+                                            # Display arguments if present
+                                            if chunk.get("input"):
+                                                console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
+                                        elif chunk.get("type") == "cancelled":
+                                            if response_started:
+                                                console.print()
+                                            console.print("\n[yellow]Query cancelled[/yellow]")
+                                            break
+                                        elif chunk.get("type") == "done":
+                                            if response_started:
+                                                console.print()
+                                            break
+                                        elif chunk.get("type") == "error":
+                                            if response_started:
+                                                console.print()
+                                            console.print(f"\n[red]{chunk.get('message')}[/red]")
+                                            break
 
                             # Show KG save feedback if entities were saved
                             kg_saved_count = agent.get_last_kg_saved_count()
@@ -689,8 +713,9 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                         {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
                     )
 
-                except (EOFError, KeyboardInterrupt):
-                    # Re-raise to be caught by outer handler which breaks the loop
+                except KeyboardInterrupt:
+                    console.print("\n[yellow]Query cancelled[/yellow]")
+                except EOFError:
                     raise
                 except Exception as e:
                     console.print(f"\n[red]Error: {e}[/red]\n")
@@ -878,10 +903,11 @@ ai-assist automatically saves tool results to the knowledge graph:
 ## Keyboard Shortcuts
 - `Enter` - Submit your input
 - `Esc-Enter` or `Ctrl-J` - Add newline for multi-line input
+- `Escape` - Cancel current streaming query
 - `Tab` - Auto-complete slash commands
 - `Up/Down` - Navigate command history
 - `Ctrl-R` - Search history (reverse search)
-- `Ctrl-C` - Cancel current input
+- `Ctrl-C` - Cancel current input or streaming query
 - `Ctrl-D` - Exit
 
 ## Tips

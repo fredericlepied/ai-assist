@@ -110,6 +110,9 @@ class AiAssistAgent:
         # Callback for inner execution visibility (e.g., during execute_mcp_prompt)
         self.on_inner_execution = None
 
+        # Active cancel event (set by query_streaming, used by execute_mcp_prompt)
+        self._cancel_event = None
+
         # Update introspection tools with reference to available_prompts and agent
         # (will be populated during server connection)
         self.introspection_tools.available_prompts = self.available_prompts
@@ -537,7 +540,12 @@ class AiAssistAgent:
         return "Maximum turns reached without final answer"
 
     async def query_streaming(
-        self, prompt: str = None, messages: list[dict] = None, max_turns: int = 100, progress_callback=None
+        self,
+        prompt: str = None,
+        messages: list[dict] = None,
+        max_turns: int = 100,
+        progress_callback=None,
+        cancel_event=None,
     ):
         """Query the agent with streaming response
 
@@ -547,11 +555,13 @@ class AiAssistAgent:
                      If provided, this is used instead of prompt.
             max_turns: Maximum number of agentic turns (safety limit, default: 100)
             progress_callback: Optional callback for progress updates
+            cancel_event: Optional threading.Event; when set, streaming is cancelled
 
         Yields:
             str: Text chunks as they arrive
             dict: Tool call information {"type": "tool_use", "name": str, "id": str, "input": dict}
             dict: Final result {"type": "done", "turns": int}
+            dict: Cancellation signal {"type": "cancelled"}
         """
         import hashlib
         import json
@@ -565,6 +575,10 @@ class AiAssistAgent:
         else:
             # Use provided messages
             messages = messages.copy()  # Don't modify caller's list
+
+        # Store cancel_event on instance so execute_mcp_prompt can forward it
+        if cancel_event is not None:
+            self._cancel_event = cancel_event
 
         # Loop detection tracking (same as query())
         start_time = time.time()
@@ -587,6 +601,11 @@ class AiAssistAgent:
             progress_callback("thinking", 0, max_turns, None)
 
         for turn in range(max_turns):
+            # Check cancellation before each turn
+            if cancel_event and cancel_event.is_set():
+                yield {"type": "cancelled"}
+                return
+
             # Check time-based timeout
             elapsed = time.time() - start_time
             if elapsed > max_time_seconds:
@@ -611,6 +630,11 @@ class AiAssistAgent:
                 current_text = ""
 
                 for event in stream:
+                    # Check cancellation during streaming
+                    if cancel_event and cancel_event.is_set():
+                        yield {"type": "cancelled"}
+                        return
+
                     # Content block delta - streaming text
                     if event.type == "content_block_delta":
                         if hasattr(event.delta, "text"):
@@ -644,6 +668,11 @@ class AiAssistAgent:
                 tool_results = []
                 for block in final_message.content:
                     if block.type == "tool_use":
+                        # Check cancellation before each tool execution
+                        if cancel_event and cancel_event.is_set():
+                            yield {"type": "cancelled"}
+                            return
+
                         if progress_callback:
                             progress_callback("executing_tool", turn + 1, max_turns, block.name)
 
@@ -755,8 +784,11 @@ class AiAssistAgent:
 
         # Feed the prompt to Claude for execution (with tools available)
         # Use streaming to allow inner execution visibility via callback
+        # Forward active cancel_event so Escape works during inner execution
         full_response = ""
-        async for chunk in self.query_streaming(messages=messages, max_turns=max_turns):
+        async for chunk in self.query_streaming(
+            messages=messages, max_turns=max_turns, cancel_event=self._cancel_event
+        ):
             if isinstance(chunk, str):
                 full_response += chunk
                 if self.on_inner_execution:
@@ -764,7 +796,7 @@ class AiAssistAgent:
             elif isinstance(chunk, dict):
                 if chunk.get("type") == "tool_use" and self.on_inner_execution:
                     self.on_inner_execution(chunk)
-                elif chunk.get("type") == "error":
+                elif chunk.get("type") in ("error", "cancelled"):
                     if self.on_inner_execution:
                         self.on_inner_execution(chunk)
                     break

@@ -344,3 +344,50 @@ async def test_execute_mcp_prompt_error_callback(agent):
     error_chunks = [c for c in received_chunks if isinstance(c, dict) and c.get("type") == "error"]
     assert len(error_chunks) == 1
     assert error_chunks[0]["message"] == "Something went wrong"
+
+
+@pytest.mark.asyncio
+async def test_execute_mcp_prompt_forwards_cancel_event(agent):
+    """Test that execute_mcp_prompt forwards the active cancel_event"""
+    import threading
+
+    mock_session = MagicMock()
+    agent.sessions["dci"] = mock_session
+
+    mock_prompt = MagicMock()
+    mock_prompt.name = "rca"
+    mock_prompt.arguments = []
+    agent.available_prompts["dci"] = {"rca": mock_prompt}
+
+    mock_message = MagicMock()
+    mock_message.role = "user"
+    mock_message.content = MagicMock()
+    mock_message.content.text = "Test prompt"
+    mock_result = MagicMock()
+    mock_result.messages = [mock_message]
+    mock_session.get_prompt = AsyncMock(return_value=mock_result)
+
+    # Set a cancel_event on the agent (simulating outer query_streaming having set it)
+    cancel_event = threading.Event()
+    agent._cancel_event = cancel_event
+
+    # Mock query_streaming to capture cancel_event and yield cancelled
+    received_cancel_event = []
+
+    async def mock_streaming(**kwargs):
+        received_cancel_event.append(kwargs.get("cancel_event"))
+        yield "partial"
+        yield {"type": "cancelled"}
+
+    agent.query_streaming = mock_streaming
+
+    received_chunks = []
+    agent.on_inner_execution = lambda chunk: received_chunks.append(chunk)
+
+    result = await agent.execute_mcp_prompt("dci", "rca", None)
+
+    # Verify cancel_event was forwarded
+    assert received_cancel_event[0] is cancel_event
+    assert result == "partial"
+    cancelled_chunks = [c for c in received_chunks if isinstance(c, dict) and c.get("type") == "cancelled"]
+    assert len(cancelled_chunks) == 1

@@ -22,7 +22,7 @@ def mock_agent():
     agent.query = AsyncMock(return_value="Test response")
 
     # Mock streaming query to yield text and done signal
-    async def mock_query_streaming(prompt=None, messages=None, progress_callback=None):
+    async def mock_query_streaming(prompt=None, messages=None, progress_callback=None, cancel_event=None):
         if progress_callback:
             progress_callback("thinking", 0, 10, None)
             progress_callback("calling_claude", 1, 10, None)
@@ -148,7 +148,7 @@ async def test_multiline_input_handling(mock_state_manager):
     agent = AsyncMock(spec=AiAssistAgent)
     streaming_called = []
 
-    async def mock_streaming(prompt=None, messages=None, progress_callback=None):
+    async def mock_streaming(prompt=None, messages=None, progress_callback=None, cancel_event=None):
         # Track what was called (either prompt or last message)
         if messages:
             streaming_called.append(messages[-1]["content"])
@@ -199,7 +199,7 @@ async def test_conversation_tracking(mock_state_manager):
     # Create mock agent with streaming
     agent = AsyncMock(spec=AiAssistAgent)
 
-    async def mock_streaming(prompt=None, messages=None, progress_callback=None):
+    async def mock_streaming(prompt=None, messages=None, progress_callback=None, cancel_event=None):
         yield "Test response"
         yield {"type": "done", "turns": 1}
 
@@ -270,7 +270,7 @@ async def test_progress_feedback_callback():
     # Create a mock agent with streaming
     mock_agent = AsyncMock(spec=AiAssistAgent)
 
-    async def mock_streaming(prompt=None, messages=None, progress_callback=None):
+    async def mock_streaming(prompt=None, messages=None, progress_callback=None, cancel_event=None):
         # Simulate calling the callback
         if progress_callback:
             progress_callback("thinking", 0, 10, None)
@@ -299,7 +299,7 @@ async def test_feedback_with_tool_calls(mock_state_manager):
     # Create mock agent with streaming and tool calls
     agent = AsyncMock(spec=AiAssistAgent)
 
-    async def mock_streaming_with_tools(prompt=None, messages=None, progress_callback=None):
+    async def mock_streaming_with_tools(prompt=None, messages=None, progress_callback=None, cancel_event=None):
         if progress_callback:
             progress_callback("thinking", 0, 10, None)
             progress_callback("calling_claude", 1, 10, None)
@@ -332,3 +332,87 @@ async def test_feedback_with_tool_calls(mock_state_manager):
         assert len(messages) == 1
         assert messages[0]["user"] == "Find failed jobs"
         assert messages[0]["assistant"] == "Found 5 failed jobs"
+
+
+@pytest.mark.asyncio
+async def test_query_streaming_cancel_event():
+    """Setting cancel_event mid-stream yields cancelled and stops"""
+    import threading
+
+    from ai_assist.agent import AiAssistAgent
+    from ai_assist.config import AiAssistConfig
+
+    mock_config = MagicMock(spec=AiAssistConfig)
+    mock_config.use_vertex = False
+    mock_config.anthropic_api_key = "test-key"
+    mock_config.model = "claude-3-5-sonnet-20241022"
+    mock_config.mcp_servers = {}
+    mock_config.allow_skill_script_execution = False
+
+    agent = AiAssistAgent(mock_config)
+
+    cancel_event = threading.Event()
+
+    # Mock the Anthropic streaming
+    mock_stream = MagicMock()
+    mock_text_delta = MagicMock()
+    mock_text_delta.type = "content_block_delta"
+    mock_text_delta.delta = MagicMock()
+    mock_text_delta.delta.text = "partial"
+    del mock_text_delta.delta.partial_json  # no partial_json attr
+
+    # Simulate iteration: yield one text chunk, then set cancel
+    def stream_iter(self_):
+        yield mock_text_delta
+        cancel_event.set()
+        # Yield another text delta that should not be processed
+        yield mock_text_delta
+
+    mock_stream.__iter__ = stream_iter
+    mock_stream.__enter__ = lambda s: s
+    mock_stream.__exit__ = lambda s, *a: None
+
+    mock_final = MagicMock()
+    mock_final.content = []  # No tool calls
+    mock_final.stop_reason = "end_turn"
+    mock_stream.get_final_message.return_value = mock_final
+
+    with patch.object(agent, "anthropic") as mock_anthropic:
+        mock_anthropic.messages.stream.return_value = mock_stream
+
+        chunks = []
+        async for chunk in agent.query_streaming(prompt="test", cancel_event=cancel_event):
+            chunks.append(chunk)
+
+    # Should have text chunk and then cancelled signal
+    assert any(isinstance(c, dict) and c.get("type") == "cancelled" for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_query_with_feedback_cancellation():
+    """query_with_feedback handles cancelled chunk gracefully"""
+    from io import StringIO
+
+    from rich.console import Console
+
+    from ai_assist.tui_interactive import query_with_feedback
+
+    output = StringIO()
+    console = Console(file=output, force_terminal=False)
+
+    mock_agent = AsyncMock(spec=AiAssistAgent)
+
+    async def mock_streaming(prompt=None, messages=None, progress_callback=None, cancel_event=None):
+        yield "Partial response"
+        yield {"type": "cancelled"}
+
+    mock_agent.query_streaming = mock_streaming
+    mock_agent.get_last_kg_saved_count = MagicMock(return_value=0)
+    mock_agent.clear_tool_calls = MagicMock()
+
+    with patch("ai_assist.tui_interactive.EscapeWatcher"):
+        result = await query_with_feedback(mock_agent, "test prompt", console)
+
+    assert result == "Partial response"
+    output_text = output.getvalue()
+    assert "cancelled" in output_text.lower()
