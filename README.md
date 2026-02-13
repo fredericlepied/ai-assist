@@ -112,6 +112,7 @@ ai-assist
 - `/history` - Recent monitoring history
 - `/clear` - Clear conversation memory
 - `/kg-save [on|off]` - Toggle knowledge graph auto-save
+- `/kg-viz` - Visualize knowledge graph in browser
 - `/prompts` - List available MCP prompts with arguments
 - `/prompt-info <server/prompt>` - Show detailed prompt info
 - `/skill/install <source>@<branch>` - Install an Agent Skill
@@ -421,6 +422,7 @@ ai-assist /kg-stats              # View statistics
 ai-assist /kg-changes 24         # Changes in last 24 hours
 ai-assist /kg-asof '2026-02-04'  # Historical state
 ai-assist /kg-show <id>          # Entity details
+ai-assist /kg-viz                # Visualize graph in browser
 ai-assist /kg-late 60            # Late discoveries (>60 min lag)
 ```
 

@@ -551,7 +551,7 @@ async def main_async():
         sys.exit(1)
 
     # Define which commands need the agent
-    kg_commands = ["kg-stats", "kg-asof", "kg-late", "kg-changes", "kg-show"]
+    kg_commands = ["kg-stats", "kg-asof", "kg-late", "kg-changes", "kg-show", "kg-viz"]
     identity_commands = ["identity-show", "identity-init"]
     state_commands = ["status", "clear-cache"]
     action_commands = ["cleanup-actions"]
@@ -610,6 +610,7 @@ async def main_async():
                 print("  /kg-late [min]     - Show late discoveries (default: 30 min)")
                 print("  /kg-changes [hrs]  - Show recent changes (default: 1 hour)")
                 print("  /kg-show <id>      - Show entity details with context")
+                print("  /kg-viz            - Visualize knowledge graph in browser")
                 print("  /cleanup-actions   - Archive old completed/failed actions")
                 print("\nRun without arguments for interactive mode\n")
                 sys.exit(0)
@@ -663,6 +664,12 @@ async def main_async():
                     sys.exit(1)
                 entity_id = sys.argv[2]
                 kg_show_command(knowledge_graph, entity_id)
+            elif command == "kg-viz":
+                from .kg_visualization import open_kg_visualization
+
+                filepath = open_kg_visualization(knowledge_graph)
+                print("Knowledge graph visualization opened in browser")
+                print(f"File: {filepath}")
             elif command == "cleanup-actions":
                 from .scheduled_actions import ScheduledActionManager
 

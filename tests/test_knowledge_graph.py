@@ -423,6 +423,81 @@ def test_context_manager(kg):
     # (We can't directly test this without accessing internals)
 
 
+def test_get_all_current_entities(kg):
+    """get_all_current_entities returns only tx_to IS NULL entities"""
+    # Insert a current entity
+    kg.insert_entity(
+        entity_type="dci_job",
+        entity_id="job-current",
+        valid_from=datetime(2026, 2, 4, 10, 0),
+        data={"status": "failure"},
+    )
+    # Insert an expired entity (tx_to is set)
+    kg.insert_entity(
+        entity_type="dci_job",
+        entity_id="job-expired",
+        valid_from=datetime(2026, 2, 4, 10, 0),
+        tx_to=datetime(2026, 2, 4, 11, 0),
+        data={"status": "failure"},
+    )
+    # Insert another current entity
+    kg.insert_entity(
+        entity_type="component",
+        entity_id="comp-current",
+        valid_from=datetime(2026, 2, 4, 0, 0),
+        data={"type": "ocp", "version": "4.19.0"},
+    )
+
+    entities = kg.get_all_current_entities()
+    entity_ids = {e.id for e in entities}
+    assert "job-current" in entity_ids
+    assert "comp-current" in entity_ids
+    assert "job-expired" not in entity_ids
+    assert len(entities) == 2
+
+
+def test_get_all_current_relationships(kg):
+    """get_all_current_relationships returns only tx_to IS NULL relationships"""
+    job = kg.insert_entity(
+        entity_type="dci_job",
+        entity_id="job-1",
+        valid_from=datetime(2026, 2, 4, 10, 0),
+        data={"status": "failure"},
+    )
+    comp = kg.insert_entity(
+        entity_type="component",
+        entity_id="comp-1",
+        valid_from=datetime(2026, 2, 4, 0, 0),
+        data={"type": "ocp"},
+    )
+    ticket = kg.insert_entity(
+        entity_type="jira_ticket",
+        entity_id="ticket-1",
+        valid_from=datetime(2026, 2, 4, 12, 0),
+        data={"key": "CILAB-1234"},
+    )
+
+    # Insert a current relationship
+    kg.insert_relationship(
+        rel_type="job_uses_component",
+        source_id=job.id,
+        target_id=comp.id,
+        valid_from=datetime(2026, 2, 4, 10, 0),
+    )
+    # Insert an expired relationship (tx_to is set)
+    kg.insert_relationship(
+        rel_type="job_references_ticket",
+        source_id=job.id,
+        target_id=ticket.id,
+        valid_from=datetime(2026, 2, 4, 12, 0),
+        tx_to=datetime(2026, 2, 4, 13, 0),
+    )
+
+    relationships = kg.get_all_current_relationships()
+    assert len(relationships) == 1
+    assert relationships[0].rel_type == "job_uses_component"
+
+
 def test_discovery_lag_scenario(kg):
     """Test scenario: identify jobs discovered late"""
     # Job failed at 10:00, but we discovered it at 10:45 (45 min lag)
