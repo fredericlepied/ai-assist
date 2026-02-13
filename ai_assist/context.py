@@ -23,7 +23,7 @@ class ConversationMemory:
             max_exchanges: Maximum number of exchanges to keep in memory.
                           Older exchanges are dropped to manage context window.
         """
-        self.exchanges = []  # List of {user, assistant, timestamp}
+        self.exchanges: list[dict[str, str]] = []  # List of {user, assistant, timestamp}
         self.max_exchanges = max_exchanges
 
     def add_exchange(self, user_input: str, assistant_response: str):
@@ -101,7 +101,7 @@ class KnowledgeGraphContext:
             knowledge_graph: KnowledgeGraph instance, or None to disable enrichment
         """
         self.knowledge_graph = knowledge_graph
-        self.last_context_used = []  # Track what context was added
+        self.last_context_used: list[str] = []  # Track what context was added
 
     def extract_entity_references(self, text: str) -> dict[str, list[str]]:
         """Extract entity references from user input
@@ -117,7 +117,7 @@ class KnowledgeGraphContext:
                 "time_refs": ["yesterday", "last week"]
             }
         """
-        refs = {"jira_tickets": [], "dci_jobs": [], "time_refs": []}
+        refs: dict[str, list[str]] = {"jira_tickets": [], "dci_jobs": [], "time_refs": []}
 
         # Extract Jira ticket references (PROJECT-123 format)
         jira_pattern = r"\b([A-Z][A-Z0-9]+-\d+)\b"
@@ -134,8 +134,9 @@ class KnowledgeGraphContext:
             r"\bthis\s+month\b",
         ]
         for pattern in time_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                refs["time_refs"].append(re.search(pattern, text, re.IGNORECASE).group())
+            time_match = re.search(pattern, text, re.IGNORECASE)
+            if time_match:
+                refs["time_refs"].append(time_match.group())
 
         return refs
 

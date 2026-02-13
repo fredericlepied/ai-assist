@@ -9,7 +9,7 @@ from pathlib import Path
 class ReportTools:
     """Internal tools for managing markdown reports"""
 
-    def __init__(self, reports_dir: Path = None):
+    def __init__(self, reports_dir: Path | None = None):
         """Initialize report tools
 
         Args:
@@ -147,7 +147,7 @@ class ReportTools:
 
         return f"Report '{name}' written to {report_file}"
 
-    def _append_to_report(self, name: str, content: str, section: str = None) -> str:
+    def _append_to_report(self, name: str, content: str, section: str | None = None) -> str:
         """Append content to a report (creates if doesn't exist)"""
         report_file = self.reports_dir / f"{name}.md"
 

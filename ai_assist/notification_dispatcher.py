@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -37,7 +38,7 @@ class NotificationDispatcher:
 
         self.notification_log = notification_log or (get_config_dir() / "notifications.log")
 
-        self.channels = {
+        self.channels: dict[str, Any] = {
             "console": ConsoleNotificationChannel(),
             "file": FileNotificationChannel(self.notification_log),
             "desktop": DesktopNotificationChannel(),

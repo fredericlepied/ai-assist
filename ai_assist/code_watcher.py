@@ -7,6 +7,7 @@ the process when Python files change during development.
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -31,7 +32,7 @@ class CodeWatcher:
             watch_dir: Directory to watch for .py file changes
         """
         self.watch_dir = watch_dir
-        self.observer: Observer | None = None
+        self.observer: Any = None
 
     def start(self):
         """Start watching code files for changes"""
@@ -56,9 +57,10 @@ class CodeWatcher:
 
     def stop(self):
         """Stop watching code files"""
-        if self.observer:
-            self.observer.stop()
-            self.observer.join(timeout=2.0)
+        observer = self.observer
+        if observer:
+            observer.stop()
+            observer.join(timeout=2.0)
 
 
 class _ChangeHandler(FileSystemEventHandler):
@@ -83,5 +85,6 @@ class _ChangeHandler(FileSystemEventHandler):
             return
 
         # Only react to .py file changes
-        if event.src_path.endswith(".py"):
-            self.callback(event.src_path)
+        src_path = str(event.src_path)
+        if src_path.endswith(".py"):
+            self.callback(src_path)

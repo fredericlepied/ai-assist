@@ -80,6 +80,9 @@ class ScriptExecutionTools:
         script_name = arguments.get("script_name")
         args = arguments.get("args", [])
 
+        if not skill_name or not script_name:
+            return "Error: skill_name and script_name are required"
+
         try:
             # 1. Validate script path
             script_path = self._validate_script_path(skill_name, script_name)

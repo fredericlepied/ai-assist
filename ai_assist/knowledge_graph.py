@@ -422,7 +422,7 @@ class KnowledgeGraph:
             SELECT * FROM entities
             WHERE tx_from <= ? AND (tx_to IS NULL OR tx_to > ?)
         """
-        params = [tx_time.isoformat(), tx_time.isoformat()]
+        params: list[str | int | float] = [tx_time.isoformat(), tx_time.isoformat()]
 
         if entity_type:
             query += " AND entity_type = ?"
@@ -459,7 +459,7 @@ class KnowledgeGraph:
             WHERE valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)
             AND tx_to IS NULL
         """
-        params = [valid_time.isoformat(), valid_time.isoformat()]
+        params: list[str | int | float] = [valid_time.isoformat(), valid_time.isoformat()]
 
         if entity_type:
             query += " AND entity_type = ?"
@@ -616,7 +616,7 @@ class KnowledgeGraph:
             WHERE tx_to IS NULL
         """
 
-        params = []
+        params: list[str | int | float] = []
 
         if entity_type:
             query += " AND entity_type = ?"

@@ -83,8 +83,9 @@ class AiAssistAgent:
         # Initialize script execution tools for Agent Skills
         self.script_execution_tools = ScriptExecutionTools(self.skills_manager, config)
 
+        self.anthropic: Anthropic | AnthropicVertex
         if config.use_vertex:
-            vertex_kwargs = {"project_id": config.vertex_project_id}
+            vertex_kwargs: dict[str, Any] = {"project_id": config.vertex_project_id}
             if config.vertex_region:
                 vertex_kwargs["region"] = config.vertex_region
                 print(f"Using Vertex AI: project={config.vertex_project_id}, region={config.vertex_region}")
@@ -108,10 +109,10 @@ class AiAssistAgent:
         self.last_tool_calls: list[dict] = []
 
         # Callback for inner execution visibility (e.g., during execute_mcp_prompt)
-        self.on_inner_execution = None
+        self.on_inner_execution: Any = None
 
         # Active cancel event (set by query_streaming, used by execute_mcp_prompt)
-        self._cancel_event = None
+        self._cancel_event: Any = None
 
         # Update introspection tools with reference to available_prompts and agent
         # (will be populated during server connection)
@@ -119,16 +120,15 @@ class AiAssistAgent:
         self.introspection_tools.agent = self  # Allow introspection tools to execute prompts
 
         # Initialize knowledge management tools
+        self.knowledge_tools: Any = None
         if self.knowledge_graph:
             from ai_assist.knowledge_tools import KnowledgeTools
 
             self.knowledge_tools = KnowledgeTools(self.knowledge_graph)
             self.knowledge_tools.agent = self
-        else:
-            self.knowledge_tools = None
 
         # Track synthesis flag
-        self._pending_synthesis = None
+        self._pending_synthesis: Any = None
 
     def get_max_tokens(self) -> int:
         """Get max output tokens for the current model
@@ -396,7 +396,11 @@ class AiAssistAgent:
             return identity_prompt
 
     async def query(
-        self, prompt: str = None, messages: list[dict] = None, max_turns: int = 100, progress_callback=None
+        self,
+        prompt: str | None = None,
+        messages: list[dict] | None = None,
+        max_turns: int = 100,
+        progress_callback=None,
     ) -> str:
         """Query the agent with a prompt or message history
 
@@ -462,22 +466,22 @@ class AiAssistAgent:
                     model=self.config.model,
                     max_tokens=max_tokens,
                     system=self._build_system_prompt(),
-                    tools=api_tools,
-                    messages=messages,
+                    tools=api_tools,  # type: ignore[arg-type]
+                    messages=messages,  # type: ignore[arg-type]
                 ) as stream:
                     response = stream.get_final_message()
             else:
-                response = self.anthropic.messages.create(
+                response = self.anthropic.messages.create(  # type: ignore[assignment]
                     model=self.config.model,
                     max_tokens=max_tokens,
                     system=self._build_system_prompt(),
-                    tools=api_tools,
-                    messages=messages,
+                    tools=api_tools,  # type: ignore[arg-type]
+                    messages=messages,  # type: ignore[arg-type]
                 )
 
             messages.append({"role": "assistant", "content": response.content})
 
-            tool_results = []
+            tool_results: list[dict[str, Any]] = []
             for block in response.content:
                 if block.type == "tool_use":
                     if progress_callback:
@@ -488,7 +492,7 @@ class AiAssistAgent:
                     # Check if result is an error (starts with "Error:")
                     is_error = isinstance(result, str) and result.startswith("Error:")
 
-                    tool_result = {
+                    tool_result: dict[str, Any] = {
                         "type": "tool_result",
                         "tool_use_id": block.id,
                         "content": result,
@@ -541,8 +545,8 @@ class AiAssistAgent:
 
     async def query_streaming(
         self,
-        prompt: str = None,
-        messages: list[dict] = None,
+        prompt: str | None = None,
+        messages: list[dict] | None = None,
         max_turns: int = 100,
         progress_callback=None,
         cancel_event=None,
@@ -623,8 +627,8 @@ class AiAssistAgent:
                 model=self.config.model,
                 max_tokens=self.get_max_tokens(),
                 system=self._build_system_prompt(),
-                tools=api_tools,
-                messages=messages,
+                tools=api_tools,  # type: ignore[arg-type]
+                messages=messages,  # type: ignore[arg-type]
             ) as stream:
                 # Track content blocks
                 current_text = ""
@@ -665,7 +669,7 @@ class AiAssistAgent:
                         yield {"type": "tool_use", "name": block.name, "id": block.id, "input": block.input}
 
                 # Execute any tools
-                tool_results = []
+                tool_results: list[dict[str, Any]] = []
                 for block in final_message.content:
                     if block.type == "tool_use":
                         # Check cancellation before each tool execution
@@ -689,7 +693,7 @@ class AiAssistAgent:
                         # Check if result is an error
                         is_error = isinstance(result, str) and result.startswith("Error:")
 
-                        tool_result = {
+                        tool_result: dict[str, Any] = {
                             "type": "tool_result",
                             "tool_use_id": block.id,
                             "content": result,
@@ -1024,7 +1028,7 @@ class AiAssistAgent:
         - get_jira_ticket -> jira_ticket entity
         """
         # Double-check kg_save_enabled (defensive programming)
-        if not self.kg_save_enabled:
+        if not self.kg_save_enabled or not self.knowledge_graph:
             return
 
         if not result_text or "Error" in result_text:
@@ -1232,7 +1236,8 @@ If no learnings, return {{"insights": []}}
                 messages=[{"role": "user", "content": synthesis_prompt}],
             )
 
-            response_text = response.content[0].text.strip()
+            first_block = response.content[0]
+            response_text = first_block.text.strip() if hasattr(first_block, "text") else ""
 
             if response_text.startswith("```"):
                 response_text = response_text.split("```")[1]

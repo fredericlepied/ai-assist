@@ -177,7 +177,7 @@ class FilesystemTools:
             with open(path_obj, encoding="utf-8", errors="replace") as f:
                 if line_start is not None or line_end is not None or max_lines is not None:
                     # Read specific line range
-                    lines = []
+                    lines: list[str] = []
                     start = line_start if line_start else 1
                     end = line_end if line_end else float("inf")
                     limit = max_lines if max_lines else float("inf")

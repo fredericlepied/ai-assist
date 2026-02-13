@@ -9,8 +9,8 @@ try:
     import termios
     import tty
 except ImportError:
-    termios = None
-    tty = None
+    termios = None  # type: ignore[assignment]
+    tty = None  # type: ignore[assignment]
 
 
 class EscapeWatcher:
@@ -35,7 +35,7 @@ class EscapeWatcher:
         self._stop_read_fd: int | None = None
         self._stop_write_fd: int | None = None
         self._stdin_fd: int | None = None
-        self._original_attrs = None
+        self._original_attrs: list | None = None
 
     def start(self):
         if not sys.stdin.isatty():
@@ -87,6 +87,8 @@ class EscapeWatcher:
     def _watch_loop(self):
         stdin_fd = self._stdin_fd
         stop_fd = self._stop_read_fd
+        if stdin_fd is None or stop_fd is None:
+            return
 
         while True:
             try:

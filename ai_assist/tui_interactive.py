@@ -3,6 +3,7 @@
 import asyncio
 import json
 import threading
+from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -64,7 +65,7 @@ class NotificationWatcher:
     def __init__(self, console: Console):
         self.console = console
         self.notification_log = get_config_dir() / "notifications.log"
-        self.watchdog = None
+        self.watchdog: FileWatchdog | None = None
         self.last_position = 0
 
         # Initialize last position to end of file
@@ -112,8 +113,8 @@ async def query_with_feedback(
     agent: AiAssistAgent,
     prompt: str,
     console: Console,
-    conversation_memory: ConversationMemory = None,
-    kg_context: KnowledgeGraphContext = None,
+    conversation_memory: ConversationMemory | None = None,
+    kg_context: KnowledgeGraphContext | None = None,
 ) -> str:
     """Query the agent with real-time feedback and streaming display
 
@@ -130,7 +131,7 @@ async def query_with_feedback(
     identity = get_identity()
 
     # Enrich prompt with knowledge graph context if available
-    context_summary = []
+    context_summary: list[str] = []
     if kg_context:
         prompt, context_summary = kg_context.enrich_prompt(prompt)
     # State to track progress
@@ -149,7 +150,7 @@ async def query_with_feedback(
             feedback_state["status"] = f"💭 Thinking... (Turn {turn}/{max_turns})"
             feedback_state["streaming"] = False
         elif status == "executing_tool":
-            display_name = format_tool_display_name(tool_name)
+            display_name = format_tool_display_name(tool_name or "")
             feedback_state["status"] = f"🔧 Using tool: {display_name}"
             feedback_state["streaming"] = False
         elif status == "complete":
@@ -158,7 +159,7 @@ async def query_with_feedback(
 
     def create_feedback_display():
         """Create the feedback display"""
-        spinner = Spinner("dots", text=feedback_state["status"], style="cyan")
+        spinner = Spinner("dots", text=str(feedback_state["status"]), style="cyan")
         return spinner
 
     # Show spinner initially
@@ -377,7 +378,7 @@ async def handle_prompt_command(
         # Create a separate session for argument collection to avoid state pollution
         from prompt_toolkit import PromptSession as ArgPromptSession
 
-        arg_session = ArgPromptSession()
+        arg_session: Any = ArgPromptSession()
 
         for arg in prompt_def.arguments:
             # Use plain text for prompt_toolkit (no Rich markup)
@@ -462,7 +463,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     def _(event):
         event.current_buffer.insert_text("\n")
 
-    session = PromptSession(
+    session: Any = PromptSession(
         message="You> ",
         multiline=False,  # Enter submits by default
         completer=AiAssistCompleter(agent=agent),
@@ -495,7 +496,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
     # Initialize conversation memory for context-aware responses
     conversation_memory = ConversationMemory(max_exchanges=10)
-    conversation_context = []  # For state manager persistence
+    conversation_context: list[dict] = []  # For state manager persistence
 
     # Enable agent introspection of conversation memory
     agent.set_conversation_memory(conversation_memory)

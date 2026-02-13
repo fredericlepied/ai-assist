@@ -39,6 +39,17 @@ repos:
       - id: ruff
         args: ['--fix', '--line-length=120']
 
+  # Type checking with mypy
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run mypy ai_assist/
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true
+
   # Run tests with pytest
   - repo: local
     hooks:

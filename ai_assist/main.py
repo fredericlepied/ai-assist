@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from typing import Any
 
 from .agent import AiAssistAgent
 from .commands import get_command_suggestion, is_valid_cli_command, is_valid_interactive_command
@@ -139,7 +140,7 @@ def should_use_tui():
     return importlib.util.find_spec("prompt_toolkit") is not None and importlib.util.find_spec("rich") is not None
 
 
-async def interactive_mode(agent: AiAssistAgent, state_manager: StateManager, use_tui: bool = None):
+async def interactive_mode(agent: AiAssistAgent, state_manager: StateManager, use_tui: bool | None = None):
     """Run in interactive mode with TUI or basic fallback"""
     if use_tui is None:
         use_tui = should_use_tui()
@@ -168,11 +169,11 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
     print("Commands: /status, /history, /clear-cache, /prompts, /help")
     print("Type /exit or /quit to exit\n")
 
-    conversation_context = []
-    messages = []  # For prompt injection
+    conversation_context: list[dict] = []
+    messages: list[dict] = []  # For prompt injection
 
     # Hook inner execution callback for MCP prompt visibility
-    def on_inner_execution(chunk):
+    def on_inner_execution(chunk: Any) -> None:
         if isinstance(chunk, str):
             print(chunk, end="", flush=True)
         elif isinstance(chunk, dict):
@@ -404,6 +405,9 @@ def kg_show_command(kg: KnowledgeGraph, entity_id: str):
     # Handle based on type
     if entity.entity_type == "jira_ticket":
         context = queries.get_ticket_with_context(entity_id)
+        if context is None:
+            print(f"Could not load context for ticket: {entity_id}")
+            return
         print(f"\nTicket: {context['id']}")
         print("=" * 50)
         print(f"Key: {context['data'].get('key', 'N/A')}")
@@ -419,6 +423,9 @@ def kg_show_command(kg: KnowledgeGraph, entity_id: str):
 
     if entity.entity_type == "dci_job":
         context = queries.get_job_with_context(entity_id)
+        if context is None:
+            print(f"Could not load context for job: {entity_id}")
+            return
         print(f"\nJob: {context['id']}")
         print("=" * 50)
         print(f"Status: {context['data'].get('status', 'unknown')}")
@@ -608,14 +615,17 @@ async def main_async():
                 sys.exit(0)
 
             elif command == "monitor":
+                assert agent is not None
                 await monitoring_mode(agent, config, state_manager, knowledge_graph)
             elif command == "query":
                 if len(sys.argv) < 3:
                     print("Usage: ai-assist /query 'your question here'")
                     sys.exit(1)
                 query = " ".join(sys.argv[2:])
+                assert agent is not None
                 await run_query(agent, query)
             elif command == "interactive":
+                assert agent is not None
                 await interactive_mode(agent, state_manager)
             elif command == "status":
                 stats = state_manager.get_stats()
@@ -665,6 +675,7 @@ async def main_async():
             # Note: Unknown commands are caught earlier, before agent initialization
         else:
             # Default to interactive mode
+            assert agent is not None
             await interactive_mode(agent, state_manager)
 
     finally:

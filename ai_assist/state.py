@@ -44,7 +44,7 @@ class MonitorState(BaseModel):
 class StateManager:
     """Manage persistent state across monitoring runs"""
 
-    def __init__(self, state_dir: Path = None):
+    def __init__(self, state_dir: Path | None = None):
         self.state_dir = state_dir or get_config_dir() / "state"
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.monitors: dict[str, MonitorState] = {}
@@ -72,7 +72,7 @@ class StateManager:
         with open(state_file, "w") as f:
             json.dump(state.model_dump(), f, indent=2, default=str)
 
-    def update_monitor(self, monitor_name: str, results: dict[str, Any], seen_items: set[str] = None):
+    def update_monitor(self, monitor_name: str, results: dict[str, Any], seen_items: set[str] | None = None):
         """Update monitor state with new results"""
         state = self.get_monitor_state(monitor_name)
         state.last_check = datetime.now()
