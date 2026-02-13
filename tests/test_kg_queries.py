@@ -284,6 +284,175 @@ def test_format_duration():
     assert KnowledgeGraphQueries._format_duration(-10) == "0s"  # Negative handled
 
 
+def test_count_entities_by_status(kg, queries):
+    """Test correct status grouping"""
+    now = datetime.now()
+    for i, status in enumerate(["failure", "failure", "success", "error"]):
+        kg.insert_entity(
+            entity_type="dci_job",
+            entity_id=f"job-status-{i}",
+            valid_from=now - timedelta(hours=i),
+            tx_from=now - timedelta(hours=i),
+            data={"status": status},
+        )
+
+    result = queries.count_entities_by_status("dci_job", days=7)
+    assert result["total"] == 4
+    assert result["by_status"]["failure"] == 2
+    assert result["by_status"]["success"] == 1
+    assert result["by_status"]["error"] == 1
+
+
+def test_count_entities_by_status_daily(kg, queries):
+    """Test correct by_day breakdown"""
+    now = datetime.now()
+    today = now.replace(hour=12, minute=0, second=0, microsecond=0)
+    yesterday = today - timedelta(days=1)
+
+    kg.insert_entity(
+        entity_type="dci_job",
+        entity_id="job-today-1",
+        valid_from=today,
+        tx_from=today,
+        data={"status": "failure"},
+    )
+    kg.insert_entity(
+        entity_type="dci_job",
+        entity_id="job-today-2",
+        valid_from=today,
+        tx_from=today,
+        data={"status": "success"},
+    )
+    kg.insert_entity(
+        entity_type="dci_job",
+        entity_id="job-yesterday",
+        valid_from=yesterday,
+        tx_from=yesterday,
+        data={"status": "failure"},
+    )
+
+    result = queries.count_entities_by_status("dci_job", days=7, group_by_day=True)
+    assert "by_day" in result
+    today_key = today.strftime("%Y-%m-%d")
+    yesterday_key = yesterday.strftime("%Y-%m-%d")
+    assert result["by_day"][today_key]["failure"] == 1
+    assert result["by_day"][today_key]["success"] == 1
+    assert result["by_day"][yesterday_key]["failure"] == 1
+
+
+def test_detect_failure_trends_spike(kg, queries):
+    """Increasing failures per day triggers 'increasing' trend"""
+    now = datetime.now()
+    # Day 0 (oldest): 1 failure, Day 1: 2 failures, Day 2 (most recent): 4 failures
+    for day_offset in range(3):
+        day = now - timedelta(days=2 - day_offset)
+        failure_count = 2**day_offset  # 1, 2, 4
+        for i in range(failure_count):
+            kg.insert_entity(
+                entity_type="dci_job",
+                entity_id=f"job-trend-d{day_offset}-{i}",
+                valid_from=day,
+                tx_from=day,
+                data={"status": "failure"},
+            )
+
+    result = queries.detect_failure_trends(days=7)
+    assert result["trend"] == "increasing"
+    assert result["total_failures"] == 7
+
+
+def test_detect_failure_trends_stable(kg, queries):
+    """Consistent failures show 'stable' trend"""
+    now = datetime.now()
+    for day_offset in range(4):
+        day = now - timedelta(days=day_offset)
+        for i in range(3):
+            kg.insert_entity(
+                entity_type="dci_job",
+                entity_id=f"job-stable-d{day_offset}-{i}",
+                valid_from=day,
+                tx_from=day,
+                data={"status": "failure"},
+            )
+
+    result = queries.detect_failure_trends(days=7)
+    assert result["trend"] == "stable"
+
+
+def test_detect_failure_trends_no_data(kg, queries):
+    """No jobs yields no_data trend"""
+    result = queries.detect_failure_trends(days=7)
+    assert result["trend"] == "no_data"
+
+
+def test_detect_component_hotspots(kg, queries):
+    """Component in 3+ failed jobs is flagged as hotspot"""
+    now = datetime.now()
+
+    # Create component
+    kg.insert_entity(
+        entity_type="component",
+        entity_id="comp-problem",
+        valid_from=now - timedelta(days=10),
+        tx_from=now - timedelta(days=10),
+        data={"type": "ocp", "version": "4.19.0"},
+    )
+
+    # Create another component that only appears once
+    kg.insert_entity(
+        entity_type="component",
+        entity_id="comp-ok",
+        valid_from=now - timedelta(days=10),
+        tx_from=now - timedelta(days=10),
+        data={"type": "storage", "name": "ceph"},
+    )
+
+    # Create 3 failed jobs using comp-problem
+    for i in range(3):
+        job_time = now - timedelta(days=i)
+        kg.insert_entity(
+            entity_type="dci_job",
+            entity_id=f"job-hotspot-{i}",
+            valid_from=job_time,
+            tx_from=job_time,
+            data={"status": "failure"},
+        )
+        kg.insert_relationship(
+            rel_type="job_uses_component",
+            source_id=f"job-hotspot-{i}",
+            target_id="comp-problem",
+            valid_from=job_time,
+        )
+
+    # Create 1 failed job using comp-ok
+    kg.insert_entity(
+        entity_type="dci_job",
+        entity_id="job-ok-1",
+        valid_from=now,
+        tx_from=now,
+        data={"status": "failure"},
+    )
+    kg.insert_relationship(
+        rel_type="job_uses_component",
+        source_id="job-ok-1",
+        target_id="comp-ok",
+        valid_from=now,
+    )
+
+    result = queries.detect_component_hotspots(days=7, min_failures=3)
+    assert len(result["hotspots"]) == 1
+    assert result["hotspots"][0]["component_id"] == "comp-problem"
+    assert result["hotspots"][0]["failure_count"] == 3
+    assert result["total_failed_jobs"] == 4
+
+
+def test_detect_component_hotspots_none(kg, queries):
+    """No hotspots when no components appear in enough failed jobs"""
+    result = queries.detect_component_hotspots(days=7)
+    assert result["hotspots"] == []
+    assert result["total_failed_jobs"] == 0
+
+
 def test_what_changed_with_corrections(kg, queries):
     """Test that corrections show up in changes"""
     now = datetime.now()
