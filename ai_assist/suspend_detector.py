@@ -6,7 +6,7 @@ This module detects laptop suspension by comparing monotonic clock
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 
 class SuspendDetector:
@@ -39,7 +39,7 @@ class SuspendDetector:
         self.last_monotonic: float | None = None
         self.last_wall_clock: float | None = None
 
-    async def watch(self, callback: Callable[[float], None]) -> None:
+    async def watch(self, callback: Callable[..., Awaitable[None]]) -> None:
         """Watch for suspension events and trigger callback.
 
         Args:

@@ -27,7 +27,7 @@ class SkillMetadata(BaseModel):
     source_type: str  # 'git' or 'local'
     source_url: str | None = None
 
-    def validate(self):
+    def validate(self):  # type: ignore[override]
         """Validate skill metadata against agentskills.io spec"""
         # Name: 1-64 chars, lowercase + hyphens, no consecutive hyphens
         if not 1 <= len(self.name) <= 64:

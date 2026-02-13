@@ -21,7 +21,7 @@ class ConditionEvaluator:
         - "X failures detected" -> {failures: X}
         - "Status: X" -> {status: "X"}
         """
-        metadata = {}
+        metadata: dict[str, Any] = {}
 
         # Pattern: "Found X <something>"
         found_pattern = r"[Ff]ound\s+(\d+)\s+(\w+)"
@@ -35,21 +35,21 @@ class ConditionEvaluator:
 
         # Pattern: "X failures"
         failures_pattern = r"(\d+)\s+failures?"
-        match = re.search(failures_pattern, output, re.IGNORECASE)
-        if match:
-            metadata["failures"] = int(match.group(1))
+        failures_match = re.search(failures_pattern, output, re.IGNORECASE)
+        if failures_match:
+            metadata["failures"] = int(failures_match.group(1))
 
         # Pattern: "Success rate: X%"
         success_rate_pattern = r"[Ss]uccess\s+rate[:\s]+(\d+(?:\.\d+)?)%?"
-        match = re.search(success_rate_pattern, output)
-        if match:
-            metadata["success_rate"] = float(match.group(1))
+        success_rate_match = re.search(success_rate_pattern, output)
+        if success_rate_match:
+            metadata["success_rate"] = float(success_rate_match.group(1))
 
         # Pattern: "Status: X"
         status_pattern = r"[Ss]tatus[:\s]+(\w+)"
-        match = re.search(status_pattern, output)
-        if match:
-            metadata["status"] = match.group(1).lower()
+        status_match = re.search(status_pattern, output)
+        if status_match:
+            metadata["status"] = status_match.group(1).lower()
 
         # Pattern: "X updated" or "X new"
         updated_pattern = r"(\d+)\s+(updated|new)"
@@ -81,8 +81,8 @@ class ConditionEvaluator:
             field = parts[0].strip()
             value = parts[1].strip().strip("'\"")
 
-            field_value = str(metadata.get(field, ""))
-            return value in field_value
+            str_field_value = str(metadata.get(field, ""))
+            return value in str_field_value
 
         # Handle "not_contains" operator
         if " not_contains " in condition_str:
@@ -90,8 +90,8 @@ class ConditionEvaluator:
             field = parts[0].strip()
             value = parts[1].strip().strip("'\"")
 
-            field_value = str(metadata.get(field, ""))
-            return value not in field_value
+            str_field_value = str(metadata.get(field, ""))
+            return value not in str_field_value
 
         # Handle comparison operators
         for op in [">=", "<=", "==", "!=", ">", "<"]:
@@ -101,32 +101,33 @@ class ConditionEvaluator:
                 value_str = parts[1].strip().strip("'\"")
 
                 # Get field value from metadata
-                field_value = metadata.get(field)
+                field_value: Any = metadata.get(field)
                 if field_value is None:
                     return False
 
                 # Try to convert value to appropriate type
+                compare_value: Any
                 try:
                     if isinstance(field_value, int | float):
-                        value = float(value_str)
+                        compare_value = float(value_str)
                     else:
-                        value = value_str
+                        compare_value = value_str
                 except (ValueError, TypeError):
-                    value = value_str
+                    compare_value = value_str
 
                 # Evaluate comparison
                 if op == ">":
-                    return field_value > value
+                    return field_value > compare_value
                 elif op == "<":
-                    return field_value < value
+                    return field_value < compare_value
                 elif op == ">=":
-                    return field_value >= value
+                    return field_value >= compare_value
                 elif op == "<=":
-                    return field_value <= value
+                    return field_value <= compare_value
                 elif op == "==":
-                    return field_value == value
+                    return field_value == compare_value
                 elif op == "!=":
-                    return field_value != value
+                    return field_value != compare_value
 
         return False
 

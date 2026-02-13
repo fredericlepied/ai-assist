@@ -10,7 +10,7 @@ from .tasks import TaskDefinition
 class ScheduleTools:
     """Internal tools for managing monitor and task schedules"""
 
-    def __init__(self, schedules_file: Path = None):
+    def __init__(self, schedules_file: Path | None = None):
         """Initialize schedule tools
 
         Args:
@@ -299,7 +299,7 @@ class ScheduleTools:
         interval: str,
         description: str | None = None,
         enabled: bool = True,
-        conditions: list = None,
+        conditions: list | None = None,
         knowledge_graph: dict | None = None,
         prompt_arguments: dict | None = None,
     ) -> str:
@@ -366,7 +366,7 @@ class ScheduleTools:
         interval: str,
         description: str | None = None,
         enabled: bool = True,
-        conditions: list = None,
+        conditions: list | None = None,
         prompt_arguments: dict | None = None,
     ) -> str:
         """Create a new task schedule"""

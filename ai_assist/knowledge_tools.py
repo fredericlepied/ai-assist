@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from .agent import AiAssistAgent
     from .knowledge_graph import KnowledgeGraph
 
 
@@ -13,7 +14,7 @@ class KnowledgeTools:
 
     def __init__(self, knowledge_graph: "KnowledgeGraph"):
         self.kg = knowledge_graph
-        self.agent = None
+        self.agent: "AiAssistAgent | None" = None
 
     def get_tool_definitions(self) -> list[dict]:
         """Get MCP-style tool definitions for knowledge management"""

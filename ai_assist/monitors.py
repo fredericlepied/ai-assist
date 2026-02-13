@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from .agent import AiAssistAgent
 from .config import get_config_dir
@@ -53,8 +54,8 @@ class MonitoringScheduler:
         self.config_watcher: ConfigWatcher | None = None
 
         # Scheduled actions (one-shot future executions)
-        self.action_manager = None
-        self.action_task_handle = None
+        self.action_manager: Any = None
+        self.action_task_handle: asyncio.Task | None = None
         self.action_file_watchdog: FileWatchdog | None = None
 
         # Load initial schedules

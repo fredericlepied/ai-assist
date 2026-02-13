@@ -316,6 +316,8 @@ Example: Search for previous mentions of "DCI failures" in conversation.
             return json.dumps({"error": "Knowledge graph not available"})
 
         entity_id = arguments.get("entity_id")
+        if not entity_id:
+            return json.dumps({"error": "entity_id is required"})
 
         try:
             entity = self.knowledge_graph.get_entity(entity_id)
@@ -498,6 +500,9 @@ Example: Search for previous mentions of "DCI failures" in conversation.
         server = arguments.get("server")
         prompt = arguments.get("prompt")
         prompt_arguments = arguments.get("arguments", {})
+
+        if not server or not prompt:
+            return json.dumps({"error": "Both 'server' and 'prompt' arguments are required"}, indent=2)
 
         try:
             # Execute the prompt using the agent's method

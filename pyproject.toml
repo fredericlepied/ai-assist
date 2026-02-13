@@ -25,6 +25,8 @@ dev = [
     "black>=24.1.0",
     "isort>=5.13.0",
     "ruff>=0.2.0",
+    "mypy>=1.14.0",
+    "types-PyYAML>=6.0.0",
 ]
 
 [project.scripts]
@@ -101,4 +103,27 @@ addopts = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+exclude = [
+    "tests/",
+    "build/",
+    "dist/",
+]
+
+[[tool.mypy.overrides]]
+module = ["mcp.*", "watchdog.*"]
+ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "mypy>=1.14.0",
+    "types-PyYAML>=6.0.0",
 ]

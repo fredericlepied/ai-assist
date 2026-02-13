@@ -123,7 +123,7 @@ class KnowledgeGraphQueries:
                 )
 
         # Sort by lag (worst first)
-        late_discoveries.sort(key=lambda x: x["lag_minutes"], reverse=True)
+        late_discoveries.sort(key=lambda x: float(str(x["lag_minutes"])), reverse=True)
 
         return late_discoveries
 

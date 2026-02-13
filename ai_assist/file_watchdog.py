@@ -5,8 +5,9 @@ This module provides efficient file watching using OS-level events
 """
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -28,7 +29,7 @@ class FileWatchdog:
     def __init__(
         self,
         file_path: Path,
-        callback: Callable[[], None],
+        callback: Callable[[], Awaitable[None]],
         debounce_seconds: float = 0.5,
     ):
         """Initialize file watchdog.
@@ -43,7 +44,7 @@ class FileWatchdog:
         self.callback = callback
         self.debounce_seconds = debounce_seconds
 
-        self._observer: Observer | None = None
+        self._observer: Any = None
         self._handler: _DebounceHandler | None = None
         self._running = False
 
@@ -83,9 +84,10 @@ class FileWatchdog:
             await self._handler.cancel_pending()
 
         # Stop observer
-        if self._observer:
-            self._observer.stop()
-            self._observer.join(timeout=2.0)
+        observer = self._observer
+        if observer:
+            observer.stop()
+            observer.join(timeout=2.0)
             self._observer = None
             self._handler = None
 
@@ -96,7 +98,7 @@ class _DebounceHandler(FileSystemEventHandler):
     def __init__(
         self,
         target_file: Path,
-        callback: Callable[[], None],
+        callback: Callable[[], Awaitable[None]],
         debounce_seconds: float,
         loop: asyncio.AbstractEventLoop,
     ):
@@ -113,7 +115,7 @@ class _DebounceHandler(FileSystemEventHandler):
             return
 
         # Check if this is our target file
-        event_path = Path(event.src_path).resolve()
+        event_path = Path(str(event.src_path)).resolve()
         target_path = self.target_file.resolve()
 
         if event_path != target_path:
