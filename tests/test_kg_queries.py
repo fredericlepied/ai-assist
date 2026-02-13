@@ -178,6 +178,58 @@ def test_get_job_with_context(kg, queries):
     assert comp_ids == {"comp-ocp", "comp-storage"}
 
 
+def test_get_entity_with_context(kg, queries):
+    """Test generic entity context groups related entities by type"""
+    kg.insert_entity(
+        entity_type="task",
+        entity_id="task-gen",
+        valid_from=datetime(2026, 2, 4, 10, 0),
+        tx_from=datetime(2026, 2, 4, 10, 5),
+        data={"status": "blocked"},
+    )
+    kg.insert_entity(
+        entity_type="resource",
+        entity_id="res-gen",
+        valid_from=datetime(2026, 2, 4, 0, 0),
+        tx_from=datetime(2026, 2, 4, 0, 0),
+        data={"name": "shared-pool"},
+    )
+    kg.insert_entity(
+        entity_type="person",
+        entity_id="person-gen",
+        valid_from=datetime(2026, 2, 4, 12, 0),
+        tx_from=datetime(2026, 2, 4, 12, 0),
+        data={"name": "Alice"},
+    )
+    kg.insert_relationship(
+        rel_type="depends_on",
+        source_id="task-gen",
+        target_id="res-gen",
+        valid_from=datetime(2026, 2, 4, 10, 0),
+    )
+    kg.insert_relationship(
+        rel_type="assigned_to",
+        source_id="task-gen",
+        target_id="person-gen",
+        valid_from=datetime(2026, 2, 4, 12, 0),
+    )
+
+    context = queries.get_entity_with_context("task-gen")
+    assert context is not None
+    assert context["id"] == "task-gen"
+    assert context["type"] == "task"
+    assert "resource" in context["related_by_type"]
+    assert "person" in context["related_by_type"]
+    assert context["related_count"] == 2
+    assert context["related_by_type"]["resource"][0]["valid_from"] is not None
+
+
+def test_get_entity_with_context_nonexistent(kg, queries):
+    """Test entity context for non-existent entity"""
+    context = queries.get_entity_with_context("non-existent")
+    assert context is None
+
+
 def test_get_job_with_context_nonexistent(kg, queries):
     """Test getting context for non-existent job"""
     context = queries.get_job_with_context("non-existent")
@@ -289,14 +341,14 @@ def test_count_entities_by_status(kg, queries):
     now = datetime.now()
     for i, status in enumerate(["failure", "failure", "success", "error"]):
         kg.insert_entity(
-            entity_type="dci_job",
-            entity_id=f"job-status-{i}",
+            entity_type="task",
+            entity_id=f"task-status-{i}",
             valid_from=now - timedelta(hours=i),
             tx_from=now - timedelta(hours=i),
             data={"status": status},
         )
 
-    result = queries.count_entities_by_status("dci_job", days=7)
+    result = queries.count_entities_by_status("task", days=7)
     assert result["total"] == 4
     assert result["by_status"]["failure"] == 2
     assert result["by_status"]["success"] == 1
@@ -310,28 +362,28 @@ def test_count_entities_by_status_daily(kg, queries):
     yesterday = today - timedelta(days=1)
 
     kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-today-1",
+        entity_type="task",
+        entity_id="task-today-1",
         valid_from=today,
         tx_from=today,
         data={"status": "failure"},
     )
     kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-today-2",
+        entity_type="task",
+        entity_id="task-today-2",
         valid_from=today,
         tx_from=today,
         data={"status": "success"},
     )
     kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-yesterday",
+        entity_type="task",
+        entity_id="task-yesterday",
         valid_from=yesterday,
         tx_from=yesterday,
         data={"status": "failure"},
     )
 
-    result = queries.count_entities_by_status("dci_job", days=7, group_by_day=True)
+    result = queries.count_entities_by_status("task", days=7, group_by_day=True)
     assert "by_day" in result
     today_key = today.strftime("%Y-%m-%d")
     yesterday_key = yesterday.strftime("%Y-%m-%d")
@@ -343,20 +395,19 @@ def test_count_entities_by_status_daily(kg, queries):
 def test_detect_failure_trends_spike(kg, queries):
     """Increasing failures per day triggers 'increasing' trend"""
     now = datetime.now()
-    # Day 0 (oldest): 1 failure, Day 1: 2 failures, Day 2 (most recent): 4 failures
     for day_offset in range(3):
         day = now - timedelta(days=2 - day_offset)
         failure_count = 2**day_offset  # 1, 2, 4
         for i in range(failure_count):
             kg.insert_entity(
-                entity_type="dci_job",
-                entity_id=f"job-trend-d{day_offset}-{i}",
+                entity_type="task",
+                entity_id=f"task-trend-d{day_offset}-{i}",
                 valid_from=day,
                 tx_from=day,
                 data={"status": "failure"},
             )
 
-    result = queries.detect_failure_trends(days=7)
+    result = queries.detect_failure_trends(days=7, entity_type="task")
     assert result["trend"] == "increasing"
     assert result["total_failures"] == 7
 
@@ -368,19 +419,19 @@ def test_detect_failure_trends_stable(kg, queries):
         day = now - timedelta(days=day_offset)
         for i in range(3):
             kg.insert_entity(
-                entity_type="dci_job",
-                entity_id=f"job-stable-d{day_offset}-{i}",
+                entity_type="task",
+                entity_id=f"task-stable-d{day_offset}-{i}",
                 valid_from=day,
                 tx_from=day,
                 data={"status": "failure"},
             )
 
-    result = queries.detect_failure_trends(days=7)
+    result = queries.detect_failure_trends(days=7, entity_type="task")
     assert result["trend"] == "stable"
 
 
 def test_detect_failure_trends_no_data(kg, queries):
-    """No jobs yields no_data trend"""
+    """No entities yields no_data trend"""
     result = queries.detect_failure_trends(days=7)
     assert result["trend"] == "no_data"
 
