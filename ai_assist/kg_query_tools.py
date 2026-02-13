@@ -34,7 +34,7 @@ class KGQueryTools:
                         },
                         "entity_type": {
                             "type": "string",
-                            "description": "Optional filter by entity type (e.g., 'dci_job', 'jira_ticket')",
+                            "description": "Optional filter by entity type",
                         },
                     },
                     "required": [],
@@ -46,7 +46,7 @@ class KGQueryTools:
                 "name": "internal__kg_late_discoveries",
                 "description": (
                     "AGENT-ONLY: Find entities discovered significantly after they became valid. "
-                    "Identifies monitoring lag — e.g., jobs that failed but weren't noticed for a while."
+                    "Identifies monitoring lag — entities that changed but weren't noticed promptly."
                 ),
                 "input_schema": {
                     "type": "object",
@@ -78,7 +78,7 @@ class KGQueryTools:
                     "properties": {
                         "entity_type": {
                             "type": "string",
-                            "description": "Entity type to analyze (e.g., 'dci_job')",
+                            "description": "Entity type to analyze",
                         },
                         "days": {
                             "type": "integer",
@@ -93,41 +93,23 @@ class KGQueryTools:
                 "_original_name": "kg_discovery_lag_stats",
             },
             {
-                "name": "internal__kg_job_context",
+                "name": "internal__kg_entity_context",
                 "description": (
-                    "AGENT-ONLY: Get a job with all related entities (components, tickets, etc.). "
-                    "Provides full context for investigating a specific job."
+                    "AGENT-ONLY: Get an entity with all related entities, grouped by type. "
+                    "Provides full context for investigating any entity in the knowledge graph."
                 ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "job_id": {
+                        "entity_id": {
                             "type": "string",
-                            "description": "The job entity ID in the knowledge graph",
+                            "description": "The entity ID in the knowledge graph",
                         },
                     },
-                    "required": ["job_id"],
+                    "required": ["entity_id"],
                 },
                 "_server": "internal",
-                "_original_name": "kg_job_context",
-            },
-            {
-                "name": "internal__kg_ticket_context",
-                "description": (
-                    "AGENT-ONLY: Get a ticket with all related jobs. " "Shows which jobs reference a given ticket."
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "ticket_id": {
-                            "type": "string",
-                            "description": "The ticket entity ID in the knowledge graph",
-                        },
-                    },
-                    "required": ["ticket_id"],
-                },
-                "_server": "internal",
-                "_original_name": "kg_ticket_context",
+                "_original_name": "kg_entity_context",
             },
             {
                 "name": "internal__kg_stats",
@@ -143,54 +125,6 @@ class KGQueryTools:
                 "_server": "internal",
                 "_original_name": "kg_stats",
             },
-            {
-                "name": "internal__kg_failure_trends",
-                "description": (
-                    "AGENT-ONLY: Detect failure trends in recent jobs. "
-                    "Analyzes daily failure counts and identifies increasing/decreasing/stable trends."
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "days": {
-                            "type": "integer",
-                            "description": "Number of days to analyze (default: 7)",
-                            "default": 7,
-                            "minimum": 1,
-                        },
-                    },
-                    "required": [],
-                },
-                "_server": "internal",
-                "_original_name": "kg_failure_trends",
-            },
-            {
-                "name": "internal__kg_component_hotspots",
-                "description": (
-                    "AGENT-ONLY: Detect component hotspots — components appearing in multiple "
-                    "failed jobs recently. Helps identify problematic components."
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "days": {
-                            "type": "integer",
-                            "description": "Number of days to look back (default: 7)",
-                            "default": 7,
-                            "minimum": 1,
-                        },
-                        "min_failures": {
-                            "type": "integer",
-                            "description": "Minimum number of failed jobs to flag (default: 3)",
-                            "default": 3,
-                            "minimum": 1,
-                        },
-                    },
-                    "required": [],
-                },
-                "_server": "internal",
-                "_original_name": "kg_component_hotspots",
-            },
         ]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
@@ -201,16 +135,10 @@ class KGQueryTools:
             return self._late_discoveries(arguments)
         elif tool_name == "kg_discovery_lag_stats":
             return self._discovery_lag_stats(arguments)
-        elif tool_name == "kg_job_context":
-            return self._job_context(arguments)
-        elif tool_name == "kg_ticket_context":
-            return self._ticket_context(arguments)
+        elif tool_name == "kg_entity_context":
+            return self._entity_context(arguments)
         elif tool_name == "kg_stats":
             return self._stats()
-        elif tool_name == "kg_failure_trends":
-            return self._failure_trends(arguments)
-        elif tool_name == "kg_component_hotspots":
-            return self._component_hotspots(arguments)
         else:
             raise ValueError(f"Unknown KG query tool: {tool_name}")
 
@@ -236,31 +164,13 @@ class KGQueryTools:
         result = self.queries.analyze_discovery_lag(entity_type=entity_type, days=days)
         return json.dumps(result, indent=2, default=str)
 
-    def _job_context(self, arguments: dict[str, Any]) -> str:
-        job_id = arguments["job_id"]
-        result = self.queries.get_job_with_context(job_id)
+    def _entity_context(self, arguments: dict[str, Any]) -> str:
+        entity_id = arguments["entity_id"]
+        result = self.queries.get_entity_with_context(entity_id)
         if result is None:
-            return json.dumps({"error": "not_found", "job_id": job_id})
-        return json.dumps(result, indent=2, default=str)
-
-    def _ticket_context(self, arguments: dict[str, Any]) -> str:
-        ticket_id = arguments["ticket_id"]
-        result = self.queries.get_ticket_with_context(ticket_id)
-        if result is None:
-            return json.dumps({"error": "not_found", "ticket_id": ticket_id})
+            return json.dumps({"error": "not_found", "entity_id": entity_id})
         return json.dumps(result, indent=2, default=str)
 
     def _stats(self) -> str:
         result = self.kg.get_stats()
-        return json.dumps(result, indent=2, default=str)
-
-    def _failure_trends(self, arguments: dict[str, Any]) -> str:
-        days = arguments.get("days", 7)
-        result = self.queries.detect_failure_trends(days=days)
-        return json.dumps(result, indent=2, default=str)
-
-    def _component_hotspots(self, arguments: dict[str, Any]) -> str:
-        days = arguments.get("days", 7)
-        min_failures = arguments.get("min_failures", 3)
-        result = self.queries.detect_component_hotspots(days=days, min_failures=min_failures)
         return json.dumps(result, indent=2, default=str)

@@ -128,7 +128,11 @@ class KnowledgeGraph:
             db_path = str(get_config_dir() / "knowledge_graph.db")
 
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, timeout=30)
+        try:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass  # WAL mode is best-effort; falls back to default journal mode
         self._create_schema()
 
     def _create_schema(self):

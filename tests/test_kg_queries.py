@@ -108,79 +108,55 @@ def test_find_late_discoveries(kg, queries):
     assert len(all_late) == 2
 
 
-def test_get_job_with_context(kg, queries):
-    """Test getting job with all related entities"""
-    # Create job
+def test_get_entity_with_context(kg, queries):
+    """Test generic entity context groups related entities by type"""
     kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-123",
+        entity_type="task",
+        entity_id="task-gen",
         valid_from=datetime(2026, 2, 4, 10, 0),
         tx_from=datetime(2026, 2, 4, 10, 5),
-        data={"status": "failure", "remoteci": "test-lab"},
+        data={"status": "blocked"},
     )
-
-    # Create components
-    comp1 = kg.insert_entity(
-        entity_type="component",
-        entity_id="comp-ocp",
+    kg.insert_entity(
+        entity_type="resource",
+        entity_id="res-gen",
         valid_from=datetime(2026, 2, 4, 0, 0),
         tx_from=datetime(2026, 2, 4, 0, 0),
-        data={"type": "ocp", "version": "4.19.0"},
+        data={"name": "shared-pool"},
     )
-
-    comp2 = kg.insert_entity(
-        entity_type="component",
-        entity_id="comp-storage",
-        valid_from=datetime(2026, 2, 4, 0, 0),
-        tx_from=datetime(2026, 2, 4, 0, 0),
-        data={"type": "storage", "name": "ceph"},
-    )
-
-    # Create ticket
-    ticket = kg.insert_entity(
-        entity_type="jira_ticket",
-        entity_id="ticket-456",
+    kg.insert_entity(
+        entity_type="person",
+        entity_id="person-gen",
         valid_from=datetime(2026, 2, 4, 12, 0),
         tx_from=datetime(2026, 2, 4, 12, 0),
-        data={"key": "CILAB-1234"},
+        data={"name": "Alice"},
     )
-
-    # Create relationships
     kg.insert_relationship(
-        rel_type="job_uses_component",
-        source_id="job-123",
-        target_id=comp1.id,
+        rel_type="depends_on",
+        source_id="task-gen",
+        target_id="res-gen",
         valid_from=datetime(2026, 2, 4, 10, 0),
-        properties={"build": "ga"},
     )
-
     kg.insert_relationship(
-        rel_type="job_uses_component", source_id="job-123", target_id=comp2.id, valid_from=datetime(2026, 2, 4, 10, 0)
-    )
-
-    kg.insert_relationship(
-        rel_type="job_references_ticket",
-        source_id="job-123",
-        target_id=ticket.id,
+        rel_type="assigned_to",
+        source_id="task-gen",
+        target_id="person-gen",
         valid_from=datetime(2026, 2, 4, 12, 0),
     )
 
-    # Get job with context
-    context = queries.get_job_with_context("job-123")
+    context = queries.get_entity_with_context("task-gen")
     assert context is not None
-    assert context["id"] == "job-123"
-    assert len(context["components"]) == 2
-    assert len(context["tickets"]) == 1
-    assert context["discovery_lag"] == "5m"
-
-    # Check component details
-    comp_ids = {c["entity_id"] for c in context["components"]}
-    assert comp_ids == {"comp-ocp", "comp-storage"}
+    assert context["id"] == "task-gen"
+    assert context["type"] == "task"
+    assert "resource" in context["related_by_type"]
+    assert "person" in context["related_by_type"]
+    assert context["related_count"] == 2
+    assert context["related_by_type"]["resource"][0]["valid_from"] is not None
 
 
-def test_get_job_with_context_nonexistent(kg, queries):
-    """Test getting context for non-existent job"""
-    context = queries.get_job_with_context("non-existent")
+def test_get_entity_with_context_nonexistent(kg, queries):
+    """Test entity context for non-existent entity"""
+    context = queries.get_entity_with_context("non-existent")
     assert context is None
 
 
@@ -217,60 +193,6 @@ def test_analyze_discovery_lag_no_data(kg, queries):
     assert "message" in stats
 
 
-def test_get_ticket_with_context(kg, queries):
-    """Test getting ticket with related jobs"""
-    # Create ticket
-    kg.insert_entity(
-        entity_type="jira_ticket",
-        entity_id="ticket-789",
-        valid_from=datetime(2026, 2, 4, 12, 0),
-        tx_from=datetime(2026, 2, 4, 12, 0),
-        data={"key": "CILAB-5678", "summary": "Test issue"},
-    )
-
-    # Create jobs
-    job1 = kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-a",
-        valid_from=datetime(2026, 2, 4, 10, 0),
-        tx_from=datetime(2026, 2, 4, 10, 5),
-        data={"status": "failure"},
-    )
-
-    job2 = kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-b",
-        valid_from=datetime(2026, 2, 4, 10, 30),
-        tx_from=datetime(2026, 2, 4, 10, 35),
-        data={"status": "failure"},
-    )
-
-    # Create relationships
-    kg.insert_relationship(
-        rel_type="job_references_ticket",
-        source_id=job1.id,
-        target_id="ticket-789",
-        valid_from=datetime(2026, 2, 4, 12, 0),
-    )
-
-    kg.insert_relationship(
-        rel_type="job_references_ticket",
-        source_id=job2.id,
-        target_id="ticket-789",
-        valid_from=datetime(2026, 2, 4, 12, 0),
-    )
-
-    # Get ticket with context
-    context = queries.get_ticket_with_context("ticket-789")
-    assert context is not None
-    assert context["id"] == "ticket-789"
-    assert context["job_count"] == 2
-    assert len(context["related_jobs"]) == 2
-
-    job_ids = {job["job_id"] for job in context["related_jobs"]}
-    assert job_ids == {"job-a", "job-b"}
-
-
 def test_format_duration():
     """Test duration formatting"""
     from ai_assist.kg_queries import KnowledgeGraphQueries
@@ -282,175 +204,6 @@ def test_format_duration():
     assert KnowledgeGraphQueries._format_duration(3665) == "1h 1m 5s"
     assert KnowledgeGraphQueries._format_duration(7200) == "2h"
     assert KnowledgeGraphQueries._format_duration(-10) == "0s"  # Negative handled
-
-
-def test_count_entities_by_status(kg, queries):
-    """Test correct status grouping"""
-    now = datetime.now()
-    for i, status in enumerate(["failure", "failure", "success", "error"]):
-        kg.insert_entity(
-            entity_type="dci_job",
-            entity_id=f"job-status-{i}",
-            valid_from=now - timedelta(hours=i),
-            tx_from=now - timedelta(hours=i),
-            data={"status": status},
-        )
-
-    result = queries.count_entities_by_status("dci_job", days=7)
-    assert result["total"] == 4
-    assert result["by_status"]["failure"] == 2
-    assert result["by_status"]["success"] == 1
-    assert result["by_status"]["error"] == 1
-
-
-def test_count_entities_by_status_daily(kg, queries):
-    """Test correct by_day breakdown"""
-    now = datetime.now()
-    today = now.replace(hour=12, minute=0, second=0, microsecond=0)
-    yesterday = today - timedelta(days=1)
-
-    kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-today-1",
-        valid_from=today,
-        tx_from=today,
-        data={"status": "failure"},
-    )
-    kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-today-2",
-        valid_from=today,
-        tx_from=today,
-        data={"status": "success"},
-    )
-    kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-yesterday",
-        valid_from=yesterday,
-        tx_from=yesterday,
-        data={"status": "failure"},
-    )
-
-    result = queries.count_entities_by_status("dci_job", days=7, group_by_day=True)
-    assert "by_day" in result
-    today_key = today.strftime("%Y-%m-%d")
-    yesterday_key = yesterday.strftime("%Y-%m-%d")
-    assert result["by_day"][today_key]["failure"] == 1
-    assert result["by_day"][today_key]["success"] == 1
-    assert result["by_day"][yesterday_key]["failure"] == 1
-
-
-def test_detect_failure_trends_spike(kg, queries):
-    """Increasing failures per day triggers 'increasing' trend"""
-    now = datetime.now()
-    # Day 0 (oldest): 1 failure, Day 1: 2 failures, Day 2 (most recent): 4 failures
-    for day_offset in range(3):
-        day = now - timedelta(days=2 - day_offset)
-        failure_count = 2**day_offset  # 1, 2, 4
-        for i in range(failure_count):
-            kg.insert_entity(
-                entity_type="dci_job",
-                entity_id=f"job-trend-d{day_offset}-{i}",
-                valid_from=day,
-                tx_from=day,
-                data={"status": "failure"},
-            )
-
-    result = queries.detect_failure_trends(days=7)
-    assert result["trend"] == "increasing"
-    assert result["total_failures"] == 7
-
-
-def test_detect_failure_trends_stable(kg, queries):
-    """Consistent failures show 'stable' trend"""
-    now = datetime.now()
-    for day_offset in range(4):
-        day = now - timedelta(days=day_offset)
-        for i in range(3):
-            kg.insert_entity(
-                entity_type="dci_job",
-                entity_id=f"job-stable-d{day_offset}-{i}",
-                valid_from=day,
-                tx_from=day,
-                data={"status": "failure"},
-            )
-
-    result = queries.detect_failure_trends(days=7)
-    assert result["trend"] == "stable"
-
-
-def test_detect_failure_trends_no_data(kg, queries):
-    """No jobs yields no_data trend"""
-    result = queries.detect_failure_trends(days=7)
-    assert result["trend"] == "no_data"
-
-
-def test_detect_component_hotspots(kg, queries):
-    """Component in 3+ failed jobs is flagged as hotspot"""
-    now = datetime.now()
-
-    # Create component
-    kg.insert_entity(
-        entity_type="component",
-        entity_id="comp-problem",
-        valid_from=now - timedelta(days=10),
-        tx_from=now - timedelta(days=10),
-        data={"type": "ocp", "version": "4.19.0"},
-    )
-
-    # Create another component that only appears once
-    kg.insert_entity(
-        entity_type="component",
-        entity_id="comp-ok",
-        valid_from=now - timedelta(days=10),
-        tx_from=now - timedelta(days=10),
-        data={"type": "storage", "name": "ceph"},
-    )
-
-    # Create 3 failed jobs using comp-problem
-    for i in range(3):
-        job_time = now - timedelta(days=i)
-        kg.insert_entity(
-            entity_type="dci_job",
-            entity_id=f"job-hotspot-{i}",
-            valid_from=job_time,
-            tx_from=job_time,
-            data={"status": "failure"},
-        )
-        kg.insert_relationship(
-            rel_type="job_uses_component",
-            source_id=f"job-hotspot-{i}",
-            target_id="comp-problem",
-            valid_from=job_time,
-        )
-
-    # Create 1 failed job using comp-ok
-    kg.insert_entity(
-        entity_type="dci_job",
-        entity_id="job-ok-1",
-        valid_from=now,
-        tx_from=now,
-        data={"status": "failure"},
-    )
-    kg.insert_relationship(
-        rel_type="job_uses_component",
-        source_id="job-ok-1",
-        target_id="comp-ok",
-        valid_from=now,
-    )
-
-    result = queries.detect_component_hotspots(days=7, min_failures=3)
-    assert len(result["hotspots"]) == 1
-    assert result["hotspots"][0]["component_id"] == "comp-problem"
-    assert result["hotspots"][0]["failure_count"] == 3
-    assert result["total_failed_jobs"] == 4
-
-
-def test_detect_component_hotspots_none(kg, queries):
-    """No hotspots when no components appear in enough failed jobs"""
-    result = queries.detect_component_hotspots(days=7)
-    assert result["hotspots"] == []
-    assert result["total_failed_jobs"] == 0
 
 
 def test_what_changed_with_corrections(kg, queries):

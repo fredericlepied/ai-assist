@@ -962,11 +962,8 @@ class AiAssistAgent:
                     "kg_recent_changes",
                     "kg_late_discoveries",
                     "kg_discovery_lag_stats",
-                    "kg_job_context",
-                    "kg_ticket_context",
+                    "kg_entity_context",
                     "kg_stats",
-                    "kg_failure_trends",
-                    "kg_component_hotspots",
                 ]
 
                 if original_tool_name in schedule_tools:

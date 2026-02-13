@@ -128,57 +128,48 @@ class KnowledgeGraphQueries:
 
         return late_discoveries
 
-    def get_job_with_context(self, job_id: str) -> dict[str, Any] | None:
-        """Get a job with all related entities (components, tickets, etc.)
+    def get_entity_with_context(self, entity_id: str) -> dict[str, Any] | None:
+        """Get an entity with all related entities, grouped by type
 
         Args:
-            job_id: The job entity ID
+            entity_id: The entity ID
 
         Returns:
-            Dictionary with job data and all related entities
+            Dictionary with entity data and related entities grouped by type
         """
-        job = self.kg.get_entity(job_id)
-        if not job:
+        entity = self.kg.get_entity(entity_id)
+        if not entity:
             return None
 
         # Get related entities
-        related = self.kg.get_related_entities(job_id, direction="both")
+        related = self.kg.get_related_entities(entity_id, direction="both")
 
-        # Organize by relationship type
-        components = []
-        tickets = []
-        other = []
-
-        for rel, entity in related:
+        # Group by entity type dynamically
+        related_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for rel, rel_entity in related:
             rel_info = {
-                "entity_id": entity.id,
-                "entity_type": entity.entity_type,
-                "data": entity.data,
+                "entity_id": rel_entity.id,
+                "entity_type": rel_entity.entity_type,
+                "data": rel_entity.data,
+                "valid_from": rel_entity.valid_from.isoformat(),
                 "relationship": rel.rel_type,
                 "properties": rel.properties,
             }
-
-            if entity.entity_type == "component":
-                components.append(rel_info)
-            elif entity.entity_type == "jira_ticket":
-                tickets.append(rel_info)
-            else:
-                other.append(rel_info)
+            related_by_type[rel_entity.entity_type].append(rel_info)
 
         # Calculate discovery lag
-        lag_seconds = (job.tx_from - job.valid_from).total_seconds()
+        lag_seconds = (entity.tx_from - entity.valid_from).total_seconds()
 
         return {
-            "id": job.id,
-            "type": job.entity_type,
-            "data": job.data,
-            "valid_from": job.valid_from.isoformat(),
-            "valid_to": job.valid_to.isoformat() if job.valid_to else None,
-            "discovered_at": job.tx_from.isoformat(),
+            "id": entity.id,
+            "type": entity.entity_type,
+            "data": entity.data,
+            "valid_from": entity.valid_from.isoformat(),
+            "valid_to": entity.valid_to.isoformat() if entity.valid_to else None,
+            "discovered_at": entity.tx_from.isoformat(),
             "discovery_lag": self._format_duration(lag_seconds),
-            "components": components,
-            "tickets": tickets,
-            "other_related": other,
+            "related_by_type": dict(related_by_type),
+            "related_count": sum(len(v) for v in related_by_type.values()),
         }
 
     def analyze_discovery_lag(self, entity_type: str, days: int = 7) -> dict[str, Any]:
@@ -234,186 +225,6 @@ class KnowledgeGraphQueries:
             "p95_lag_minutes": round(sorted_lags[p95_idx], 1) if p95_idx < len(sorted_lags) else None,
             "avg_lag_human": self._format_duration(avg_lag * 60),
             "max_lag_human": self._format_duration(max_lag * 60),
-        }
-
-    def get_ticket_with_context(self, ticket_id: str) -> dict[str, Any] | None:
-        """Get a ticket with all related jobs
-
-        Args:
-            ticket_id: The ticket entity ID
-
-        Returns:
-            Dictionary with ticket data and related jobs
-        """
-        ticket = self.kg.get_entity(ticket_id)
-        if not ticket:
-            return None
-
-        # Get related jobs (incoming relationships)
-        related = self.kg.get_related_entities(ticket_id, direction="incoming")
-
-        related_jobs = []
-        for rel, entity in related:
-            if entity.entity_type == "dci_job":
-                related_jobs.append(
-                    {
-                        "job_id": entity.id,
-                        "data": entity.data,
-                        "valid_from": entity.valid_from.isoformat(),
-                        "relationship": rel.rel_type,
-                    }
-                )
-
-        return {
-            "id": ticket.id,
-            "type": ticket.entity_type,
-            "data": ticket.data,
-            "valid_from": ticket.valid_from.isoformat(),
-            "discovered_at": ticket.tx_from.isoformat(),
-            "related_jobs": related_jobs,
-            "job_count": len(related_jobs),
-        }
-
-    def count_entities_by_status(
-        self, entity_type: str = "dci_job", days: int = 7, group_by_day: bool = False
-    ) -> dict[str, Any]:
-        """Count entities grouped by status, optionally by day
-
-        Args:
-            entity_type: Entity type to count (default: 'dci_job')
-            days: Number of days to look back
-            group_by_day: If True, break down counts by day
-
-        Returns:
-            Dictionary with status counts and optional daily breakdown
-        """
-        cutoff = datetime.now() - timedelta(days=days)
-        entities = self.kg.query_as_of(datetime.now(), entity_type=entity_type)
-        recent = [e for e in entities if e.tx_from >= cutoff]
-
-        # Count by status
-        status_counts: dict[str, int] = defaultdict(int)
-        for e in recent:
-            status = e.data.get("status", "unknown")
-            status_counts[status] += 1
-
-        result: dict[str, Any] = {
-            "entity_type": entity_type,
-            "period_days": days,
-            "total": len(recent),
-            "by_status": dict(status_counts),
-        }
-
-        if group_by_day:
-            by_day: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-            for e in recent:
-                day_key = e.valid_from.strftime("%Y-%m-%d")
-                status = e.data.get("status", "unknown")
-                by_day[day_key][status] += 1
-            result["by_day"] = {k: dict(v) for k, v in sorted(by_day.items())}
-
-        return result
-
-    def detect_failure_trends(self, days: int = 7) -> dict[str, Any]:
-        """Detect trends in job failures over recent days
-
-        Compares daily failure counts to identify increasing, decreasing,
-        or stable trends.
-
-        Args:
-            days: Number of days to analyze
-
-        Returns:
-            Dictionary with daily counts and trend analysis
-        """
-        counts = self.count_entities_by_status("dci_job", days=days, group_by_day=True)
-
-        by_day = counts.get("by_day", {})
-        if not by_day:
-            return {
-                "period_days": days,
-                "daily_counts": {},
-                "trend": "no_data",
-                "message": f"No jobs found in the last {days} days",
-            }
-
-        # Extract daily failure counts
-        daily_failures: dict[str, int] = {}
-        for day_key in sorted(by_day.keys()):
-            day_statuses = by_day[day_key]
-            failures = day_statuses.get("failure", 0) + day_statuses.get("error", 0)
-            daily_failures[day_key] = failures
-
-        # Determine trend from sorted daily counts
-        failure_values = list(daily_failures.values())
-        if len(failure_values) < 2:
-            trend = "insufficient_data"
-        else:
-            # Compare first half vs second half averages
-            mid = len(failure_values) // 2
-            first_half_avg = sum(failure_values[:mid]) / max(mid, 1)
-            second_half_avg = sum(failure_values[mid:]) / max(len(failure_values) - mid, 1)
-
-            if second_half_avg > first_half_avg * 1.3:
-                trend = "increasing"
-            elif second_half_avg < first_half_avg * 0.7:
-                trend = "decreasing"
-            else:
-                trend = "stable"
-
-        return {
-            "period_days": days,
-            "daily_counts": daily_failures,
-            "total_failures": sum(daily_failures.values()),
-            "trend": trend,
-        }
-
-    def detect_component_hotspots(self, days: int = 7, min_failures: int = 3) -> dict[str, Any]:
-        """Detect components appearing in multiple failed jobs
-
-        Args:
-            days: Number of days to look back
-            min_failures: Minimum failed jobs to flag a component (default: 3)
-
-        Returns:
-            Dictionary with hotspot components and their failure counts
-        """
-        cutoff = datetime.now() - timedelta(days=days)
-
-        # Get recent failed jobs
-        entities = self.kg.query_as_of(datetime.now(), entity_type="dci_job")
-        failed_jobs = [e for e in entities if e.tx_from >= cutoff and e.data.get("status") in ("failure", "error")]
-
-        # Count component appearances in failed jobs
-        component_failures: dict[str, dict[str, Any]] = defaultdict(lambda: {"count": 0, "job_ids": [], "data": {}})
-        for job in failed_jobs:
-            related = self.kg.get_related_entities(job.id, rel_type="job_uses_component")
-            for _rel, comp in related:
-                info = component_failures[comp.id]
-                info["count"] += 1
-                info["job_ids"].append(job.id)
-                info["data"] = comp.data
-
-        # Filter to hotspots
-        hotspots = [
-            {
-                "component_id": comp_id,
-                "data": info["data"],
-                "failure_count": info["count"],
-                "job_ids": info["job_ids"],
-            }
-            for comp_id, info in component_failures.items()
-            if info["count"] >= min_failures
-        ]
-
-        # Sort by failure count descending
-        hotspots.sort(key=lambda x: x["failure_count"], reverse=True)
-
-        return {
-            "period_days": days,
-            "min_failures": min_failures,
-            "hotspots": hotspots,
-            "total_failed_jobs": len(failed_jobs),
         }
 
     @staticmethod
