@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 import threading
 from typing import Any
 
@@ -147,7 +148,7 @@ async def query_with_feedback(
             feedback_state["status"] = "🤔 Analyzing your question..."
             feedback_state["streaming"] = False
         elif status == "calling_claude":
-            feedback_state["status"] = f"💭 Thinking... (Turn {turn}/{max_turns})"
+            feedback_state["status"] = "💭 Thinking..."
             feedback_state["streaming"] = False
         elif status == "executing_tool":
             display_name = format_tool_display_name(tool_name or "")
@@ -164,6 +165,7 @@ async def query_with_feedback(
 
     # Show spinner initially
     live = Live(create_feedback_display(), console=console, refresh_per_second=10)
+    agent._active_live = live
     live.start()
 
     full_response = ""
@@ -190,7 +192,9 @@ async def query_with_feedback(
 
         # Use streaming query with conversation context and cancellation support
         cancel_event = threading.Event()
-        with EscapeWatcher(cancel_event):
+        escape_watcher = EscapeWatcher(cancel_event)
+        agent._active_escape_watcher = escape_watcher
+        with escape_watcher:
             async for chunk in agent.query_streaming(
                 prompt=prompt if messages is None else None,
                 messages=messages,
@@ -249,13 +253,10 @@ async def query_with_feedback(
         console.print(f"\n[red]Error: {e}[/red]")
 
     finally:
-        # Ensure spinner is stopped
         if live._started:
             live.stop()
-
-        # If we never started response (no text chunks), stop the spinner
-        if not response_started:
-            pass  # Already stopped above or never started
+        agent._active_live = None
+        agent._active_escape_watcher = None
 
         # Show KG save feedback if entities were saved
         kg_saved_count = agent.get_last_kg_saved_count()
@@ -531,6 +532,49 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                 console.print(f"\n[red]  {chunk.get('message')}[/red]")
 
     agent.on_inner_execution = on_inner_execution
+
+    # Set up security confirmation callback for filesystem tools
+    async def command_confirmation_callback(command: str) -> bool:
+        """Prompt user to approve non-allowlisted commands or destructive actions"""
+        # Remember what was running so we only restart what we stopped
+        live = agent._active_live
+        live_was_running = live and live._started
+        if live_was_running:
+            live.stop()
+
+        watcher = agent._active_escape_watcher
+        watcher_was_running = watcher is not None and watcher._thread is not None
+        if watcher_was_running:
+            watcher.stop()
+
+        # Restore cooked mode with echo so input() works normally
+        try:
+            import termios
+
+            stdin_fd = sys.stdin.fileno()
+            attrs = termios.tcgetattr(stdin_fd)
+            attrs[3] |= termios.ECHO | termios.ICANON
+            termios.tcsetattr(stdin_fd, termios.TCSANOW, attrs)
+        except (ImportError, termios.error, OSError):
+            pass
+
+        console.print("\n[yellow]Security: The agent wants to run:[/yellow]")
+        console.print(f"  [bold]{command}[/bold]")
+
+        try:
+            answer = await asyncio.to_thread(input, "Allow? [y/N] ")
+            approved = answer.strip().lower() in ("y", "yes")
+        except (KeyboardInterrupt, EOFError):
+            approved = False
+
+        if watcher_was_running:
+            watcher.start()
+        if live_was_running:
+            live.start()
+
+        return approved
+
+    agent.filesystem_tools.confirmation_callback = command_confirmation_callback
 
     try:
         while True:

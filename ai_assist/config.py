@@ -77,6 +77,21 @@ class AiAssistConfig(BaseModel):
         description="Enable script execution from Agent Skills (security risk if enabled)",
     )
 
+    # Command execution allowlist (Phase 1 security)
+    allowed_commands: list[str] = Field(
+        default_factory=lambda: ["grep", "find", "wc", "sort", "head", "tail", "ls", "cat", "diff", "file", "stat"],
+    )
+
+    # Filesystem path restrictions (Phase 2 security)
+    allowed_paths: list[str] = Field(
+        default_factory=lambda: ["~/.ai-assist", "/tmp/ai-assist"],
+    )
+
+    # Tools requiring user confirmation (Phase 4 security)
+    confirm_tools: list[str] = Field(
+        default_factory=lambda: ["internal__create_directory"],
+    )
+
     @classmethod
     def from_env(cls, mcp_servers_file: Path | None = None, config_dir: Path | None = None) -> "AiAssistConfig":
         """Load configuration from environment variables and YAML files

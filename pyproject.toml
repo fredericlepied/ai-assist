@@ -159,5 +159,6 @@ ignore-imports = true
 [dependency-groups]
 dev = [
     "mypy>=1.14.0",
+    "pytest-xdist>=3.8.0",
     "types-PyYAML>=6.0.0",
 ]

@@ -41,6 +41,10 @@ def mock_agent():
     agent.skills_manager = MagicMock()
     agent.skills_manager.installed_skills = []
 
+    # Mock filesystem tools for security confirmation callback
+    agent.filesystem_tools = MagicMock()
+    agent.filesystem_tools.confirmation_callback = None
+
     return agent
 
 
@@ -165,6 +169,8 @@ async def test_multiline_input_handling(mock_state_manager):
     agent.kg_save_enabled = True
     agent.skills_manager = MagicMock()
     agent.skills_manager.installed_skills = []
+    agent.filesystem_tools = MagicMock()
+    agent.filesystem_tools.confirmation_callback = None
 
     with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         # Simulate multi-line input then exit
@@ -209,6 +215,8 @@ async def test_conversation_tracking(mock_state_manager):
     agent.kg_save_enabled = True
     agent.skills_manager = MagicMock()
     agent.skills_manager.installed_skills = []
+    agent.filesystem_tools = MagicMock()
+    agent.filesystem_tools.confirmation_callback = None
 
     with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
@@ -317,6 +325,8 @@ async def test_feedback_with_tool_calls(mock_state_manager):
     agent.kg_save_enabled = True
     agent.skills_manager = MagicMock()
     agent.skills_manager.installed_skills = []
+    agent.filesystem_tools = MagicMock()
+    agent.filesystem_tools.confirmation_callback = None
 
     with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
@@ -348,6 +358,9 @@ async def test_query_streaming_cancel_event():
     mock_config.model = "claude-3-5-sonnet-20241022"
     mock_config.mcp_servers = {}
     mock_config.allow_skill_script_execution = False
+    mock_config.allowed_commands = ["grep", "find", "wc", "sort", "head", "tail", "ls", "cat", "diff", "file", "stat"]
+    mock_config.allowed_paths = ["~/.ai-assist", "/tmp/ai-assist"]
+    mock_config.confirm_tools = ["internal__create_directory"]
 
     agent = AiAssistAgent(mock_config)
 
