@@ -122,3 +122,27 @@ def test_non_tty_skipped(cancel_event):
 
         # stop() should not crash
         watcher.stop()
+
+
+def test_main_restores_terminal_on_keyboard_interrupt():
+    """main() should restore terminal state even on KeyboardInterrupt"""
+    original_attrs = [0, 1, 2, 3, 4, 5, []]
+
+    def _run_then_interrupt(coro):
+        coro.close()
+        raise KeyboardInterrupt()
+
+    with patch("sys.stdin") as mock_stdin, patch("ai_assist.main.asyncio") as mock_asyncio:
+        mock_stdin.isatty.return_value = True
+        mock_stdin.fileno.return_value = 0
+        mock_asyncio.run.side_effect = _run_then_interrupt
+
+        with (
+            patch("termios.tcgetattr", return_value=original_attrs),
+            patch("termios.tcsetattr") as mock_set,
+            patch("termios.TCSADRAIN", 1),
+        ):
+            from ai_assist.main import main
+
+            main()
+            mock_set.assert_called_with(0, 1, original_attrs)
