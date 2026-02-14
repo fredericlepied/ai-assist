@@ -50,12 +50,23 @@ repos:
         always_run: true
         verbose: true
 
+  # Duplicate code detection with pylint
+  - repo: local
+    hooks:
+      - id: pylint-similarities
+        name: pylint-similarities
+        entry: pylint --disable=all --enable=similarities --min-similarity-lines=6 ai_assist/
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true
+
   # Run tests with pytest
   - repo: local
     hooks:
       - id: pytest
         name: pytest
-        entry: pytest
+        entry: uv run pytest
         language: system
         pass_filenames: false
         always_run: true

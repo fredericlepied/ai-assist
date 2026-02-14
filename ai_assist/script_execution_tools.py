@@ -188,6 +188,7 @@ class ScriptExecutionTools:
                 capture_output=True,
                 text=True,
                 timeout=30,  # 30 second default
+                check=False,
             )
 
             # Limit output size

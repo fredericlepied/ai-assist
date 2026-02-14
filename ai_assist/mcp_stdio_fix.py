@@ -15,9 +15,9 @@ from typing import TextIO
 
 import anyio
 import anyio.lowlevel
-import mcp.types as types
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from anyio.streams.text import TextReceiveStream
+from mcp import types
 from mcp.client import stdio as mcp_stdio
 from mcp.shared.message import SessionMessage
 

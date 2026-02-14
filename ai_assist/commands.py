@@ -48,7 +48,7 @@ def is_valid_interactive_command(user_input: str) -> bool:
         return True
 
     # Extract base command (before any space)
-    base_command = user_input.split()[0].lower()
+    base_command = user_input.split(maxsplit=1)[0].lower()
 
     return base_command in INTERACTIVE_COMMANDS
 
