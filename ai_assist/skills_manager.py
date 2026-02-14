@@ -65,7 +65,9 @@ class SkillsManager:
                         )
                         self.loaded_skills[installed_skill.name] = content
                     else:
-                        print(f"Warning: Skill cache not found for '{installed_skill.name}' at {skill_path}")
+                        print(
+                            f"Warning: Skill cache not found for '{installed_skill.name}' at {skill_path}"
+                        )
 
                 except Exception as e:
                     print(f"Warning: Failed to load installed skill: {e}")
@@ -100,9 +102,14 @@ class SkillsManager:
                 content = self.skills_loader.load_skill_from_clawhub(slug, version)
                 cache_path = str(content.metadata.skill_path)
 
+                # Extract installed version from cache dir name (clawhub_{slug}_{version})
+                installed_version = Path(cache_path).name.rsplit("_", 1)[-1]
+
                 skill_name = content.metadata.name
 
-                existing = next((s for s in self.installed_skills if s.name == skill_name), None)
+                existing = next(
+                    (s for s in self.installed_skills if s.name == skill_name), None
+                )
                 if existing:
                     return f"Error: Skill '{skill_name}' is already installed. Uninstall first to reinstall."
 
@@ -110,7 +117,7 @@ class SkillsManager:
                     name=skill_name,
                     source=source,
                     source_type=source_type,
-                    branch=branch,
+                    branch=installed_version,
                     installed_at=datetime.now().isoformat(),
                     cache_path=cache_path,
                 )
@@ -147,7 +154,9 @@ class SkillsManager:
                 skill_subpath = "/".join(parts[2:]) if len(parts) > 2 else ""
 
                 repo_url = f"{owner}/{repo}"
-                content = self.skills_loader.load_skill_from_git(repo_url, skill_subpath, branch)
+                content = self.skills_loader.load_skill_from_git(
+                    repo_url, skill_subpath, branch
+                )
 
                 # Cache path is the git repo cache
                 cache_path = str(content.metadata.skill_path)
@@ -155,7 +164,9 @@ class SkillsManager:
             skill_name = content.metadata.name
 
             # Check if already installed
-            existing = next((s for s in self.installed_skills if s.name == skill_name), None)
+            existing = next(
+                (s for s in self.installed_skills if s.name == skill_name), None
+            )
             if existing:
                 return f"Error: Skill '{skill_name}' is already installed. Uninstall first to reinstall."
 
@@ -194,7 +205,9 @@ class SkillsManager:
             Success message or error
         """
         # Find installed skill
-        existing = next((s for s in self.installed_skills if s.name == skill_name), None)
+        existing = next(
+            (s for s in self.installed_skills if s.name == skill_name), None
+        )
         if not existing:
             return f"Error: Skill '{skill_name}' is not installed"
 
@@ -243,7 +256,11 @@ class SkillsManager:
 
         # Add script execution instructions if enabled
         if script_execution_enabled:
-            skills_with_scripts = [(name, content) for name, content in self.loaded_skills.items() if content.scripts]
+            skills_with_scripts = [
+                (name, content)
+                for name, content in self.loaded_skills.items()
+                if content.scripts
+            ]
             if skills_with_scripts:
                 sections.append("\n## Script Execution")
                 sections.append(
@@ -252,7 +269,9 @@ class SkillsManager:
                 )
                 for skill_name, content in skills_with_scripts:
                     script_names = list(content.scripts.keys())
-                    sections.append(f"\n**{skill_name}** has {len(script_names)} script(s):")
+                    sections.append(
+                        f"\n**{skill_name}** has {len(script_names)} script(s):"
+                    )
                     for script_name in script_names[:5]:  # Limit to first 5
                         sections.append(f"  - {script_name}")
                     if len(script_names) > 5:

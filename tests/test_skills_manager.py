@@ -114,7 +114,9 @@ def test_system_prompt_with_script_execution_enabled(skills_manager):
 def test_parse_source_spec(skills_manager):
     """Test parsing source specifications"""
     # With branch
-    source, branch = skills_manager._parse_source_spec("anthropics/skills/skills/pdf@main")
+    source, branch = skills_manager._parse_source_spec(
+        "anthropics/skills/skills/pdf@main"
+    )
     assert source == "anthropics/skills/skills/pdf"
     assert branch == "main"
 
@@ -127,32 +129,44 @@ def test_parse_source_spec(skills_manager):
 def test_normalize_github_url(skills_manager):
     """Test normalizing GitHub URLs to owner/repo format"""
     # Full HTTPS URL
-    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo")
+    source, branch = skills_manager._normalize_github_url(
+        "https://github.com/owner/repo"
+    )
     assert source == "owner/repo"
     assert branch is None
 
     # Full HTTPS URL with trailing slash
-    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo/")
+    source, branch = skills_manager._normalize_github_url(
+        "https://github.com/owner/repo/"
+    )
     assert source == "owner/repo"
     assert branch is None
 
     # URL with .git suffix
-    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo.git")
+    source, branch = skills_manager._normalize_github_url(
+        "https://github.com/owner/repo.git"
+    )
     assert source == "owner/repo"
     assert branch is None
 
     # URL with /tree/branch/path
-    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo/tree/develop/skills/pdf")
+    source, branch = skills_manager._normalize_github_url(
+        "https://github.com/owner/repo/tree/develop/skills/pdf"
+    )
     assert source == "owner/repo/skills/pdf"
     assert branch == "develop"
 
     # URL with /blob/branch/path
-    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo/blob/main/skills/pdf")
+    source, branch = skills_manager._normalize_github_url(
+        "https://github.com/owner/repo/blob/main/skills/pdf"
+    )
     assert source == "owner/repo/skills/pdf"
     assert branch == "main"
 
     # URL with /tree/branch but no subpath (top-level)
-    source, branch = skills_manager._normalize_github_url("https://github.com/owner/repo/tree/main")
+    source, branch = skills_manager._normalize_github_url(
+        "https://github.com/owner/repo/tree/main"
+    )
     assert source == "owner/repo"
     assert branch == "main"
 
@@ -162,7 +176,9 @@ def test_normalize_github_url(skills_manager):
     assert branch is None
 
     # HTTP URL
-    source, branch = skills_manager._normalize_github_url("http://github.com/owner/repo")
+    source, branch = skills_manager._normalize_github_url(
+        "http://github.com/owner/repo"
+    )
     assert source == "owner/repo"
     assert branch is None
 
@@ -199,8 +215,9 @@ def test_persistence(skills_manager, temp_installed_skills_file):
     assert new_manager.installed_skills[0].name == "hello"
 
 
-def _make_clawhub_content(slug="test-skill", cache_path="/tmp/clawhub-cache"):
+def _make_clawhub_content(slug="test-skill", version="1.0.0"):
     """Helper: build a SkillContent as if returned by load_skill_from_clawhub"""
+    cache_path = f"/tmp/skills-cache/clawhub_{slug}_{version}"
     return SkillContent(
         metadata=SkillMetadata(
             name=slug,
@@ -214,10 +231,12 @@ def _make_clawhub_content(slug="test-skill", cache_path="/tmp/clawhub-cache"):
 
 
 def test_install_clawhub_skill(skills_manager):
-    """Test installing a skill with clawhub: prefix"""
-    content = _make_clawhub_content()
+    """Test installing a skill with clawhub: prefix stores version not branch"""
+    content = _make_clawhub_content(version="1.2.3")
 
-    with patch.object(skills_manager.skills_loader, "load_skill_from_clawhub", return_value=content) as mock_load:
+    with patch.object(
+        skills_manager.skills_loader, "load_skill_from_clawhub", return_value=content
+    ) as mock_load:
         result = skills_manager.install_skill("clawhub:test-skill@1.2.3")
 
     assert "installed successfully" in result
@@ -226,15 +245,18 @@ def test_install_clawhub_skill(skills_manager):
     skill = skills_manager.installed_skills[0]
     assert skill.source_type == "clawhub"
     assert skill.name == "test-skill"
+    assert skill.branch == "1.2.3"
 
     mock_load.assert_called_once_with("test-skill", "1.2.3")
 
 
 def test_install_clawhub_skill_default_version(skills_manager):
     """Test that clawhub:slug without @version passes None to loader"""
-    content = _make_clawhub_content()
+    content = _make_clawhub_content(version="2.0.0")
 
-    with patch.object(skills_manager.skills_loader, "load_skill_from_clawhub", return_value=content) as mock_load:
+    with patch.object(
+        skills_manager.skills_loader, "load_skill_from_clawhub", return_value=content
+    ) as mock_load:
         result = skills_manager.install_skill("clawhub:test-skill")
 
     assert "installed successfully" in result
