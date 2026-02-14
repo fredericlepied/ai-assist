@@ -178,7 +178,7 @@ class AiAssistCompleter(Completer):
             "/skill/install": "Install an Agent Skill from git, local path, or ClawHub",
             "/skill/uninstall": "Uninstall an installed Agent Skill",
             "/skill/list": "List all installed Agent Skills",
-            "/skill/search": "Search the ClawHub registry for skills",
+            "/skill/search": "Search ClawHub and skills.sh for skills",
             "/exit": "Exit interactive mode",
             "/quit": "Exit interactive mode",
             "/help": "Show help message",
