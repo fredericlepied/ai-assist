@@ -343,7 +343,9 @@ class FilesystemTools:
                     return f"Error: Invalid working directory: {working_dir}"
 
             # Execute command
-            result = subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(
+                command, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False
+            )
 
             # Build output
             output = f"Command: {command}\n"

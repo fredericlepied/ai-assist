@@ -21,12 +21,14 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "pytest-mock>=3.14.0",
+    "pytest-xdist>=3.5.0",
     "pre-commit>=3.6.0",
     "black>=24.1.0",
     "isort>=5.13.0",
     "ruff>=0.2.0",
     "mypy>=1.14.0",
     "types-PyYAML>=6.0.0",
+    "pylint>=3.0.0",
 ]
 
 [project.scripts]
@@ -78,15 +80,35 @@ select = [
     "B",   # flake8-bugbear
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
+    "PL",  # pylint (convention, error, refactor, warning)
 ]
 ignore = [
-    "E501",  # line too long (handled by black)
-    "B008",  # do not perform function calls in argument defaults
-    "C901",  # too complex
+    "E501",    # line too long (handled by black)
+    "B008",    # do not perform function calls in argument defaults
+    "C901",    # too complex
+    "PLC0415", # import not at top-level (lazy imports are intentional)
+    "PLR2004", # magic value in comparison (too noisy for len checks, etc.)
+    "PLW0603", # global statement (acceptable for module-level singletons)
 ]
+
+[tool.ruff.lint.pylint]
+max-args = 8
+max-branches = 25
+max-returns = 8
+max-statements = 100
+max-nested-blocks = 6
+max-positional-args = 6
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Unused imports in __init__.py
+"tests/*" = ["PLR2004"]  # magic values are fine in test assertions
+"ai_assist/agent.py" = ["PLR0911", "PLR0912"]  # complex agent methods with many branches/returns
+"ai_assist/main.py" = ["PLR0912", "PLR0915"]  # main_async is inherently complex entry point
+"ai_assist/tui.py" = ["PLR0912"]  # completion handler has many branches
+"ai_assist/tui_interactive.py" = ["PLR0912", "PLR0915"]  # interactive REPL loop is inherently complex
+"ai_assist/conditions.py" = ["PLR0911"]  # condition evaluator needs many return paths
+"ai_assist/knowledge_graph.py" = ["PLR0913"]  # insert_relationship has many parameters by design
+"ai_assist/schedule_tools.py" = ["PLR0913"]  # schedule functions have many parameters by design
 
 [tool.pytest.ini_options]
 minversion = "8.0"
@@ -99,6 +121,7 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
+    "-n", "auto",
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
@@ -121,6 +144,17 @@ exclude = [
 [[tool.mypy.overrides]]
 module = ["mcp.*", "watchdog.*"]
 ignore_missing_imports = true
+
+[tool.pylint.main]
+load-plugins = []
+disable = "all"
+enable = "similarities"
+
+[tool.pylint.similarities]
+min-similarity-lines = 6
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
 
 [dependency-groups]
 dev = [

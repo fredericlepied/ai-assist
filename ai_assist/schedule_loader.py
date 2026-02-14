@@ -57,17 +57,7 @@ class ScheduleLoader:
 
         for task_data in data.get("tasks", []):
             try:
-                task = TaskDefinition(
-                    name=task_data["name"],
-                    prompt=task_data["prompt"],
-                    interval=task_data["interval"],
-                    description=task_data.get("description"),
-                    enabled=task_data.get("enabled", True),
-                    conditions=task_data.get("conditions", []),
-                    prompt_arguments=task_data.get("prompt_arguments"),
-                    notify=task_data.get("notify", False),
-                    notification_channels=task_data.get("notification_channels", ["console"]),
-                )
+                task = TaskDefinition.from_dict(task_data)
                 task.validate()
                 tasks.append(task)
             except (KeyError, ValueError) as e:

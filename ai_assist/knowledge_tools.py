@@ -14,7 +14,7 @@ class KnowledgeTools:
 
     def __init__(self, knowledge_graph: "KnowledgeGraph"):
         self.kg = knowledge_graph
-        self.agent: "AiAssistAgent | None" = None
+        self.agent: AiAssistAgent | None = None
 
     def get_tool_definitions(self) -> list[dict]:
         """Get MCP-style tool definitions for knowledge management"""
