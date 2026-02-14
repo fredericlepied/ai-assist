@@ -1,25 +1,49 @@
-"""Filesystem tools for ai-assist agent
-
-Provides tools for:
-- Reading files
-- Searching files with regex
-- Creating directories
-- Listing files/directories
-- Executing commands
-"""
+"""Filesystem tools for ai-assist agent"""
 
 import re
+import shlex
 import subprocess
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
+
+from .config import AiAssistConfig
 
 
 class FilesystemTools:
     """Internal filesystem tools for the agent"""
 
-    def __init__(self):
-        """Initialize filesystem tools"""
-        pass
+    def __init__(self, config: AiAssistConfig):
+        """Initialize filesystem tools
+
+        Args:
+            config: AiAssistConfig instance for security settings
+        """
+        self.allowed_commands = config.allowed_commands
+        self.allowed_paths = [Path(p).expanduser().resolve() for p in config.allowed_paths if p]
+        self.confirm_tools = config.confirm_tools
+        self.confirmation_callback: Callable[[str], Awaitable[bool]] | None = None
+
+    def _validate_path(self, path_str: str) -> str | None:
+        """Validate that a path is within allowed directories.
+
+        Returns:
+            Error message if path is not allowed, None if validation passes
+        """
+        if not self.allowed_paths:
+            return None
+
+        resolved = Path(path_str).expanduser().resolve()
+
+        for allowed in self.allowed_paths:
+            try:
+                resolved.relative_to(allowed)
+                return None
+            except ValueError:
+                continue
+
+        allowed_list = ", ".join(str(p) for p in self.allowed_paths)
+        return f"Error: Path '{resolved}' is outside allowed directories: {allowed_list}. Not allowed."
 
     def get_tool_definitions(self) -> list[dict]:
         """Get tool definitions for the agent
@@ -108,11 +132,11 @@ class FilesystemTools:
             },
             {
                 "name": "internal__execute_command",
-                "description": "Execute a bash command and return the output. Use this to run commands like grep, find, create files with echo/cat, or any other shell operations. Commands are executed in a shell environment. Be careful with commands that might take a long time or produce large output.",
+                "description": "Execute a command and return the output. Commands are checked against an allowlist. Non-allowlisted commands require user approval in interactive mode. Be careful with commands that might take a long time or produce large output.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "command": {"type": "string", "description": "The bash command to execute"},
+                        "command": {"type": "string", "description": "The command to execute"},
                         "working_directory": {
                             "type": "string",
                             "description": "Optional working directory for the command (default: current directory)",
@@ -154,6 +178,28 @@ class FilesystemTools:
         else:
             return f"Error: Unknown filesystem tool: {tool_name}"
 
+    async def _check_confirmation(self, tool_full_name: str, description: str) -> str | None:
+        """Check if a tool requires confirmation and prompt the user.
+
+        Args:
+            tool_full_name: Full tool name (e.g. "internal__create_directory")
+            description: Human-readable description of the action
+
+        Returns:
+            Error message if rejected/blocked, None if approved
+        """
+        if tool_full_name not in self.confirm_tools:
+            return None
+
+        if self.confirmation_callback is None:
+            return None
+
+        approved = await self.confirmation_callback(description)
+        if not approved:
+            return f"Error: Action rejected by user: {description}"
+
+        return None
+
     async def _read_file(self, args: dict) -> str:
         """Read a file from the filesystem"""
         path = args.get("path")
@@ -164,6 +210,10 @@ class FilesystemTools:
         if not path:
             return "Error: path parameter is required"
 
+        path_error = self._validate_path(path)
+        if path_error:
+            return path_error
+
         try:
             path_obj = Path(path).expanduser()
 
@@ -173,10 +223,8 @@ class FilesystemTools:
             if not path_obj.is_file():
                 return f"Error: Not a file: {path}"
 
-            # Read file with line range support
             with open(path_obj, encoding="utf-8", errors="replace") as f:
                 if line_start is not None or line_end is not None or max_lines is not None:
-                    # Read specific line range
                     lines: list[str] = []
                     start = line_start if line_start else 1
                     end = line_end if line_end else float("inf")
@@ -193,7 +241,6 @@ class FilesystemTools:
 
                     content = "\n".join(lines)
 
-                    # Still apply size limit
                     max_size = 15000
                     if len(content) > max_size:
                         content = content[:max_size] + f"\n\n... (truncated at {max_size} chars)"
@@ -207,11 +254,8 @@ class FilesystemTools:
                     return f"File contents ({path_obj.name}, {range_info}, {len(lines)} lines, {len(content)} chars):\n\n{content}"
 
                 else:
-                    # Read entire file (up to limit)
                     content = f.read()
-
-                    # Limit size to prevent context overflow
-                    max_size = 15000  # 15KB ≈ 4K tokens
+                    max_size = 15000
                     if len(content) > max_size:
                         return f"File contents (first {max_size} chars, total {len(content)} chars):\n\n{content[:max_size]}\n\n... (truncated - use line_start/line_end to read specific sections or search_in_file to find patterns)"
 
@@ -229,6 +273,10 @@ class FilesystemTools:
         if not path or not pattern:
             return "Error: path and pattern parameters are required"
 
+        path_error = self._validate_path(path)
+        if path_error:
+            return path_error
+
         try:
             path_obj = Path(path).expanduser()
 
@@ -238,13 +286,11 @@ class FilesystemTools:
             if not path_obj.is_file():
                 return f"Error: Not a file: {path}"
 
-            # Compile regex
             try:
                 regex = re.compile(pattern)
             except re.error as e:
                 return f"Error: Invalid regex pattern: {e}"
 
-            # Search file
             matches = []
             with open(path_obj, encoding="utf-8", errors="replace") as f:
                 for line_num, line in enumerate(f, 1):
@@ -273,13 +319,20 @@ class FilesystemTools:
         if not path:
             return "Error: path parameter is required"
 
+        path_error = self._validate_path(path)
+        if path_error:
+            return path_error
+
+        confirm_error = await self._check_confirmation("internal__create_directory", f"Create directory: {path}")
+        if confirm_error:
+            return confirm_error
+
         try:
             path_obj = Path(path).expanduser()
 
-            # Create directory (including parents)
             path_obj.mkdir(parents=True, exist_ok=True)
 
-            return f"✓ Directory created: {path_obj}"
+            return f"Directory created: {path_obj}"
 
         except Exception as e:
             return f"Error creating directory: {str(e)}"
@@ -292,6 +345,10 @@ class FilesystemTools:
         if not path:
             return "Error: path parameter is required"
 
+        path_error = self._validate_path(path)
+        if path_error:
+            return path_error
+
         try:
             path_obj = Path(path).expanduser()
 
@@ -301,7 +358,6 @@ class FilesystemTools:
             if not path_obj.is_dir():
                 return f"Error: Not a directory: {path}"
 
-            # List matching files
             items = list(path_obj.glob(pattern))
             items.sort()
 
@@ -322,8 +378,27 @@ class FilesystemTools:
         except Exception as e:
             return f"Error listing directory: {str(e)}"
 
+    async def _check_command_allowed(self, cmd_token: str, full_command: str) -> str | None:
+        """Check if a command is allowed, prompting for confirmation if needed.
+
+        Returns:
+            Error message if blocked, None if allowed
+        """
+        cmd_name = Path(cmd_token).name
+        if cmd_name in self.allowed_commands:
+            return None
+
+        if self.confirmation_callback is not None:
+            approved = await self.confirmation_callback(full_command)
+            if approved:
+                return None
+            return f"Error: Command '{full_command}' was rejected by the user. Try a different approach or use only allowed commands: {', '.join(self.allowed_commands)}."
+
+        allowed_list = ", ".join(self.allowed_commands)
+        return f"Error: Command '{cmd_name}' is not in the allowed commands list: {allowed_list}. Not allowed."
+
     async def _execute_command(self, args: dict) -> str:
-        """Execute a bash command"""
+        """Execute a command with allowlist enforcement"""
         command = args.get("command")
         working_dir = args.get("working_directory")
         timeout = args.get("timeout", 30)
@@ -331,23 +406,37 @@ class FilesystemTools:
         if not command:
             return "Error: command parameter is required"
 
-        # Limit timeout
-        timeout = min(timeout, 300)  # Max 5 minutes
+        # In interactive mode (confirmation_callback set), no timeout -- the user
+        # can press Escape to interrupt like any normal interaction.
+        # In non-interactive mode, enforce a timeout to prevent runaway commands.
+        if self.confirmation_callback is not None:
+            timeout = None
+        else:
+            timeout = min(timeout, 300)  # Max 5 minutes
 
         try:
-            # Prepare working directory
+            cmd_parts = shlex.split(command)
+        except ValueError as e:
+            return f"Error: Invalid command syntax: {e}"
+
+        if not cmd_parts:
+            return "Error: Empty command"
+
+        error = await self._check_command_allowed(cmd_parts[0], command)
+        if error:
+            return error
+
+        try:
             cwd = None
             if working_dir:
                 cwd = Path(working_dir).expanduser()
                 if not cwd.exists() or not cwd.is_dir():
                     return f"Error: Invalid working directory: {working_dir}"
 
-            # Execute command
             result = subprocess.run(
                 command, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False
             )
 
-            # Build output
             output = f"Command: {command}\n"
             if working_dir:
                 output += f"Working directory: {cwd}\n"
@@ -360,10 +449,9 @@ class FilesystemTools:
                 output += f"STDERR:\n{result.stderr}\n"
 
             if result.returncode != 0:
-                output += f"\n⚠️  Command failed with exit code {result.returncode}"
+                output += f"\nCommand failed with exit code {result.returncode}"
 
-            # Limit output size to prevent context overflow
-            max_size = 15000  # 15KB ≈ 4K tokens
+            max_size = 15000
             if len(output) > max_size:
                 output = (
                     output[:max_size]
@@ -373,6 +461,6 @@ class FilesystemTools:
             return output
 
         except subprocess.TimeoutExpired:
-            return f"Error: Command timed out after {timeout} seconds"
+            return f"Error: Command timed out after {timeout} seconds. Use interactive mode for long-running commands."
         except Exception as e:
             return f"Error executing command: {str(e)}"

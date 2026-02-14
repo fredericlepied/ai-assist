@@ -36,6 +36,7 @@ dev = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "pytest-xdist" },
     { name = "types-pyyaml" },
 ]
 
@@ -67,6 +68,7 @@ provides-extras = ["dev"]
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.14.0" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "types-pyyaml", specifier = ">=6.0.0" },
 ]
 

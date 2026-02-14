@@ -39,6 +39,9 @@ def mock_config():
     config.model = "claude-3-5-sonnet-20241022"
     config.mcp_servers = {}
     config.allow_skill_script_execution = False
+    config.allowed_commands = ["grep", "find", "wc", "sort", "head", "tail", "ls", "cat", "diff", "file", "stat"]
+    config.allowed_paths = ["~/.ai-assist", "/tmp/ai-assist"]
+    config.confirm_tools = ["internal__create_directory"]
     return config
 
 

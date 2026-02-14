@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from anthropic import Anthropic, AnthropicVertex
 from mcp import ClientSession, StdioServerParameters
 
+from .audit import AuditLogger
 from .config import AiAssistConfig, MCPServerConfig
 from .filesystem_tools import FilesystemTools
 from .identity import get_identity
@@ -69,7 +70,14 @@ class AiAssistAgent:
         self.schedule_tools = ScheduleTools()
 
         # Initialize internal filesystem tools
-        self.filesystem_tools = FilesystemTools()
+        self.filesystem_tools = FilesystemTools(config)
+
+        # Initialize audit logger
+        self.audit_logger = AuditLogger()
+
+        # Set by TUI to pause spinner/watcher during confirmation prompts
+        self._active_live: Any = None
+        self._active_escape_watcher: Any = None
 
         # Initialize schedule action tools (one-shot future actions)
         from ai_assist.schedule_action_tools import ScheduleActionTools
@@ -929,9 +937,13 @@ class AiAssistAgent:
                     }
                 )
 
+                self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=True)
+
                 return result_text
             except Exception as e:
-                return f"Error executing introspection tool {original_tool_name}: {str(e)}"
+                error_msg = f"Error executing introspection tool {original_tool_name}: {str(e)}"
+                self.audit_logger.log_tool_call(tool_name, arguments, error_msg, success=False)
+                return error_msg
 
         # Handle internal tools (report management, schedule management, filesystem, etc.)
         if server_name == "internal":
@@ -1002,9 +1014,14 @@ class AiAssistAgent:
                     }
                 )
 
+                is_success = not (isinstance(result_text, str) and result_text.startswith("Error:"))
+                self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=is_success)
+
                 return result_text
             except Exception as e:
-                return f"Error executing internal tool {original_tool_name}: {str(e)}"
+                error_msg = f"Error executing internal tool {original_tool_name}: {str(e)}"
+                self.audit_logger.log_tool_call(tool_name, arguments, error_msg, success=False)
+                return error_msg
 
         # Handle regular MCP server tools
         if server_name not in self.sessions:
@@ -1037,9 +1054,13 @@ class AiAssistAgent:
             if self.knowledge_graph and self.kg_save_enabled:
                 await self._save_tool_result_to_kg(tool_name, original_tool_name, arguments, result_text)
 
+            self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=True)
+
             return result_text
         except Exception as e:
-            return f"Error executing tool {original_tool_name}: {str(e)}"
+            error_msg = f"Error executing tool {original_tool_name}: {str(e)}"
+            self.audit_logger.log_tool_call(tool_name, arguments, error_msg, success=False)
+            return error_msg
 
     async def _save_tool_result_to_kg(self, tool_name: str, original_tool_name: str, arguments: dict, result_text: str):
         """Save tool result to knowledge graph if it contains entities
