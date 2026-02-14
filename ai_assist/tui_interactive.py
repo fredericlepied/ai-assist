@@ -287,46 +287,64 @@ async def handle_skill_management_command(command: str, agent: AiAssistAgent, co
     subcommand = parts[0]
 
     if subcommand == "install":
-        if len(parts) < 2:
-            console.print("[yellow]Usage: /skill/install <source>@<branch>[/yellow]")
-            console.print("Examples:")
-            console.print("  /skill/install anthropics/skills/skills/pdf@main")
-            console.print("  /skill/install /home/user/skills/perso@main")
-            return True
-
-        source_spec = parts[1]
-        with console.status(f"Installing skill from {source_spec}..."):
-            result = agent.skills_manager.install_skill(source_spec)
-
-        if result.startswith("Error"):
-            console.print(f"[red]{result}[/red]")
-        else:
-            console.print(f"[green]{result}[/green]")
-        return True
-
+        _handle_skill_install(parts, agent, console)
     elif subcommand == "uninstall":
-        if len(parts) < 2:
-            console.print("[yellow]Usage: /skill/uninstall <skill-name>[/yellow]")
-            return True
-
-        skill_name = parts[1]
-        result = agent.skills_manager.uninstall_skill(skill_name)
-
-        if result.startswith("Error"):
-            console.print(f"[red]{result}[/red]")
-        else:
-            console.print(f"[green]{result}[/green]")
-        return True
-
+        _handle_skill_uninstall(parts, agent, console)
     elif subcommand == "list":
-        result = agent.skills_manager.list_installed()
-        console.print(result)
-        return True
-
+        console.print(agent.skills_manager.list_installed())
+    elif subcommand == "search":
+        _handle_skill_search(parts, agent, console)
     else:
         console.print(f"[yellow]Unknown skill command: {subcommand}[/yellow]")
-        console.print("Available: /skill/install, /skill/uninstall, /skill/list")
-        return True
+        console.print("Available: /skill/install, /skill/uninstall, /skill/list, /skill/search")
+
+    return True
+
+
+def _handle_skill_install(parts: list[str], agent: AiAssistAgent, console: Console):
+    if len(parts) < 2:
+        console.print("[yellow]Usage: /skill/install <source>@<branch>[/yellow]")
+        console.print("Examples:")
+        console.print("  /skill/install anthropics/skills/skills/pdf@main")
+        console.print("  /skill/install /home/user/skills/perso@main")
+        console.print("  /skill/install clawhub:skill-slug")
+        console.print("  /skill/install clawhub:skill-slug@1.2.3")
+        return
+
+    source_spec = parts[1]
+    with console.status(f"Installing skill from {source_spec}..."):
+        result = agent.skills_manager.install_skill(source_spec)
+
+    if result.startswith("Error"):
+        console.print(f"[red]{result}[/red]")
+    else:
+        console.print(f"[green]{result}[/green]")
+
+
+def _handle_skill_uninstall(parts: list[str], agent: AiAssistAgent, console: Console):
+    if len(parts) < 2:
+        console.print("[yellow]Usage: /skill/uninstall <skill-name>[/yellow]")
+        return
+
+    skill_name = parts[1]
+    result = agent.skills_manager.uninstall_skill(skill_name)
+
+    if result.startswith("Error"):
+        console.print(f"[red]{result}[/red]")
+    else:
+        console.print(f"[green]{result}[/green]")
+
+
+def _handle_skill_search(parts: list[str], agent: AiAssistAgent, console: Console):
+    if len(parts) < 2:
+        console.print("[yellow]Usage: /skill/search <query>[/yellow]")
+        return
+
+    query = parts[1]
+    with console.status(f"Searching ClawHub for '{query}'..."):
+        result = agent.skills_manager.skills_loader.search_clawhub(query)
+
+    console.print(result)
 
 
 async def handle_prompt_command(
@@ -553,7 +571,8 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
             stdin_fd = sys.stdin.fileno()
             attrs = termios.tcgetattr(stdin_fd)
-            attrs[3] |= termios.ECHO | termios.ICANON
+            attrs[0] |= termios.ICRNL  # iflag: translate CR to NL
+            attrs[3] |= termios.ECHO | termios.ICANON  # lflag: echo + canonical
             termios.tcsetattr(stdin_fd, termios.TCSANOW, attrs)
         except (ImportError, termios.error, OSError):
             pass
@@ -927,15 +946,19 @@ async def handle_help_command(console: Console):
 - `/skill/install <source>@<branch>` - Install an Agent Skill
 - `/skill/uninstall <name>` - Uninstall an Agent Skill
 - `/skill/list` - List installed Agent Skills
+- `/skill/search <query>` - Search ClawHub registry for skills
 - `/exit` or `/quit` - Exit interactive mode
 - `/help` - Show this help
 
 ## Agent Skills 🚀
-Install specialized skills from git repositories or local paths:
+Install specialized skills from git repositories, local paths, or ClawHub:
 - Use `/skill/list` to see installed skills
+- Use `/skill/search <query>` to search the ClawHub registry
 - Install with `/skill/install <source>@<branch>`
   - Git: `/skill/install anthropics/skills/skills/pdf@main`
   - Local: `/skill/install /path/to/skill@main`
+  - ClawHub: `/skill/install clawhub:skill-slug`
+  - ClawHub (pinned): `/skill/install clawhub:skill-slug@1.2.3`
 - Uninstall with `/skill/uninstall <skill-name>`
 - Skills are automatically loaded into system prompt
 - Follows agentskills.io specification

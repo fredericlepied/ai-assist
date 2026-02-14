@@ -39,6 +39,7 @@ class AiAssistCompleter(Completer):
             "/skill/install",
             "/skill/uninstall",
             "/skill/list",
+            "/skill/search",
             "/exit",
             "/quit",
             "/help",
@@ -71,6 +72,7 @@ class AiAssistCompleter(Completer):
                 # Suggest example patterns
                 prefix = text.split(" ", 1)[1] if " " in text else ""
                 examples = [
+                    ("clawhub:skill-slug", "Install from ClawHub registry"),
                     ("anthropics/skills/skills/pdf@main", "Official PDF skill from Anthropic"),
                     ("anthropics/skills/skills/docx@main", "Official DOCX skill from Anthropic"),
                     ("/path/to/skill@main", "Local skill path example"),
@@ -173,9 +175,10 @@ class AiAssistCompleter(Completer):
             "/kg-viz": "Visualize knowledge graph in browser",
             "/prompts": "List available MCP prompts",
             "/search": "Search conversation history",
-            "/skill/install": "Install an Agent Skill from git or local path",
+            "/skill/install": "Install an Agent Skill from git, local path, or ClawHub",
             "/skill/uninstall": "Uninstall an installed Agent Skill",
             "/skill/list": "List all installed Agent Skills",
+            "/skill/search": "Search the ClawHub registry for skills",
             "/exit": "Exit interactive mode",
             "/quit": "Exit interactive mode",
             "/help": "Show help message",
