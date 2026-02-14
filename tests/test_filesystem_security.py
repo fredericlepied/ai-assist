@@ -1,9 +1,11 @@
 """Tests for filesystem tools security: command allowlist, path restrictions, and confirmations"""
 
+import json
+
 import pytest
 
 from ai_assist.config import AiAssistConfig
-from ai_assist.filesystem_tools import FilesystemTools
+from ai_assist.filesystem_tools import ALLOWED_COMMANDS_FILE, FilesystemTools
 
 # --- Phase 1: Command allowlist + user confirmation ---
 
@@ -308,3 +310,94 @@ async def test_configurable_confirm_tools_list(tmp_path):
 
     assert not callback_called
     assert "created" in result.lower()
+
+
+# --- Phase 5: Persistent command allowlist ---
+
+
+def test_add_permanent_allowed_command(tmp_path):
+    """add_permanent_allowed_command persists command to JSON file"""
+    config = AiAssistConfig(anthropic_api_key="test")
+    tools = FilesystemTools(config)
+
+    json_file = tmp_path / ALLOWED_COMMANDS_FILE
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+
+        tools.add_permanent_allowed_command("curl")
+
+    assert "curl" in tools.allowed_commands
+
+    data = json.loads(json_file.read_text())
+    assert "curl" in data
+
+
+def test_add_permanent_allowed_command_no_duplicate(tmp_path):
+    """Adding the same command twice does not create duplicates"""
+    config = AiAssistConfig(anthropic_api_key="test")
+    tools = FilesystemTools(config)
+
+    json_file = tmp_path / ALLOWED_COMMANDS_FILE
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+
+        tools.add_permanent_allowed_command("curl")
+        tools.add_permanent_allowed_command("curl")
+
+    data = json.loads(json_file.read_text())
+    assert data.count("curl") == 1
+
+
+def test_load_user_allowed_commands(tmp_path):
+    """Commands from persistent JSON file are loaded at init"""
+    json_file = tmp_path / ALLOWED_COMMANDS_FILE
+    json_file.write_text(json.dumps(["docker", "podman"]))
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+
+        config = AiAssistConfig(anthropic_api_key="test")
+        tools = FilesystemTools(config)
+
+    assert "docker" in tools.allowed_commands
+    assert "podman" in tools.allowed_commands
+
+
+def test_load_user_allowed_commands_no_file():
+    """Missing JSON file does not cause errors"""
+    config = AiAssistConfig(anthropic_api_key="test")
+    tools = FilesystemTools(config)
+    # Should not raise - the file simply doesn't exist
+    assert len(tools.allowed_commands) > 0  # has defaults
+
+
+def test_load_user_allowed_commands_corrupt_json(tmp_path):
+    """Corrupt JSON file is silently ignored"""
+    json_file = tmp_path / ALLOWED_COMMANDS_FILE
+    json_file.write_text("not valid json {{{")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+
+        config = AiAssistConfig(anthropic_api_key="test")
+        tools = FilesystemTools(config)
+
+    # Should still have defaults, no crash
+    assert len(tools.allowed_commands) > 0
+
+
+@pytest.mark.asyncio
+async def test_permanently_allowed_command_executes(tmp_path):
+    """A permanently added command runs without confirmation callback"""
+    json_file = tmp_path / ALLOWED_COMMANDS_FILE
+    json_file.write_text(json.dumps(["echo"]))
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+
+        config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
+        tools = FilesystemTools(config)
+
+    # echo is not in the config allowlist but is in the persistent file
+    result = await tools.execute_tool("execute_command", {"command": "echo persistent"})
+    assert "persistent" in result

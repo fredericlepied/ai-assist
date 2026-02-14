@@ -593,8 +593,14 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         prev_sigint = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, signal.default_int_handler)
         try:
-            answer = input("Allow? [y/N] ")
-            approved = answer.strip().lower() in ("y", "yes")
+            answer = await asyncio.to_thread(input, "Allow? [y/N/a(lways)] ")
+            choice = answer.strip().lower()
+            approved = choice in ("y", "yes", "a", "always")
+
+            if choice in ("a", "always"):
+                cmd_name = command.split()[0].rsplit("/", 1)[-1]
+                agent.filesystem_tools.add_permanent_allowed_command(cmd_name)
+                console.print(f"[green]'{cmd_name}' permanently added to allowed commands[/green]")
         except EOFError:
             approved = False
         except KeyboardInterrupt:
