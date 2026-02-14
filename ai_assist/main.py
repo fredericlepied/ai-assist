@@ -402,46 +402,28 @@ def kg_show_command(kg: KnowledgeGraph, entity_id: str):
         print(f"Entity not found: {entity_id}")
         return
 
-    # Handle based on type
-    if entity.entity_type == "jira_ticket":
-        context = queries.get_ticket_with_context(entity_id)
-        if context is None:
-            print(f"Could not load context for ticket: {entity_id}")
-            return
-        print(f"\nTicket: {context['id']}")
-        print("=" * 50)
-        print(f"Key: {context['data'].get('key', 'N/A')}")
-        print(f"Summary: {context['data'].get('summary', 'N/A')}")
-        print(f"Status: {context['data'].get('status', 'N/A')}")
-        print(f"Valid from: {context['valid_from']}")
-        print(f"Discovered: {context['discovered_at']}")
-        print(f"\nRelated jobs ({len(context['related_jobs'])}):")
-        for job in context["related_jobs"]:
-            print(f"  - {job['job_id']}: {job['data'].get('status', 'unknown')}")
-        print()
+    context = queries.get_entity_with_context(entity_id)
+    if context is None:
+        print(f"Could not load context for entity: {entity_id}")
         return
 
-    if entity.entity_type == "dci_job":
-        context = queries.get_job_with_context(entity_id)
-        if context is None:
-            print(f"Could not load context for job: {entity_id}")
-            return
-        print(f"\nJob: {context['id']}")
-        print("=" * 50)
-        print(f"Status: {context['data'].get('status', 'unknown')}")
-        print(f"Valid from: {context['valid_from']}")
-        if context["valid_to"]:
-            print(f"Valid to: {context['valid_to']}")
-        print(f"Discovered: {context['discovered_at']}")
-        print(f"Discovery lag: {context['discovery_lag']}")
-        print(f"\nComponents ({len(context['components'])}):")
-        for comp in context["components"]:
-            print(f"  - {comp['data']['type']} {comp['data'].get('version', '')}")
-        print(f"\nTickets ({len(context['tickets'])}):")
-        for ticket in context["tickets"]:
-            print(f"  - {ticket['data'].get('key', ticket['entity_id'])}")
-        print()
-        return
+    print(f"\n{entity.entity_type}: {context['id']}")
+    print("=" * 50)
+    for key, value in context["data"].items():
+        print(f"{key}: {value}")
+    print(f"Valid from: {context['valid_from']}")
+    if context["valid_to"]:
+        print(f"Valid to: {context['valid_to']}")
+    print(f"Discovered: {context['discovered_at']}")
+    print(f"Discovery lag: {context['discovery_lag']}")
+
+    for rel_type, related_entities in context["related_by_type"].items():
+        print(f"\n{rel_type} ({len(related_entities)}):")
+        for rel in related_entities:
+            label = rel["data"].get("key") or rel["data"].get("name") or rel["entity_id"]
+            print(f"  - {label} ({rel['relationship']})")
+    print()
+    return
 
     # Fallback to basic entity lookup
     print(f"\nEntity: {entity.id}")
@@ -551,7 +533,7 @@ async def main_async():
         sys.exit(1)
 
     # Define which commands need the agent
-    kg_commands = ["kg-stats", "kg-asof", "kg-late", "kg-changes", "kg-show"]
+    kg_commands = ["kg-stats", "kg-asof", "kg-late", "kg-changes", "kg-show", "kg-viz"]
     identity_commands = ["identity-show", "identity-init"]
     state_commands = ["status", "clear-cache"]
     action_commands = ["cleanup-actions"]
@@ -610,6 +592,7 @@ async def main_async():
                 print("  /kg-late [min]     - Show late discoveries (default: 30 min)")
                 print("  /kg-changes [hrs]  - Show recent changes (default: 1 hour)")
                 print("  /kg-show <id>      - Show entity details with context")
+                print("  /kg-viz            - Visualize knowledge graph in browser")
                 print("  /cleanup-actions   - Archive old completed/failed actions")
                 print("\nRun without arguments for interactive mode\n")
                 sys.exit(0)
@@ -663,6 +646,12 @@ async def main_async():
                     sys.exit(1)
                 entity_id = sys.argv[2]
                 kg_show_command(knowledge_graph, entity_id)
+            elif command == "kg-viz":
+                from .kg_visualization import open_kg_visualization
+
+                filepath = open_kg_visualization(knowledge_graph)
+                print("Knowledge graph visualization opened in browser")
+                print(f"File: {filepath}")
             elif command == "cleanup-actions":
                 from .scheduled_actions import ScheduledActionManager
 

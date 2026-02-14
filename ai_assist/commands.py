@@ -10,6 +10,7 @@ INTERACTIVE_COMMANDS = [
     "/help",
     "/clear",
     "/kg-save",
+    "/kg-viz",
 ]
 
 # Valid commands at CLI level
@@ -27,6 +28,7 @@ CLI_COMMANDS = [
     "/kg-changes",
     "/kg-show",
     "/cleanup-actions",
+    "/kg-viz",
     "/help",
 ]
 

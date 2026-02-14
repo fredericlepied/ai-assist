@@ -1,5 +1,6 @@
 """High-level query interface for the knowledge graph"""
 
+from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -127,57 +128,48 @@ class KnowledgeGraphQueries:
 
         return late_discoveries
 
-    def get_job_with_context(self, job_id: str) -> dict[str, Any] | None:
-        """Get a job with all related entities (components, tickets, etc.)
+    def get_entity_with_context(self, entity_id: str) -> dict[str, Any] | None:
+        """Get an entity with all related entities, grouped by type
 
         Args:
-            job_id: The job entity ID
+            entity_id: The entity ID
 
         Returns:
-            Dictionary with job data and all related entities
+            Dictionary with entity data and related entities grouped by type
         """
-        job = self.kg.get_entity(job_id)
-        if not job:
+        entity = self.kg.get_entity(entity_id)
+        if not entity:
             return None
 
         # Get related entities
-        related = self.kg.get_related_entities(job_id, direction="both")
+        related = self.kg.get_related_entities(entity_id, direction="both")
 
-        # Organize by relationship type
-        components = []
-        tickets = []
-        other = []
-
-        for rel, entity in related:
+        # Group by entity type dynamically
+        related_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for rel, rel_entity in related:
             rel_info = {
-                "entity_id": entity.id,
-                "entity_type": entity.entity_type,
-                "data": entity.data,
+                "entity_id": rel_entity.id,
+                "entity_type": rel_entity.entity_type,
+                "data": rel_entity.data,
+                "valid_from": rel_entity.valid_from.isoformat(),
                 "relationship": rel.rel_type,
                 "properties": rel.properties,
             }
-
-            if entity.entity_type == "component":
-                components.append(rel_info)
-            elif entity.entity_type == "jira_ticket":
-                tickets.append(rel_info)
-            else:
-                other.append(rel_info)
+            related_by_type[rel_entity.entity_type].append(rel_info)
 
         # Calculate discovery lag
-        lag_seconds = (job.tx_from - job.valid_from).total_seconds()
+        lag_seconds = (entity.tx_from - entity.valid_from).total_seconds()
 
         return {
-            "id": job.id,
-            "type": job.entity_type,
-            "data": job.data,
-            "valid_from": job.valid_from.isoformat(),
-            "valid_to": job.valid_to.isoformat() if job.valid_to else None,
-            "discovered_at": job.tx_from.isoformat(),
+            "id": entity.id,
+            "type": entity.entity_type,
+            "data": entity.data,
+            "valid_from": entity.valid_from.isoformat(),
+            "valid_to": entity.valid_to.isoformat() if entity.valid_to else None,
+            "discovered_at": entity.tx_from.isoformat(),
             "discovery_lag": self._format_duration(lag_seconds),
-            "components": components,
-            "tickets": tickets,
-            "other_related": other,
+            "related_by_type": dict(related_by_type),
+            "related_count": sum(len(v) for v in related_by_type.values()),
         }
 
     def analyze_discovery_lag(self, entity_type: str, days: int = 7) -> dict[str, Any]:
@@ -233,44 +225,6 @@ class KnowledgeGraphQueries:
             "p95_lag_minutes": round(sorted_lags[p95_idx], 1) if p95_idx < len(sorted_lags) else None,
             "avg_lag_human": self._format_duration(avg_lag * 60),
             "max_lag_human": self._format_duration(max_lag * 60),
-        }
-
-    def get_ticket_with_context(self, ticket_id: str) -> dict[str, Any] | None:
-        """Get a ticket with all related jobs
-
-        Args:
-            ticket_id: The ticket entity ID
-
-        Returns:
-            Dictionary with ticket data and related jobs
-        """
-        ticket = self.kg.get_entity(ticket_id)
-        if not ticket:
-            return None
-
-        # Get related jobs (incoming relationships)
-        related = self.kg.get_related_entities(ticket_id, direction="incoming")
-
-        related_jobs = []
-        for rel, entity in related:
-            if entity.entity_type == "dci_job":
-                related_jobs.append(
-                    {
-                        "job_id": entity.id,
-                        "data": entity.data,
-                        "valid_from": entity.valid_from.isoformat(),
-                        "relationship": rel.rel_type,
-                    }
-                )
-
-        return {
-            "id": ticket.id,
-            "type": ticket.entity_type,
-            "data": ticket.data,
-            "valid_from": ticket.valid_from.isoformat(),
-            "discovered_at": ticket.tx_from.isoformat(),
-            "related_jobs": related_jobs,
-            "job_count": len(related_jobs),
         }
 
     @staticmethod

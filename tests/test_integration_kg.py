@@ -138,27 +138,27 @@ def test_end_to_end_workflow():
     all_late = queries.find_late_discoveries(min_delay_minutes=1)
     assert len(all_late) == 2  # Both jobs discovered late
 
-    # Test 4: Get job with context
-    context = queries.get_job_with_context("job-integration-1")
+    # Test 4: Get entity with context (job 1)
+    context = queries.get_entity_with_context("job-integration-1")
     assert context is not None
     assert context["data"]["status"] == "failure"
-    assert len(context["components"]) == 1
-    assert len(context["tickets"]) == 1
-    assert context["components"][0]["data"]["type"] == "ocp"
-    assert context["tickets"][0]["data"]["key"] == "TEST-1"
+    assert len(context["related_by_type"].get("component", [])) == 1
+    assert len(context["related_by_type"].get("jira_ticket", [])) == 1
+    assert context["related_by_type"]["component"][0]["data"]["type"] == "ocp"
+    assert context["related_by_type"]["jira_ticket"][0]["data"]["key"] == "TEST-1"
 
-    # Test 5: Get job 2 with multiple components
-    context2 = queries.get_job_with_context("job-integration-2")
-    assert len(context2["components"]) == 2
-    comp_types = {c["data"]["type"] for c in context2["components"]}
+    # Test 5: Get entity with context (job 2 with multiple components)
+    context2 = queries.get_entity_with_context("job-integration-2")
+    assert len(context2["related_by_type"].get("component", [])) == 2
+    comp_types = {c["data"]["type"] for c in context2["related_by_type"]["component"]}
     assert comp_types == {"ocp", "storage"}
 
-    # Test 6: Get ticket with related jobs
-    ticket_context = queries.get_ticket_with_context("ticket-integration")
+    # Test 6: Get entity with context (ticket with related jobs)
+    ticket_context = queries.get_entity_with_context("ticket-integration")
     assert ticket_context is not None
-    assert len(ticket_context["related_jobs"]) == 2
-    job_ids = {j["job_id"] for j in ticket_context["related_jobs"]}
-    assert job_ids == {"job-integration-1", "job-integration-2"}
+    assert ticket_context["related_count"] == 2
+    related_ids = {e["entity_id"] for entities in ticket_context["related_by_type"].values() for e in entities}
+    assert related_ids == {"job-integration-1", "job-integration-2"}
 
     # Test 7: Temporal snapshot (at 10:30, before first job discovered)
     snapshot_early = queries.what_did_we_know_at(base_time + timedelta(minutes=30))

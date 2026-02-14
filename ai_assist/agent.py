@@ -121,11 +121,14 @@ class AiAssistAgent:
 
         # Initialize knowledge management tools
         self.knowledge_tools: Any = None
+        self.kg_query_tools: Any = None
         if self.knowledge_graph:
+            from ai_assist.kg_query_tools import KGQueryTools
             from ai_assist.knowledge_tools import KnowledgeTools
 
             self.knowledge_tools = KnowledgeTools(self.knowledge_graph)
             self.knowledge_tools.agent = self
+            self.kg_query_tools = KGQueryTools(self.knowledge_graph)
 
         # Track synthesis flag
         self._pending_synthesis: Any = None
@@ -191,6 +194,13 @@ class AiAssistAgent:
             if knowledge_tool_defs:
                 self.available_tools.extend(knowledge_tool_defs)
                 print(f"✓ Added {len(knowledge_tool_defs)} knowledge management tools")
+
+        # Add KG query tools
+        if self.kg_query_tools:
+            kg_query_tool_defs = self.kg_query_tools.get_tool_definitions()
+            if kg_query_tool_defs:
+                self.available_tools.extend(kg_query_tool_defs)
+                print(f"✓ Added {len(kg_query_tool_defs)} KG query tools")
 
         # Add internal report tools
         report_tool_defs = self.report_tools.get_tool_definitions()
@@ -948,6 +958,13 @@ class AiAssistAgent:
                 script_tools = ["execute_skill_script"]
                 schedule_action_tools = ["schedule_action"]
                 knowledge_tools = ["save_knowledge", "search_knowledge", "trigger_synthesis"]
+                kg_query_tool_names = [
+                    "kg_recent_changes",
+                    "kg_late_discoveries",
+                    "kg_discovery_lag_stats",
+                    "kg_entity_context",
+                    "kg_stats",
+                ]
 
                 if original_tool_name in schedule_tools:
                     result_text = await self.schedule_tools.execute_tool(original_tool_name, arguments)
@@ -964,6 +981,11 @@ class AiAssistAgent:
                         result_text = await self.knowledge_tools.execute_tool(original_tool_name, arguments)
                     else:
                         result_text = "Error: Knowledge tools not available (knowledge graph disabled)"
+                elif original_tool_name in kg_query_tool_names:
+                    if self.kg_query_tools:
+                        result_text = await self.kg_query_tools.execute_tool(original_tool_name, arguments)
+                    else:
+                        result_text = "Error: KG query tools not available (knowledge graph disabled)"
                 else:
                     # Default to report tools
                     result_text = await self.report_tools.execute_tool(original_tool_name, arguments)

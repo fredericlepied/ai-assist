@@ -672,6 +672,10 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                     console.print("\n[green]✓ Conversation memory cleared[/green]\n")
                     continue
 
+                if user_input.lower() == "/kg-viz":
+                    await handle_kg_viz_command(kg_context.knowledge_graph if kg_context else None, console)
+                    continue
+
                 if user_input.lower().startswith("/kg-save"):
                     parts = user_input.split()
                     if len(parts) > 1:
@@ -849,6 +853,18 @@ async def handle_prompt_info_command(agent: AiAssistAgent, console: Console, pro
     console.print()
 
 
+async def handle_kg_viz_command(kg, console: Console):
+    """Handle /kg-viz command"""
+    from .kg_visualization import open_kg_visualization
+
+    if kg is None:
+        console.print("\n[red]Knowledge graph not available[/red]\n")
+        return
+    filepath = open_kg_visualization(kg)
+    console.print("\n[green]Knowledge graph visualization opened in browser[/green]")
+    console.print(f"[dim]File: {filepath}[/dim]\n")
+
+
 async def handle_help_command(console: Console):
     """Handle /help command"""
     help_text = """
@@ -860,6 +876,7 @@ async def handle_help_command(console: Console):
 - `/clear-cache` - Clear expired cache
 - `/clear` - Clear conversation memory (start fresh)
 - `/kg-save [on|off]` - Toggle knowledge graph auto-save
+- `/kg-viz` - Visualize knowledge graph in browser
 - `/prompts` - List available MCP prompts
 - `/prompt-info <server/prompt>` - Show detailed prompt info
 - `/server/prompt` - Load an MCP prompt (e.g., `/dci/rca`)

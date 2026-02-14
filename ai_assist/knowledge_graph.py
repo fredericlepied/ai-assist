@@ -128,7 +128,11 @@ class KnowledgeGraph:
             db_path = str(get_config_dir() / "knowledge_graph.db")
 
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, timeout=30)
+        try:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass  # WAL mode is best-effort; falls back to default journal mode
         self._create_schema()
 
     def _create_schema(self):
@@ -708,6 +712,26 @@ class KnowledgeGraph:
             "total_relationships": total_relationships,
             "relationships_by_type": relationship_counts,
         }
+
+    def get_all_current_entities(self) -> list[Entity]:
+        """Get all current entities (tx_to IS NULL)
+
+        Returns:
+            List of all entities that ai-assist currently believes
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM entities WHERE tx_to IS NULL ORDER BY entity_type, tx_from DESC")
+        return [Entity.from_row(row) for row in cursor.fetchall()]
+
+    def get_all_current_relationships(self) -> list[Relationship]:
+        """Get all current relationships (tx_to IS NULL)
+
+        Returns:
+            List of all relationships that ai-assist currently believes
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM relationships WHERE tx_to IS NULL")
+        return [Relationship.from_row(row) for row in cursor.fetchall()]
 
     def close(self):
         """Close the database connection"""
