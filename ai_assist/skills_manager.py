@@ -17,7 +17,7 @@ class InstalledSkill(BaseModel):
 
     name: str
     source: str  # Original source spec (e.g., 'anthropics/skills/skills/pdf' or '/path/to/skill')
-    source_type: str  # 'git' or 'local'
+    source_type: str  # 'git', 'local', or 'clawhub'
     branch: str
     installed_at: str  # ISO timestamp
     cache_path: str  # Path to cached skill
@@ -91,6 +91,35 @@ class SkillsManager:
         try:
             # Parse source spec
             source, branch = self._parse_source_spec(source_spec)
+
+            # ClawHub registry
+            if source.startswith("clawhub:"):
+                slug = source[len("clawhub:") :]
+                source_type = "clawhub"
+                version = branch if branch != "main" else None
+                content = self.skills_loader.load_skill_from_clawhub(slug, version)
+                cache_path = str(content.metadata.skill_path)
+
+                skill_name = content.metadata.name
+
+                existing = next((s for s in self.installed_skills if s.name == skill_name), None)
+                if existing:
+                    return f"Error: Skill '{skill_name}' is already installed. Uninstall first to reinstall."
+
+                installed_skill = InstalledSkill(
+                    name=skill_name,
+                    source=source,
+                    source_type=source_type,
+                    branch=branch,
+                    installed_at=datetime.now().isoformat(),
+                    cache_path=cache_path,
+                )
+
+                self.installed_skills.append(installed_skill)
+                self.loaded_skills[skill_name] = content
+                self._save_installed_skills()
+
+                return f"Skill '{skill_name}' installed successfully"
 
             # Determine source type
             source_path = Path(source)

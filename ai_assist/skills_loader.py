@@ -1,13 +1,20 @@
 """Load and manage Agent Skills following agentskills.io specification"""
 
+import io
+import os
 import re
+import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 
+import httpx
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from .config import get_config_dir
+
+CLAWHUB_DEFAULT_REGISTRY = "https://clawhub.ai"
 
 
 class SkillMetadata(BaseModel):
@@ -19,7 +26,7 @@ class SkillMetadata(BaseModel):
     description: str  # Required, 1-1024 chars
     license: str | None = None
     compatibility: str | None = None
-    metadata: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, object] = Field(default_factory=dict)
     allowed_tools: list[str] = Field(default_factory=list)
 
     # Internal fields
@@ -142,6 +149,107 @@ class SkillsLoader:
         assets = self._discover_files(skill_path / "assets")
 
         return SkillContent(metadata=metadata, body=body, scripts=scripts, references=references, assets=assets)
+
+    def load_skill_from_clawhub(self, slug: str, version: str | None = None) -> SkillContent:
+        """Load a skill from the ClawHub registry.
+
+        1. GET /api/v1/skills/{slug} — resolve latest version if none specified
+        2. GET /api/v1/download?slug=...&version=... — download ZIP
+        3. Extract to cache dir, load via load_skill_from_local
+        """
+        registry = self._get_clawhub_registry_url()
+        timeout = httpx.Timeout(30.0)
+
+        try:
+            meta_resp = httpx.get(f"{registry}/api/v1/skills/{slug}", timeout=timeout)
+            meta_resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise ValueError(f"Skill '{slug}' not found on ClawHub registry") from e
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            raise ValueError(f"Failed to connect to ClawHub registry: {e}") from e
+
+        metadata = meta_resp.json()
+
+        # Strip leading 'v' from user-provided version (e.g. v1.0.0 -> 1.0.0)
+        if version and version.startswith("v"):
+            version = version[1:]
+
+        # Resolve version from metadata if not specified
+        resolved_version = version or metadata.get("latestVersion", {}).get("version")
+
+        # Build download params: only pass version if we resolved one
+        download_params: dict[str, str] = {"slug": slug}
+        if resolved_version:
+            download_params["version"] = resolved_version
+        else:
+            resolved_version = "latest"
+
+        try:
+            download_resp = httpx.get(
+                f"{registry}/api/v1/download",
+                params=download_params,
+                timeout=timeout,
+                follow_redirects=True,
+            )
+            download_resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                import time
+
+                reset_ts = e.response.headers.get("x-ratelimit-reset", e.response.headers.get("retry-after", ""))
+                try:
+                    wait = max(1, int(reset_ts) - int(time.time()))
+                except (ValueError, TypeError):
+                    wait = 60
+                raise ValueError(f"ClawHub rate limit exceeded. Try again in {wait}s") from e
+            raise ValueError(f"Failed to download skill '{slug}' version {resolved_version}") from e
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            raise ValueError(f"Failed to connect to ClawHub registry: {e}") from e
+
+        cache_name = f"clawhub_{slug}_{resolved_version}"
+        skill_cache_dir = self.cache_dir / cache_name
+
+        if skill_cache_dir.exists():
+            shutil.rmtree(skill_cache_dir)
+        skill_cache_dir.mkdir(parents=True, exist_ok=True)
+
+        with zipfile.ZipFile(io.BytesIO(download_resp.content)) as zf:
+            zf.extractall(skill_cache_dir)
+
+        return self.load_skill_from_local(skill_cache_dir, source_type="clawhub")
+
+    def search_clawhub(self, query: str, limit: int = 10) -> str:
+        """Search ClawHub registry. Returns formatted results string."""
+        registry = self._get_clawhub_registry_url()
+
+        try:
+            resp = httpx.get(
+                f"{registry}/api/v1/search", params={"q": query, "limit": limit}, timeout=httpx.Timeout(30.0)
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError:
+            return "Error: Failed to search ClawHub registry"
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            return f"Error: Failed to connect to ClawHub registry: {e}"
+
+        data = resp.json()
+        results = data.get("results", [])
+
+        if not results:
+            return f"No skills found matching '{query}'"
+
+        lines = [f"ClawHub search results for '{query}' ({data.get('total', len(results))} total):\n"]
+        for skill in results:
+            lines.append(f"  {skill['slug']}  v{skill.get('version', '?')}")
+            lines.append(f"    {skill.get('description', '')}")
+            lines.append(f"    Install: /skill/install clawhub:{skill['slug']}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def _get_clawhub_registry_url(self) -> str:
+        """Return registry URL from CLAWHUB_REGISTRY env var or default."""
+        return os.environ.get("CLAWHUB_REGISTRY", CLAWHUB_DEFAULT_REGISTRY)
 
     def _parse_skill_file(
         self, skill_file: Path, skill_path: Path, source_type: str, source_url: str | None

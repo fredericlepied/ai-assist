@@ -1,10 +1,12 @@
 """Tests for skills manager"""
 
 import json
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from ai_assist.skills_loader import SkillsLoader
+from ai_assist.skills_loader import SkillContent, SkillMetadata, SkillsLoader
 from ai_assist.skills_manager import SkillsManager
 
 
@@ -195,3 +197,45 @@ def test_persistence(skills_manager, temp_installed_skills_file):
 
     assert len(new_manager.installed_skills) == 1
     assert new_manager.installed_skills[0].name == "hello"
+
+
+def _make_clawhub_content(slug="test-skill", cache_path="/tmp/clawhub-cache"):
+    """Helper: build a SkillContent as if returned by load_skill_from_clawhub"""
+    return SkillContent(
+        metadata=SkillMetadata(
+            name=slug,
+            description="A skill from ClawHub",
+            skill_path=Path(cache_path),
+            source_type="clawhub",
+            source_url="https://clawhub.ai",
+        ),
+        body="# Test\nClawHub skill body",
+    )
+
+
+def test_install_clawhub_skill(skills_manager):
+    """Test installing a skill with clawhub: prefix"""
+    content = _make_clawhub_content()
+
+    with patch.object(skills_manager.skills_loader, "load_skill_from_clawhub", return_value=content) as mock_load:
+        result = skills_manager.install_skill("clawhub:test-skill@1.2.3")
+
+    assert "installed successfully" in result
+    assert len(skills_manager.installed_skills) == 1
+
+    skill = skills_manager.installed_skills[0]
+    assert skill.source_type == "clawhub"
+    assert skill.name == "test-skill"
+
+    mock_load.assert_called_once_with("test-skill", "1.2.3")
+
+
+def test_install_clawhub_skill_default_version(skills_manager):
+    """Test that clawhub:slug without @version passes None to loader"""
+    content = _make_clawhub_content()
+
+    with patch.object(skills_manager.skills_loader, "load_skill_from_clawhub", return_value=content) as mock_load:
+        result = skills_manager.install_skill("clawhub:test-skill")
+
+    assert "installed successfully" in result
+    mock_load.assert_called_once_with("test-skill", None)
