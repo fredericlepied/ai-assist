@@ -294,3 +294,46 @@ def test_search_clawhub_no_results():
         result = loader.search_clawhub("nonexistent-skill-xyz")
 
     assert "No skills found" in result
+
+
+def test_search_skills_sh():
+    """Test searching skills.sh registry"""
+    loader = SkillsLoader()
+
+    search_json = {
+        "skills": [
+            {"id": "steipete/clawdis/weather", "name": "weather", "source": "steipete/clawdis", "installs": 117},
+            {
+                "id": "vikiboss/60s-skills/weather-query",
+                "name": "weather-query",
+                "source": "vikiboss/60s-skills",
+                "installs": 27,
+            },
+        ],
+    }
+
+    def fake_get(url, **kwargs):
+        return _FakeResponse(json_data=search_json)
+
+    with patch("ai_assist.skills_loader.httpx.get", side_effect=fake_get):
+        result = loader.search_skills_sh("weather")
+
+    assert "weather" in result
+    assert "steipete/clawdis" in result
+    assert "117" in result
+    assert "/skill/install" in result
+
+
+def test_search_skills_sh_no_results():
+    """Test skills.sh search with no results"""
+    loader = SkillsLoader()
+
+    search_json = {"skills": []}
+
+    def fake_get(url, **kwargs):
+        return _FakeResponse(json_data=search_json)
+
+    with patch("ai_assist.skills_loader.httpx.get", side_effect=fake_get):
+        result = loader.search_skills_sh("nonexistent-xyz")
+
+    assert "No skills found" in result

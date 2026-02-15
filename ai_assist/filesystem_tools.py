@@ -1,5 +1,6 @@
 """Filesystem tools for ai-assist agent"""
 
+import json
 import re
 import shlex
 import subprocess
@@ -7,7 +8,9 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from .config import AiAssistConfig
+from .config import AiAssistConfig, get_config_dir
+
+ALLOWED_COMMANDS_FILE = "allowed_commands.json"
 
 
 class FilesystemTools:
@@ -19,10 +22,44 @@ class FilesystemTools:
         Args:
             config: AiAssistConfig instance for security settings
         """
-        self.allowed_commands = config.allowed_commands
+        self.allowed_commands = list(config.allowed_commands)
+        self._load_user_allowed_commands()
         self.allowed_paths = [Path(p).expanduser().resolve() for p in config.allowed_paths if p]
         self.confirm_tools = config.confirm_tools
         self.confirmation_callback: Callable[[str], Awaitable[bool]] | None = None
+
+    def _load_user_allowed_commands(self):
+        """Load user-added allowed commands from persistent file."""
+        path = get_config_dir() / ALLOWED_COMMANDS_FILE
+        if not path.exists():
+            return
+        try:
+            with open(path) as f:
+                commands = json.load(f)
+            for cmd in commands:
+                if cmd not in self.allowed_commands:
+                    self.allowed_commands.append(cmd)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    def add_permanent_allowed_command(self, cmd_name: str):
+        """Add a command to the persistent allowlist."""
+        if cmd_name not in self.allowed_commands:
+            self.allowed_commands.append(cmd_name)
+
+        path = get_config_dir() / ALLOWED_COMMANDS_FILE
+        try:
+            existing: list[str] = []
+            if path.exists():
+                with open(path) as f:
+                    existing = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            existing = []
+
+        if cmd_name not in existing:
+            existing.append(cmd_name)
+            with open(path, "w") as f:
+                json.dump(existing, f, indent=2)
 
     def _validate_path(self, path_str: str) -> str | None:
         """Validate that a path is within allowed directories.

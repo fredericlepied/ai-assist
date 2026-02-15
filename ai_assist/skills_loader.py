@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .config import get_config_dir
 
 CLAWHUB_DEFAULT_REGISTRY = "https://clawhub.ai"
+SKILLS_SH_DEFAULT_REGISTRY = "https://skills.sh"
 
 
 class SkillMetadata(BaseModel):
@@ -250,6 +251,44 @@ class SkillsLoader:
     def _get_clawhub_registry_url(self) -> str:
         """Return registry URL from CLAWHUB_REGISTRY env var or default."""
         return os.environ.get("CLAWHUB_REGISTRY", CLAWHUB_DEFAULT_REGISTRY)
+
+    def search_skills_sh(self, query: str, limit: int = 10) -> str:
+        """Search skills.sh registry. Returns formatted results string."""
+        registry = self._get_skills_sh_registry_url()
+
+        try:
+            resp = httpx.get(
+                f"{registry}/api/search",
+                params={"q": query, "limit": limit},
+                timeout=httpx.Timeout(30.0),
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError:
+            return "Error: Failed to search skills.sh registry"
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            return f"Error: Failed to connect to skills.sh registry: {e}"
+
+        data = resp.json()
+        results = data.get("skills", [])
+
+        if not results:
+            return f"No skills found matching '{query}'"
+
+        lines = [f"skills.sh results for '{query}':\n"]
+        for skill in results:
+            source = skill.get("source", skill.get("id", ""))
+            installs = skill.get("installs", 0)
+            installs_str = f"  ({installs} installs)" if installs else ""
+            lines.append(f"  {skill['name']}{installs_str}")
+            lines.append(f"    Source: {source}")
+            lines.append(f"    Install: /skill/install {source}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def _get_skills_sh_registry_url(self) -> str:
+        """Return registry URL from SKILLS_SH_REGISTRY env var or default."""
+        return os.environ.get("SKILLS_SH_REGISTRY", SKILLS_SH_DEFAULT_REGISTRY)
 
     def _parse_skill_file(
         self, skill_file: Path, skill_path: Path, source_type: str, source_url: str | None

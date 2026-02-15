@@ -100,6 +100,9 @@ class SkillsManager:
                 content = self.skills_loader.load_skill_from_clawhub(slug, version)
                 cache_path = str(content.metadata.skill_path)
 
+                # Extract installed version from cache dir name (clawhub_{slug}_{version})
+                installed_version = Path(cache_path).name.rsplit("_", 1)[-1]
+
                 skill_name = content.metadata.name
 
                 existing = next((s for s in self.installed_skills if s.name == skill_name), None)
@@ -110,7 +113,7 @@ class SkillsManager:
                     name=skill_name,
                     source=source,
                     source_type=source_type,
-                    branch=branch,
+                    branch=installed_version,
                     installed_at=datetime.now().isoformat(),
                     cache_path=cache_path,
                 )

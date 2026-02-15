@@ -199,8 +199,9 @@ def test_persistence(skills_manager, temp_installed_skills_file):
     assert new_manager.installed_skills[0].name == "hello"
 
 
-def _make_clawhub_content(slug="test-skill", cache_path="/tmp/clawhub-cache"):
+def _make_clawhub_content(slug="test-skill", version="1.0.0"):
     """Helper: build a SkillContent as if returned by load_skill_from_clawhub"""
+    cache_path = f"/tmp/skills-cache/clawhub_{slug}_{version}"
     return SkillContent(
         metadata=SkillMetadata(
             name=slug,
@@ -214,8 +215,8 @@ def _make_clawhub_content(slug="test-skill", cache_path="/tmp/clawhub-cache"):
 
 
 def test_install_clawhub_skill(skills_manager):
-    """Test installing a skill with clawhub: prefix"""
-    content = _make_clawhub_content()
+    """Test installing a skill with clawhub: prefix stores version not branch"""
+    content = _make_clawhub_content(version="1.2.3")
 
     with patch.object(skills_manager.skills_loader, "load_skill_from_clawhub", return_value=content) as mock_load:
         result = skills_manager.install_skill("clawhub:test-skill@1.2.3")
@@ -226,13 +227,14 @@ def test_install_clawhub_skill(skills_manager):
     skill = skills_manager.installed_skills[0]
     assert skill.source_type == "clawhub"
     assert skill.name == "test-skill"
+    assert skill.branch == "1.2.3"
 
     mock_load.assert_called_once_with("test-skill", "1.2.3")
 
 
 def test_install_clawhub_skill_default_version(skills_manager):
     """Test that clawhub:slug without @version passes None to loader"""
-    content = _make_clawhub_content()
+    content = _make_clawhub_content(version="2.0.0")
 
     with patch.object(skills_manager.skills_loader, "load_skill_from_clawhub", return_value=content) as mock_load:
         result = skills_manager.install_skill("clawhub:test-skill")

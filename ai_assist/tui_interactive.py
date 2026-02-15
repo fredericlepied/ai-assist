@@ -342,10 +342,15 @@ def _handle_skill_search(parts: list[str], agent: AiAssistAgent, console: Consol
         return
 
     query = parts[1]
-    with console.status(f"Searching ClawHub for '{query}'..."):
-        result = agent.skills_manager.skills_loader.search_clawhub(query)
+    loader = agent.skills_manager.skills_loader
 
-    console.print(result)
+    with console.status(f"Searching registries for '{query}'..."):
+        clawhub_result = loader.search_clawhub(query)
+        skills_sh_result = loader.search_skills_sh(query)
+
+    console.print(clawhub_result)
+    console.print("")
+    console.print(skills_sh_result)
 
 
 async def handle_prompt_command(
@@ -588,8 +593,14 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         prev_sigint = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, signal.default_int_handler)
         try:
-            answer = input("Allow? [y/N] ")
-            approved = answer.strip().lower() in ("y", "yes")
+            answer = await asyncio.to_thread(input, "Allow? [y/N/a(lways)] ")
+            choice = answer.strip().lower()
+            approved = choice in ("y", "yes", "a", "always")
+
+            if choice in ("a", "always"):
+                cmd_name = command.split()[0].rsplit("/", 1)[-1]
+                agent.filesystem_tools.add_permanent_allowed_command(cmd_name)
+                console.print(f"[green]'{cmd_name}' permanently added to allowed commands[/green]")
         except EOFError:
             approved = False
         except KeyboardInterrupt:
@@ -959,14 +970,14 @@ async def handle_help_command(console: Console):
 - `/skill/install <source>@<branch>` - Install an Agent Skill
 - `/skill/uninstall <name>` - Uninstall an Agent Skill
 - `/skill/list` - List installed Agent Skills
-- `/skill/search <query>` - Search ClawHub registry for skills
+- `/skill/search <query>` - Search ClawHub and skills.sh registries
 - `/exit` or `/quit` - Exit interactive mode
 - `/help` - Show this help
 
 ## Agent Skills 🚀
 Install specialized skills from git repositories, local paths, or ClawHub:
 - Use `/skill/list` to see installed skills
-- Use `/skill/search <query>` to search the ClawHub registry
+- Use `/skill/search <query>` to search ClawHub and skills.sh registries
 - Install with `/skill/install <source>@<branch>`
   - Git: `/skill/install anthropics/skills/skills/pdf@main`
   - Local: `/skill/install /path/to/skill@main`
