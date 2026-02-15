@@ -104,6 +104,7 @@ ai-assist
 - 📚 Command history with search (Ctrl-R)
 - ⌨️ Tab completion for commands
 - ⚡ Streaming responses in real-time
+- 🛑 Cancel streaming with Escape key
 - 🧠 Conversation memory (up to 10 exchanges)
 - 💾 Auto-learning from interactions
 
@@ -111,6 +112,7 @@ ai-assist
 - `/status` - Show statistics
 - `/history` - Recent monitoring history
 - `/clear` - Clear conversation memory
+- `/clear-cache` - Clear response cache
 - `/kg-save [on|off]` - Toggle knowledge graph auto-save
 - `/kg-viz` - Visualize knowledge graph in browser
 - `/prompts` - List available MCP prompts with arguments
@@ -118,8 +120,21 @@ ai-assist
 - `/skill/install <source>@<branch>` - Install an Agent Skill
 - `/skill/uninstall <name>` - Uninstall an Agent Skill
 - `/skill/list` - List installed Agent Skills
+- `/skill/search <query>` - Search ClawHub and skills.sh registries
 - `/help` - Show help
 - `/exit` or `/quit` - Exit
+
+**Security:**
+
+When a command is not on the allowlist, the assistant prompts for confirmation:
+
+```
+Allow? [y/N/a(lways)]
+```
+
+- **y** - Allow once
+- **N** - Deny (default)
+- **a(lways)** - Allow and permanently add to the allowlist
 
 **Example queries:**
 ```
@@ -150,6 +165,7 @@ Install specialized skills following the [agentskills.io](https://agentskills.io
 /skill/install /path/to/my-skill@main                # Install local skill
 /skill/list                                          # List installed skills
 /skill/uninstall pdf                                 # Uninstall skill
+/skill/search pdf                                    # Search ClawHub and skills.sh
 ```
 
 **What are Agent Skills?**
@@ -502,7 +518,7 @@ ai-assist/
 │   ├── state.py           # State management and caching
 │   ├── knowledge_graph.py # Temporal knowledge graph
 │   └── filesystem_tools.py # Filesystem operations
-├── tests/                  # Test suite (321 tests)
+├── tests/                  # Test suite (532 tests)
 ├── .env.example           # Example environment variables
 ├── VERTEX_AI_SETUP.md     # Vertex AI troubleshooting
 ├── SECURITY.md            # Security model
