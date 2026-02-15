@@ -5,6 +5,7 @@ import re
 import shlex
 import subprocess
 from collections.abc import Awaitable, Callable
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -190,6 +191,28 @@ class FilesystemTools:
                 "_server": "internal",
                 "_original_name": "execute_command",
             },
+            {
+                "name": "internal__get_today_date",
+                "description": "Get today's date in YYYY-MM-DD format.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+                "_server": "internal",
+                "_original_name": "get_today_date",
+            },
+            {
+                "name": "internal__get_current_time",
+                "description": "Get current date and time in ISO format.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+                "_server": "internal",
+                "_original_name": "get_current_time",
+            },
         ]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
@@ -212,6 +235,10 @@ class FilesystemTools:
             return await self._list_directory(arguments)
         elif tool_name == "execute_command":
             return await self._execute_command(arguments)
+        elif tool_name == "get_today_date":
+            return date.today().isoformat()
+        elif tool_name == "get_current_time":
+            return datetime.now().isoformat()
         else:
             return f"Error: Unknown filesystem tool: {tool_name}"
 

@@ -477,6 +477,8 @@ Schedules stored in `~/.ai-assist/schedules.json` with hot-reload support.
 - `create_directory` - Create directories
 - `list_directory` - List directory contents
 - `execute_command` - Execute bash commands
+- `get_today_date` - Get today's date (YYYY-MM-DD)
+- `get_current_time` - Get current date and time (ISO format)
 
 ### MCP Server Tools
 
