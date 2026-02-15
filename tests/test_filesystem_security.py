@@ -1,6 +1,8 @@
 """Tests for filesystem tools security: command allowlist, path restrictions, and confirmations"""
 
 import json
+import re
+from datetime import date
 
 import pytest
 
@@ -401,3 +403,29 @@ async def test_permanently_allowed_command_executes(tmp_path):
     # echo is not in the config allowlist but is in the persistent file
     result = await tools.execute_tool("execute_command", {"command": "echo persistent"})
     assert "persistent" in result
+
+
+# --- Phase 6: Date and time tools ---
+
+
+@pytest.mark.asyncio
+async def test_get_today_date():
+    """get_today_date returns today's date in YYYY-MM-DD format"""
+    config = AiAssistConfig(anthropic_api_key="test")
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("get_today_date", {})
+
+    assert re.match(r"^\d{4}-\d{2}-\d{2}$", result)
+    assert result == date.today().isoformat()
+
+
+@pytest.mark.asyncio
+async def test_get_current_time():
+    """get_current_time returns current date and time in ISO format"""
+    config = AiAssistConfig(anthropic_api_key="test")
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("get_current_time", {})
+
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", result)
