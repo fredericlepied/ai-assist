@@ -675,10 +675,49 @@ async def main_async():
 
 def main():
     """Main entry point"""
+    import atexit
+    import signal
+
+    _saved_terminal_attrs = None
+    stdin_fd = None
+
+    if sys.stdin.isatty():
+        try:
+            import termios
+
+            stdin_fd = sys.stdin.fileno()
+            _saved_terminal_attrs = termios.tcgetattr(stdin_fd)
+        except (ImportError, OSError, Exception):
+            pass
+
+    def _restore_terminal():
+        if _saved_terminal_attrs is not None and stdin_fd is not None:
+            try:
+                import termios
+
+                termios.tcsetattr(stdin_fd, termios.TCSADRAIN, _saved_terminal_attrs)
+            except Exception:
+                pass
+
+    atexit.register(_restore_terminal)
+
+    def _signal_handler(signum, frame):
+        _restore_terminal()
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            signal.signal(sig, _signal_handler)
+        except (OSError, ValueError):
+            pass
+
     try:
         asyncio.run(main_async())
     except KeyboardInterrupt:
         print("\nShutting down...")
+    finally:
+        _restore_terminal()
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import signal
 import sys
 import threading
 from typing import Any
@@ -580,11 +581,22 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         console.print("\n[yellow]Security: The agent wants to run:[/yellow]")
         console.print(f"  [bold]{command}[/bold]")
 
+        # asyncio replaces the default SIGINT handler with one that defers
+        # KeyboardInterrupt to the next event-loop iteration.  Because input()
+        # blocks the loop, that deferred raise never fires.  Temporarily
+        # restore the default handler so Ctrl-C interrupts input() immediately.
+        prev_sigint = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, signal.default_int_handler)
         try:
-            answer = await asyncio.to_thread(input, "Allow? [y/N] ")
+            answer = input("Allow? [y/N] ")
             approved = answer.strip().lower() in ("y", "yes")
-        except (KeyboardInterrupt, EOFError):
+        except EOFError:
             approved = False
+        except KeyboardInterrupt:
+            console.print()
+            raise
+        finally:
+            signal.signal(signal.SIGINT, prev_sigint)
 
         if watcher_was_running:
             watcher.start()
@@ -783,6 +795,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
                 except KeyboardInterrupt:
                     console.print("\n[yellow]Query cancelled[/yellow]")
+                    raise
                 except EOFError:
                     raise
                 except Exception as e:
