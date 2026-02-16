@@ -5,6 +5,7 @@ import json
 import signal
 import sys
 import threading
+from datetime import datetime
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -738,6 +739,17 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                                 }
                             )
 
+                            # Save to knowledge graph for cross-session memory
+                            if kg_context and kg_context.knowledge_graph:
+                                try:
+                                    kg_context.knowledge_graph.insert_entity(
+                                        entity_type="conversation",
+                                        data={"user": user_input, "assistant": full_response},
+                                        valid_from=datetime.now(),
+                                    )
+                                except Exception:
+                                    pass
+
                         except Exception as e:
                             console.print(f"\n[red]Error: {e}[/red]\n")
 
@@ -821,6 +833,17 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                     conversation_context.append(
                         {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
                     )
+
+                    # Save to knowledge graph for cross-session memory
+                    if kg_context and kg_context.knowledge_graph:
+                        try:
+                            kg_context.knowledge_graph.insert_entity(
+                                entity_type="conversation",
+                                data={"user": user_input, "assistant": response},
+                                valid_from=datetime.now(),
+                            )
+                        except Exception:
+                            pass
 
                 except KeyboardInterrupt:
                     console.print("\n[yellow]Query cancelled[/yellow]")

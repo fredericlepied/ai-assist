@@ -407,7 +407,13 @@ class KnowledgeGraph:
 
         return relationship
 
-    def query_as_of(self, tx_time: datetime, entity_type: str | None = None, limit: int | None = None) -> list[Entity]:
+    def query_as_of(
+        self,
+        tx_time: datetime,
+        entity_type: str | None = None,
+        limit: int | None = None,
+        search_text: str | None = None,
+    ) -> list[Entity]:
         """Query entities as they were known at a specific transaction time
 
         This answers: "What did ai-assist know at time X?"
@@ -416,6 +422,7 @@ class KnowledgeGraph:
             tx_time: The transaction time to query
             entity_type: Optional filter by entity type
             limit: Optional limit on number of results
+            search_text: Optional case-insensitive text search within entity data JSON
 
         Returns:
             List of entities that ai-assist believed at tx_time
@@ -431,6 +438,10 @@ class KnowledgeGraph:
         if entity_type:
             query += " AND entity_type = ?"
             params.append(entity_type)
+
+        if search_text:
+            query += " AND data LIKE ?"
+            params.append(f"%{search_text}%")
 
         query += " ORDER BY tx_from DESC"
 

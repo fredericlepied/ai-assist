@@ -49,12 +49,13 @@ Use this tool when you need to:
 - Check if information is already known (e.g., "Do I already know about CILAB-123?")
 - Find recent failures or issues without calling external APIs
 - Get historical context about jobs, tickets, or components
+- Recall previous conversations (use entity_type='conversation')
 - Answer questions using cached data instead of fresh API calls
 
 Examples:
 - "Search for Jira tickets with status Open"
 - "Find DCI jobs that failed in the last 24 hours"
-- "Get all components of type 'ocp'"
+- "Search previous conversations about DCI failures"
 
 The tool will return entities from the knowledge graph with their data and timestamps.
 """,
@@ -63,8 +64,12 @@ The tool will return entities from the knowledge graph with their data and times
                             "properties": {
                                 "entity_type": {
                                     "type": "string",
-                                    "description": "Type of entity to search for. Options: 'jira_ticket', 'dci_job', 'dci_component'",
-                                    "enum": ["jira_ticket", "dci_job", "dci_component"],
+                                    "description": "Type of entity to search for. Options: 'jira_ticket', 'dci_job', 'dci_component', 'conversation'",
+                                    "enum": ["jira_ticket", "dci_job", "dci_component", "conversation"],
+                                },
+                                "search_text": {
+                                    "type": "string",
+                                    "description": "Optional: Case-insensitive text search within entity data. Useful for finding conversations mentioning specific topics.",
                                 },
                                 "time_range_hours": {
                                     "type": "number",
@@ -271,6 +276,7 @@ Example: Search for previous mentions of "DCI failures" in conversation.
 
         entity_type = arguments.get("entity_type")
         time_range_hours = arguments.get("time_range_hours")
+        search_text = arguments.get("search_text")
         limit = min(arguments.get("limit", 20), 100)
 
         try:
@@ -278,12 +284,16 @@ Example: Search for previous mentions of "DCI failures" in conversation.
             if time_range_hours:
                 # Get entities from specific time range
                 since_time = datetime.now() - timedelta(hours=time_range_hours)
-                entities = self.knowledge_graph.query_as_of(datetime.now(), entity_type=entity_type, limit=None)
+                entities = self.knowledge_graph.query_as_of(
+                    datetime.now(), entity_type=entity_type, limit=None, search_text=search_text
+                )
                 # Filter by valid_from time
                 entities = [e for e in entities if e.valid_from >= since_time][:limit]
             else:
                 # Get all current entities of this type
-                entities = self.knowledge_graph.query_as_of(datetime.now(), entity_type=entity_type, limit=limit)
+                entities = self.knowledge_graph.query_as_of(
+                    datetime.now(), entity_type=entity_type, limit=limit, search_text=search_text
+                )
 
             # Format results
             results = []

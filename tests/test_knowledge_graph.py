@@ -530,3 +530,59 @@ def test_discovery_lag_scenario(kg):
             assert lag == 45  # 45 minutes
         elif job.id == "job-quick-discovery":
             assert lag == 5  # 5 minutes
+
+
+def test_conversation_entity_insert_and_query(kg):
+    """Test inserting and querying conversation entities"""
+    now = datetime.now()
+    kg.insert_entity(
+        entity_type="conversation",
+        data={"user": "What are the failing DCI jobs?", "assistant": "Here are 3 failing jobs..."},
+        valid_from=now,
+        tx_from=now,
+    )
+    kg.insert_entity(
+        entity_type="conversation",
+        data={"user": "Show me CILAB tickets", "assistant": "Found 5 open tickets..."},
+        valid_from=now,
+        tx_from=now,
+    )
+
+    results = kg.query_as_of(now, entity_type="conversation")
+    assert len(results) == 2
+
+
+def test_query_as_of_with_search_text(kg):
+    """Test text search within entity data"""
+    now = datetime.now()
+    kg.insert_entity(
+        entity_type="conversation",
+        data={"user": "What are the failing DCI jobs?", "assistant": "Here are 3 failing jobs..."},
+        valid_from=now,
+        tx_from=now,
+    )
+    kg.insert_entity(
+        entity_type="conversation",
+        data={"user": "Show me CILAB tickets", "assistant": "Found 5 open tickets..."},
+        valid_from=now,
+        tx_from=now,
+    )
+    kg.insert_entity(
+        entity_type="dci_job",
+        data={"status": "failure", "name": "test-job"},
+        valid_from=now,
+        tx_from=now,
+    )
+
+    # Search for "DCI" in conversations only
+    results = kg.query_as_of(now, entity_type="conversation", search_text="DCI")
+    assert len(results) == 1
+    assert "DCI" in results[0].data["user"]
+
+    # Search for "CILAB" across all types
+    results = kg.query_as_of(now, search_text="CILAB")
+    assert len(results) == 1
+
+    # Case-insensitive search
+    results = kg.query_as_of(now, entity_type="conversation", search_text="dci")
+    assert len(results) == 1

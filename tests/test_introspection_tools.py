@@ -290,6 +290,34 @@ async def test_tool_without_conversation(kg):
 
 
 @pytest.mark.asyncio
+async def test_search_conversation_entities_in_kg(introspection_tools_with_kg, kg):
+    """Test searching conversation entities stored in the KG"""
+    kg.insert_entity(
+        entity_type="conversation",
+        data={"user": "What are failing DCI jobs?", "assistant": "Here are 3 failing jobs..."},
+        valid_from=datetime.now(),
+    )
+    kg.insert_entity(
+        entity_type="conversation",
+        data={"user": "Show me CILAB tickets", "assistant": "Found 5 open tickets..."},
+        valid_from=datetime.now(),
+    )
+
+    # Search by entity type
+    result = await introspection_tools_with_kg.execute_tool("search_knowledge_graph", {"entity_type": "conversation"})
+    data = json.loads(result)
+    assert data["found"] == 2
+
+    # Search with text filter
+    result = await introspection_tools_with_kg.execute_tool(
+        "search_knowledge_graph", {"entity_type": "conversation", "search_text": "DCI"}
+    )
+    data = json.loads(result)
+    assert data["found"] == 1
+    assert "DCI" in data["entities"][0]["data"]["user"]
+
+
+@pytest.mark.asyncio
 async def test_unknown_tool(introspection_tools_full):
     """Test calling unknown tool returns error"""
     result = await introspection_tools_full.execute_tool("unknown_tool", {})
