@@ -523,6 +523,13 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     conversation_memory = ConversationMemory(max_exchanges=10)
     conversation_context: list[dict] = []  # For state manager persistence
 
+    # Restore previous session context
+    saved = state_manager.load_conversation_context("last_interactive_session")
+    if saved and saved.get("messages"):
+        conversation_context = saved["messages"]
+        conversation_memory.load_exchanges(conversation_context)
+        console.print(f"[dim]Restored {len(conversation_memory)} exchange(s) from previous session[/dim]\n")
+
     # Enable agent introspection of conversation memory
     agent.set_conversation_memory(conversation_memory)
 
@@ -755,6 +762,8 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
                 if user_input.lower() == "/clear":
                     conversation_memory.clear()
+                    conversation_context.clear()
+                    state_manager.save_conversation_context("last_interactive_session", {"messages": []})
                     console.print("\n[green]✓ Conversation memory cleared[/green]\n")
                     continue
 

@@ -59,6 +59,20 @@ class ConversationMemory:
             messages.append({"role": "assistant", "content": exchange["assistant"]})
         return messages
 
+    def load_exchanges(self, exchanges: list[dict[str, str]]):
+        """Load exchanges from saved data, applying max_exchanges limit"""
+        for ex in exchanges:
+            if "user" in ex and "assistant" in ex:
+                self.exchanges.append(
+                    {
+                        "user": ex["user"],
+                        "assistant": ex["assistant"],
+                        "timestamp": ex.get("timestamp", ""),
+                    }
+                )
+        if len(self.exchanges) > self.max_exchanges:
+            self.exchanges = self.exchanges[-self.max_exchanges :]
+
     def clear(self):
         """Clear all conversation history"""
         self.exchanges = []
