@@ -137,6 +137,77 @@ def test_multiple_exchanges_ordering():
     assert messages[4]["content"] == "Third"
 
 
+# Load Exchanges Tests
+
+
+def test_load_exchanges():
+    """Test loading exchanges from saved data"""
+    memory = ConversationMemory(max_exchanges=10)
+
+    exchanges = [
+        {"user": "Q1", "assistant": "A1", "timestamp": "2026-01-01T00:00:00"},
+        {"user": "Q2", "assistant": "A2", "timestamp": "2026-01-01T00:01:00"},
+    ]
+    memory.load_exchanges(exchanges)
+
+    assert len(memory) == 2
+    messages = memory.to_messages()
+    assert messages[0] == {"role": "user", "content": "Q1"}
+    assert messages[1] == {"role": "assistant", "content": "A1"}
+    assert messages[2] == {"role": "user", "content": "Q2"}
+    assert messages[3] == {"role": "assistant", "content": "A2"}
+
+
+def test_load_exchanges_respects_max():
+    """Test that load_exchanges drops oldest when over max_exchanges"""
+    memory = ConversationMemory(max_exchanges=2)
+
+    exchanges = [
+        {"user": "Q1", "assistant": "A1", "timestamp": "t1"},
+        {"user": "Q2", "assistant": "A2", "timestamp": "t2"},
+        {"user": "Q3", "assistant": "A3", "timestamp": "t3"},
+    ]
+    memory.load_exchanges(exchanges)
+
+    assert len(memory) == 2
+    messages = memory.to_messages()
+    assert messages[0] == {"role": "user", "content": "Q2"}
+    assert messages[3] == {"role": "assistant", "content": "A3"}
+
+
+def test_load_exchanges_skips_invalid():
+    """Test that entries missing user or assistant keys are skipped"""
+    memory = ConversationMemory(max_exchanges=10)
+
+    exchanges = [
+        {"user": "Q1", "assistant": "A1"},
+        {"user": "Q2"},  # missing assistant
+        {"assistant": "A3"},  # missing user
+        {},  # missing both
+        {"user": "Q4", "assistant": "A4"},
+    ]
+    memory.load_exchanges(exchanges)
+
+    assert len(memory) == 2
+    messages = memory.to_messages()
+    assert messages[0] == {"role": "user", "content": "Q1"}
+    assert messages[2] == {"role": "user", "content": "Q4"}
+
+
+def test_load_exchanges_missing_timestamp():
+    """Test that entries without timestamp get empty string default"""
+    memory = ConversationMemory(max_exchanges=10)
+
+    exchanges = [
+        {"user": "Q1", "assistant": "A1"},  # no timestamp
+    ]
+    memory.load_exchanges(exchanges)
+
+    assert len(memory) == 1
+    last = memory.get_last_exchange()
+    assert last["timestamp"] == ""
+
+
 # Knowledge Graph Context Tests
 
 

@@ -172,6 +172,12 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
     conversation_context: list[dict] = []
     messages: list[dict] = []  # For prompt injection
 
+    # Restore previous session context
+    saved = state_manager.load_conversation_context("last_interactive_session")
+    if saved and saved.get("messages"):
+        conversation_context = saved["messages"]
+        print(f"Restored {len(conversation_context)} exchange(s) from previous session")
+
     # Hook inner execution callback for MCP prompt visibility
     def on_inner_execution(chunk: Any) -> None:
         if isinstance(chunk, str):

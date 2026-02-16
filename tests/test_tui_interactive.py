@@ -56,6 +56,7 @@ def mock_state_manager():
     manager.get_history = MagicMock(return_value=[{"timestamp": "2026-02-05"}])
     manager.cleanup_expired_cache = MagicMock(return_value=5)
     manager.save_conversation_context = MagicMock()
+    manager.load_conversation_context = MagicMock(return_value=None)
     return manager
 
 
