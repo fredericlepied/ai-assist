@@ -474,6 +474,15 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     console = Console()
     identity = get_identity()
 
+    # Save terminal state before prompt_toolkit changes it
+    saved_terminal_attrs = None
+    try:
+        import termios
+
+        saved_terminal_attrs = termios.tcgetattr(sys.stdin.fileno())
+    except (ImportError, termios.error, OSError):
+        pass
+
     # Setup history file
     history_file = get_config_dir() / "interactive_history.txt"
     history_file.parent.mkdir(parents=True, exist_ok=True)
@@ -831,6 +840,15 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         # Stop watchers on exit
         await config_watcher.stop()
         await notification_watcher.stop()
+
+        # Restore terminal to the state saved before prompt_toolkit modified it
+        if saved_terminal_attrs is not None:
+            try:
+                import termios
+
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, saved_terminal_attrs)
+            except (ImportError, termios.error, OSError):
+                pass
 
 
 async def handle_status_command(state_manager: StateManager, console: Console):
