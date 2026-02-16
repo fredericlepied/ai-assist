@@ -587,7 +587,6 @@ class AiAssistAgent:
         """
         import hashlib
         import json
-        import time
 
         # Build messages list
         if messages is None:
@@ -603,8 +602,6 @@ class AiAssistAgent:
             self._cancel_event = cancel_event
 
         # Loop detection tracking (same as query())
-        start_time = time.time()
-        max_time_seconds = 600  # 10 minutes max
         recent_tool_calls = []
         max_recent_calls = 5
         loop_detection_threshold = 3
@@ -626,15 +623,6 @@ class AiAssistAgent:
             # Check cancellation before each turn
             if cancel_event and cancel_event.is_set():
                 yield {"type": "cancelled"}
-                return
-
-            # Check time-based timeout
-            elapsed = time.time() - start_time
-            if elapsed > max_time_seconds:
-                yield {
-                    "type": "error",
-                    "message": f"Task timeout after {int(elapsed)} seconds (max: {max_time_seconds}s)",
-                }
                 return
 
             if progress_callback:
