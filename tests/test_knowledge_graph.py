@@ -586,3 +586,36 @@ def test_query_as_of_with_search_text(kg):
     # Case-insensitive search
     results = kg.query_as_of(now, entity_type="conversation", search_text="dci")
     assert len(results) == 1
+
+
+def test_query_as_of_with_valid_from_after(kg):
+    """Test filtering entities by valid_from minimum time"""
+    old_time = datetime(2026, 2, 1, 10, 0)
+    recent_time = datetime(2026, 2, 17, 10, 0)
+    query_time = datetime(2026, 2, 17, 12, 0)
+
+    # Insert old conversation
+    kg.insert_entity(
+        entity_type="conversation",
+        data={"user": "Old question", "assistant": "Old answer"},
+        valid_from=old_time,
+        tx_from=old_time,
+    )
+
+    # Insert recent conversation
+    kg.insert_entity(
+        entity_type="conversation",
+        data={"user": "Recent question", "assistant": "Recent answer"},
+        valid_from=recent_time,
+        tx_from=recent_time,
+    )
+
+    # Query all conversations (no valid_from_after filter)
+    results = kg.query_as_of(query_time, entity_type="conversation")
+    assert len(results) == 2
+
+    # Query only recent conversations (valid_from_after = Feb 16)
+    cutoff = datetime(2026, 2, 16, 0, 0)
+    results = kg.query_as_of(query_time, entity_type="conversation", valid_from_after=cutoff)
+    assert len(results) == 1
+    assert results[0].data["user"] == "Recent question"

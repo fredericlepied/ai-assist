@@ -105,8 +105,8 @@ ai-assist
 - ⌨️ Tab completion for commands
 - ⚡ Streaming responses in real-time
 - 🛑 Cancel streaming with Escape key
-- 🧠 Conversation memory (up to 10 exchanges)
-- 💾 Auto-learning from interactions
+- 🧠 Conversation memory with persistent storage in knowledge graph
+- 💾 Nightly self-reflection extracts knowledge from conversations
 
 **Built-in Commands:**
 - `/status` - Show statistics
@@ -447,6 +447,9 @@ The knowledge graph automatically stores:
 - Jira tickets and status history
 - Entity relationships
 - Temporal changes (when created vs. when discovered)
+- Conversation exchanges (user/assistant pairs)
+
+**Nightly Synthesis**: A built-in scheduled task (`nightly-synthesis`) runs at 22:00 on weekdays to review the day's conversations and extract structured knowledge (preferences, lessons, context, rationale). The schedule is configurable in `schedules.json`.
 
 ## Available Tools
 

@@ -235,3 +235,57 @@ class TestScheduleLoader:
 
         assert len(monitors) == 5
         assert len(tasks) == 3
+
+    def test_ensure_default_tasks_adds_synthesis(self, temp_json_file):
+        """ensure_default_tasks should add nightly-synthesis to schedules.json"""
+        # Start with empty tasks
+        temp_json_file.write_text(json.dumps({"version": "1.0", "monitors": [], "tasks": []}))
+
+        loader = ScheduleLoader(temp_json_file)
+        loader.ensure_default_tasks()
+
+        # Reload and verify it was added to the file
+        tasks = loader.load_tasks()
+        names = [t.name for t in tasks]
+        assert "nightly-synthesis" in names
+
+        synthesis_task = next(t for t in tasks if t.name == "nightly-synthesis")
+        assert synthesis_task.prompt == "__builtin__:nightly_synthesis"
+        assert synthesis_task.is_time_based is True
+        assert synthesis_task.enabled is True
+
+    def test_ensure_default_tasks_preserves_user_override(self, temp_json_file):
+        """ensure_default_tasks should not overwrite existing user entry"""
+        data = {
+            "version": "1.0",
+            "monitors": [],
+            "tasks": [
+                {
+                    "name": "nightly-synthesis",
+                    "prompt": "__builtin__:nightly_synthesis",
+                    "interval": "1h",
+                    "description": "Run hourly instead",
+                }
+            ],
+        }
+        temp_json_file.write_text(json.dumps(data))
+
+        loader = ScheduleLoader(temp_json_file)
+        loader.ensure_default_tasks()
+
+        # User's interval should be preserved
+        tasks = loader.load_tasks()
+        synthesis_task = next(t for t in tasks if t.name == "nightly-synthesis")
+        assert synthesis_task.interval == "1h"
+
+    def test_ensure_default_tasks_creates_file(self, temp_json_file):
+        """ensure_default_tasks should create schedules.json if missing"""
+        assert not temp_json_file.exists()
+
+        loader = ScheduleLoader(temp_json_file)
+        loader.ensure_default_tasks()
+
+        assert temp_json_file.exists()
+        tasks = loader.load_tasks()
+        names = [t.name for t in tasks]
+        assert "nightly-synthesis" in names

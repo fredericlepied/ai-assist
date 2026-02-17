@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Optional
 
 from anthropic import Anthropic, AnthropicVertex
@@ -23,6 +23,42 @@ from .skills_manager import SkillsManager
 if TYPE_CHECKING:
     from .context import ConversationMemory
     from .knowledge_graph import KnowledgeGraph
+
+
+SYNTHESIS_PROMPT_TEMPLATE = """Review this conversation and identify learnings to save.
+
+Extract:
+- **User Preferences**: Stated preferences about code style, workflows, tools
+- **Lessons Learned**: Insights about bugs, patterns, best practices, gotchas
+- **Project Context**: Background about projects, goals, teams, constraints
+- **Decision Rationale**: Why certain implementation choices were made
+
+For each learning:
+- Write 1-2 sentence summary
+- Suggest unique key (e.g., "python_test_framework", "dci_friday_failures")
+- Assign confidence (0.0-1.0 based on how explicit/clear it was)
+- Add relevant tags
+
+Focus: {focus}
+
+Conversation:
+{history_text}
+
+Output valid JSON only (no markdown):
+{{
+  "insights": [
+    {{
+      "category": "user_preference|lesson_learned|project_context|decision_rationale",
+      "key": "unique_identifier",
+      "content": "1-2 sentence summary",
+      "confidence": 0.9,
+      "tags": ["tag1", "tag2"]
+    }}
+  ]
+}}
+
+If no learnings, return {{"insights": []}}
+"""
 
 
 class AiAssistAgent:
@@ -1227,40 +1263,10 @@ class AiAssistAgent:
             history_parts.append(f"Assistant: {ex['assistant']}")
         history_text = "\n\n".join(history_parts)
 
-        synthesis_prompt = f"""Review this conversation and identify learnings to save.
-
-Extract:
-- **User Preferences**: Stated preferences about code style, workflows, tools
-- **Lessons Learned**: Insights about bugs, patterns, best practices, gotchas
-- **Project Context**: Background about projects, goals, teams, constraints
-- **Decision Rationale**: Why certain implementation choices were made
-
-For each learning:
-- Write 1-2 sentence summary
-- Suggest unique key (e.g., "python_test_framework", "dci_friday_failures")
-- Assign confidence (0.0-1.0 based on how explicit/clear it was)
-- Add relevant tags
-
-Focus: {focus if focus != 'all' else 'everything'}
-
-Conversation:
-{history_text}
-
-Output valid JSON only (no markdown):
-{{
-  "insights": [
-    {{
-      "category": "user_preference|lesson_learned|project_context|decision_rationale",
-      "key": "unique_identifier",
-      "content": "1-2 sentence summary",
-      "confidence": 0.9,
-      "tags": ["tag1", "tag2"]
-    }}
-  ]
-}}
-
-If no learnings, return {{"insights": []}}
-"""
+        synthesis_prompt = SYNTHESIS_PROMPT_TEMPLATE.format(
+            focus=focus if focus != "all" else "everything",
+            history_text=history_text,
+        )
 
         try:
             response = self.anthropic.messages.create(
@@ -1311,6 +1317,113 @@ If no learnings, return {{"insights": []}}
             print(f"⚠️  Synthesis failed - invalid JSON: {e}")
         except Exception as e:
             print(f"⚠️  Synthesis failed: {e}")
+
+    async def _run_synthesis_from_kg(self, hours: int = 24) -> str:
+        """Review recent conversation entities from KG and extract knowledge
+
+        Args:
+            hours: How many hours back to look for conversations
+
+        Returns:
+            Summary of synthesis results
+        """
+        if not self.knowledge_graph or not self.knowledge_tools:
+            return "Knowledge graph not available"
+
+        now = datetime.now()
+        cutoff = now - timedelta(hours=hours)
+
+        # Check for synthesis marker to avoid re-processing
+        markers = self.knowledge_graph.query_as_of(now, entity_type="synthesis_marker", limit=1)
+        if markers:
+            last_synthesis = markers[0].valid_from
+            if last_synthesis > cutoff:
+                cutoff = last_synthesis
+
+        # Get conversation entities since cutoff
+        conversations = self.knowledge_graph.query_as_of(now, entity_type="conversation", valid_from_after=cutoff)
+
+        if not conversations:
+            print("💭 No new conversations to synthesize")
+            return "No new conversations to synthesize"
+
+        # Build conversation text
+        history_parts = []
+        for conv in conversations:
+            data = conv.data
+            history_parts.append(f"User: {data.get('user', '')}")
+            history_parts.append(f"Assistant: {data.get('assistant', '')}")
+        history_text = "\n\n".join(history_parts)
+
+        synthesis_prompt = SYNTHESIS_PROMPT_TEMPLATE.format(
+            focus="everything",
+            history_text=history_text,
+        )
+
+        try:
+            response = self.anthropic.messages.create(
+                model="claude-3-5-haiku-20241022",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": synthesis_prompt}],
+            )
+
+            first_block = response.content[0]
+            response_text = first_block.text.strip() if hasattr(first_block, "text") else ""
+
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+
+            insights_data = json.loads(response_text)
+            insights = insights_data.get("insights", [])
+
+            if not insights:
+                print("💭 Synthesis complete - no new learnings to save")
+                # Still record the marker so we don't re-process
+                self.knowledge_graph.insert_entity(
+                    entity_type="synthesis_marker",
+                    data={"synthesized_conversations": len(conversations)},
+                    valid_from=now,
+                )
+                return "Synthesis complete - no new learnings"
+
+            saved_count = 0
+            for insight in insights:
+                try:
+                    self.knowledge_graph.insert_knowledge(
+                        entity_type=insight["category"],
+                        key=insight["key"],
+                        content=insight["content"],
+                        metadata={
+                            "tags": insight.get("tags", []),
+                            "source": "auto_synthesis",
+                            "synthesized_at": now.isoformat(),
+                        },
+                        confidence=insight.get("confidence", 1.0),
+                    )
+                    saved_count += 1
+                    print(f"💡 Learned: {insight['category']}:{insight['key']}")
+                except Exception as e:
+                    print(f"⚠️  Failed to save insight {insight.get('key')}: {e}")
+
+            # Record synthesis marker
+            self.knowledge_graph.insert_entity(
+                entity_type="synthesis_marker",
+                data={"synthesized_conversations": len(conversations), "insights_saved": saved_count},
+                valid_from=now,
+            )
+
+            summary = f"Saved {saved_count} new learnings from {len(conversations)} conversations"
+            print(f"✓ {summary}")
+            return summary
+
+        except json.JSONDecodeError as e:
+            print(f"⚠️  Synthesis failed - invalid JSON: {e}")
+            return f"Synthesis failed - invalid JSON: {e}"
+        except Exception as e:
+            print(f"⚠️  Synthesis failed: {e}")
+            return f"Synthesis failed: {e}"
 
     async def check_and_run_synthesis(self, conversation_memory: "ConversationMemory"):
         """Check if synthesis was triggered and run it

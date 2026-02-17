@@ -1,6 +1,7 @@
 """Tests for agent synthesis functionality"""
 
 import json
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -196,3 +197,150 @@ class TestSynthesisIntegration:
         assert agent._pending_synthesis is None
         results = agent.knowledge_graph.search_knowledge()
         assert len(results) >= 1
+
+
+class TestSynthesisFromKG:
+    """Test synthesis that reads conversation entities from the KG"""
+
+    @pytest.mark.asyncio
+    async def test_synthesis_from_kg_extracts_insights(self, agent, kg):
+        """Synthesis from KG should extract insights from conversation entities"""
+        now = datetime.now()
+        kg.insert_entity(
+            entity_type="conversation",
+            data={"user": "I prefer pytest over unittest", "assistant": "Noted, using pytest."},
+            valid_from=now - timedelta(hours=2),
+            tx_from=now - timedelta(hours=2),
+        )
+
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(
+                text=json.dumps(
+                    {
+                        "insights": [
+                            {
+                                "category": "user_preference",
+                                "key": "test_framework",
+                                "content": "User prefers pytest over unittest",
+                                "confidence": 1.0,
+                                "tags": ["testing"],
+                            }
+                        ]
+                    }
+                )
+            )
+        ]
+
+        with patch.object(agent.anthropic.messages, "create", return_value=mock_response):
+            await agent._run_synthesis_from_kg()
+
+        results = kg.search_knowledge(entity_type="user_preference")
+        assert len(results) >= 1
+        assert any("pytest" in r["content"].lower() for r in results)
+
+    @pytest.mark.asyncio
+    async def test_synthesis_from_kg_only_recent(self, agent, kg):
+        """Synthesis should only process conversations from the specified time window"""
+        now = datetime.now()
+
+        # Old conversation (48 hours ago)
+        kg.insert_entity(
+            entity_type="conversation",
+            data={"user": "Old question about Jenkins", "assistant": "Jenkins info..."},
+            valid_from=now - timedelta(hours=48),
+            tx_from=now - timedelta(hours=48),
+        )
+
+        # Recent conversation (1 hour ago)
+        kg.insert_entity(
+            entity_type="conversation",
+            data={"user": "I like dark mode", "assistant": "Dark mode enabled."},
+            valid_from=now - timedelta(hours=1),
+            tx_from=now - timedelta(hours=1),
+        )
+
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(
+                text=json.dumps(
+                    {
+                        "insights": [
+                            {
+                                "category": "user_preference",
+                                "key": "dark_mode",
+                                "content": "User likes dark mode",
+                                "confidence": 0.9,
+                                "tags": ["ui"],
+                            }
+                        ]
+                    }
+                )
+            )
+        ]
+
+        with patch.object(agent.anthropic.messages, "create", return_value=mock_response) as mock_create:
+            await agent._run_synthesis_from_kg(hours=24)
+
+        # The LLM should only have been called with the recent conversation
+        call_args = mock_create.call_args
+        prompt_text = call_args[1]["messages"][0]["content"]
+        assert "dark mode" in prompt_text
+        assert "Jenkins" not in prompt_text
+
+    @pytest.mark.asyncio
+    async def test_synthesis_from_kg_no_conversations(self, agent, kg):
+        """Synthesis with no conversations should return without errors"""
+        result = await agent._run_synthesis_from_kg()
+
+        # Should return a message indicating nothing to process
+        assert result is not None
+        results = kg.search_knowledge()
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_synthesis_from_kg_skips_already_synthesized(self, agent, kg):
+        """Synthesis should not re-process already synthesized conversations"""
+        now = datetime.now()
+
+        # First conversation (recent, within 24h)
+        kg.insert_entity(
+            entity_type="conversation",
+            data={"user": "First question", "assistant": "First answer"},
+            valid_from=now - timedelta(hours=3),
+            tx_from=now - timedelta(hours=3),
+        )
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text=json.dumps({"insights": []}))]
+
+        # First synthesis processes the first conversation
+        with patch.object(agent.anthropic.messages, "create", return_value=mock_response):
+            await agent._run_synthesis_from_kg()
+
+        # Verify synthesis_marker was created
+        markers = kg.query_as_of(now + timedelta(hours=1), entity_type="synthesis_marker")
+        assert len(markers) >= 1
+
+        # Second conversation added after first synthesis marker
+        # valid_from must be after the marker but tx_from must be <= "now" when synthesis runs
+        import time
+
+        time.sleep(0.01)  # Ensure marker's valid_from is in the past
+        second_time = datetime.now()
+        kg.insert_entity(
+            entity_type="conversation",
+            data={"user": "Second question", "assistant": "Second answer"},
+            valid_from=second_time,
+            tx_from=second_time,
+        )
+
+        # Run synthesis again — marker cutoff should exclude the first conversation
+        with patch.object(agent.anthropic.messages, "create", return_value=mock_response) as mock_create:
+            await agent._run_synthesis_from_kg()
+
+        # Should only include the second conversation (first already synthesized)
+        call_args = mock_create.call_args
+        prompt_text = call_args[1]["messages"][0]["content"]
+        assert "Second question" in prompt_text
+        assert "First question" not in prompt_text

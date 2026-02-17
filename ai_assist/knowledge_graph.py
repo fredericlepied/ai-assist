@@ -413,6 +413,7 @@ class KnowledgeGraph:
         entity_type: str | None = None,
         limit: int | None = None,
         search_text: str | None = None,
+        valid_from_after: datetime | None = None,
     ) -> list[Entity]:
         """Query entities as they were known at a specific transaction time
 
@@ -423,6 +424,7 @@ class KnowledgeGraph:
             entity_type: Optional filter by entity type
             limit: Optional limit on number of results
             search_text: Optional case-insensitive text search within entity data JSON
+            valid_from_after: Optional minimum valid_from time filter
 
         Returns:
             List of entities that ai-assist believed at tx_time
@@ -442,6 +444,10 @@ class KnowledgeGraph:
         if search_text:
             query += " AND data LIKE ?"
             params.append(f"%{search_text}%")
+
+        if valid_from_after:
+            query += " AND valid_from >= ?"
+            params.append(valid_from_after.isoformat())
 
         query += " ORDER BY tx_from DESC"
 

@@ -7,6 +7,7 @@ The ai-assist agent can learn and remember information from conversations.
 ## What Gets Saved
 
 The agent automatically saves:
+- **Conversations**: Every user/assistant exchange is stored in the Knowledge Graph on-the-fly
 - **User Preferences**: Code style, tools, workflows
 - **Lessons Learned**: Bug patterns, best practices
 - **Project Context**: Goals, constraints, background
@@ -14,10 +15,10 @@ The agent automatically saves:
 
 ## How It Works
 
-1. Agent notices learnings during conversation
-2. Agent calls `internal__trigger_synthesis` (you don't see this)
-3. After responding, agent reflects and extracts insights
-4. Insights saved to Knowledge Graph automatically
+1. Every conversation exchange is saved to the Knowledge Graph as it happens
+2. A **nightly synthesis** task (configurable in `schedules.json`) reviews the day's conversations
+3. The synthesis extracts structured knowledge (preferences, lessons, context, rationale)
+4. Extracted insights are saved to the Knowledge Graph automatically
 5. Agent can recall saved knowledge in future conversations
 
 ## Example
@@ -105,7 +106,6 @@ The agent has these internal tools (automatically used, not directly callable):
 **Knowledge Management:**
 - `internal__search_knowledge`: Search for saved learnings
 - `internal__save_knowledge`: Explicitly save facts
-- `internal__trigger_synthesis`: Trigger reflection
 
 **Introspection:**
 - `introspection__get_kg_stats`: Get knowledge graph statistics
