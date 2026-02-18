@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
@@ -128,7 +129,8 @@ class KnowledgeGraph:
             db_path = str(get_config_dir() / "knowledge_graph.db")
 
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path, timeout=30)
+        self.conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+        self._batch_mode = False
         try:
             self.conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.OperationalError:
@@ -227,6 +229,25 @@ class KnowledgeGraph:
 
         self.conn.commit()
 
+    def _maybe_commit(self):
+        """Commit unless we are in batch mode."""
+        if not self._batch_mode:
+            self.conn.commit()
+
+    @contextmanager
+    def batch(self):
+        """Context manager for batching multiple writes into a single commit.
+
+        Defers conn.commit() until the batch exits, which is dramatically
+        faster for multiple sequential inserts.
+        """
+        self._batch_mode = True
+        try:
+            yield self
+        finally:
+            self._batch_mode = False
+            self.conn.commit()
+
     def insert_entity(
         self,
         entity_type: str,
@@ -283,7 +304,7 @@ class KnowledgeGraph:
                 json.dumps(entity.data),
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
         return entity
 
@@ -331,7 +352,7 @@ class KnowledgeGraph:
                 entity_id,
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
         return entity
 
@@ -403,11 +424,18 @@ class KnowledgeGraph:
                 json.dumps(relationship.properties),
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
         return relationship
 
-    def query_as_of(self, tx_time: datetime, entity_type: str | None = None, limit: int | None = None) -> list[Entity]:
+    def query_as_of(
+        self,
+        tx_time: datetime,
+        entity_type: str | None = None,
+        limit: int | None = None,
+        search_text: str | None = None,
+        valid_from_after: datetime | None = None,
+    ) -> list[Entity]:
         """Query entities as they were known at a specific transaction time
 
         This answers: "What did ai-assist know at time X?"
@@ -416,6 +444,8 @@ class KnowledgeGraph:
             tx_time: The transaction time to query
             entity_type: Optional filter by entity type
             limit: Optional limit on number of results
+            search_text: Optional case-insensitive text search within entity data JSON
+            valid_from_after: Optional minimum valid_from time filter
 
         Returns:
             List of entities that ai-assist believed at tx_time
@@ -431,6 +461,14 @@ class KnowledgeGraph:
         if entity_type:
             query += " AND entity_type = ?"
             params.append(entity_type)
+
+        if search_text:
+            query += " AND data LIKE ?"
+            params.append(f"%{search_text}%")
+
+        if valid_from_after:
+            query += " AND valid_from >= ?"
+            params.append(valid_from_after.isoformat())
 
         query += " ORDER BY tx_from DESC"
 
@@ -588,7 +626,22 @@ class KnowledgeGraph:
 
         data = {"key": key, "content": content, "metadata": metadata}
 
-        self.insert_entity(entity_id=entity_id, entity_type=entity_type, data=data, valid_from=valid_from)
+        # Upsert: update existing entity or insert new one
+        existing = self.get_entity(entity_id)
+        if existing:
+            now = datetime.now()
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                UPDATE entities
+                SET data = ?, valid_from = ?, tx_from = ?, tx_to = NULL
+                WHERE id = ?
+            """,
+                (json.dumps(data), valid_from.isoformat(), now.isoformat(), entity_id),
+            )
+            self._maybe_commit()
+        else:
+            self.insert_entity(entity_id=entity_id, entity_type=entity_type, data=data, valid_from=valid_from)
 
         return entity_id
 

@@ -65,6 +65,43 @@ class ScheduleLoader:
 
         return tasks
 
+    # Default tasks that are ensured to exist in schedules.json
+    DEFAULT_TASKS = [
+        {
+            "name": "nightly-synthesis",
+            "prompt": "__builtin__:nightly_synthesis",
+            "interval": "night on weekdays",
+            "description": "Review day's conversations and extract knowledge",
+            "enabled": True,
+        },
+    ]
+
+    def ensure_default_tasks(self):
+        """Ensure default tasks exist in schedules.json
+
+        Adds any missing default tasks to the file so the agent can see and edit them.
+        Matches by prompt (functional identifier), not name (user-editable label).
+        """
+        data = self._load_json()
+        existing_prompts = {t.get("prompt") for t in data.get("tasks", [])}
+
+        added = []
+        for default_task in self.DEFAULT_TASKS:
+            if default_task["prompt"] not in existing_prompts:
+                data["tasks"].append(default_task)
+                added.append(default_task["name"])
+
+        if added:
+            self._save_json(data)
+            for name in added:
+                print(f"Added default task to schedules: {name}")
+
+    def _save_json(self, data: dict):
+        """Save data to JSON file"""
+        self.json_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.json_file, "w") as f:
+            json.dump(data, f, indent=2)
+
     def _load_json(self) -> dict:
         """Load and parse JSON file
 

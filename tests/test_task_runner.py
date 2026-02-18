@@ -1,6 +1,6 @@
 """Tests for task runner"""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -250,7 +250,6 @@ async def test_task_runner_handles_monitors(mock_agent, state_manager):
 @pytest.mark.asyncio
 async def test_notification_truncates_at_500_chars(mock_agent, state_manager):
     """Notifications should truncate at 500 chars consistently"""
-    from unittest.mock import patch
 
     long_output = "x" * 1000
     task_def = TaskDefinition(name="test", interval="5m", prompt="test", notify=True)
@@ -268,3 +267,23 @@ async def test_notification_truncates_at_500_chars(mock_agent, state_manager):
         # Notification should be truncated to 500 chars
         notification = mock_dispatcher.dispatch.call_args[0][0]
         assert len(notification.message) == 500
+
+
+@pytest.mark.asyncio
+async def test_builtin_prompt_routes_to_synthesis(mock_agent, state_manager):
+    """__builtin__:nightly_synthesis prompt should call _run_synthesis_from_kg"""
+    task = TaskDefinition(
+        name="nightly-synthesis",
+        prompt="__builtin__:nightly_synthesis",
+        interval="night on weekdays",
+    )
+
+    mock_agent._run_synthesis_from_kg = AsyncMock(return_value="Synthesized 3 insights")
+
+    runner = TaskRunner(task, mock_agent, state_manager)
+    result = await runner.run()
+
+    assert result.success is True
+    assert result.output == "Synthesized 3 insights"
+    mock_agent._run_synthesis_from_kg.assert_called_once()
+    mock_agent.query.assert_not_called()

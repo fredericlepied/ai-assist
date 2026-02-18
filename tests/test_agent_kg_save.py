@@ -1,5 +1,6 @@
 """Tests for agent knowledge graph auto-save"""
 
+import json
 from datetime import datetime
 
 import pytest
@@ -301,3 +302,49 @@ async def test_save_limits_entities(agent_with_kg, kg):
     # Should only save first 20
     stats = kg.get_stats()
     assert stats["total_entities"] <= 20
+
+
+@pytest.mark.asyncio
+async def test_save_dci_jobs_batched_commits(agent_with_kg, kg):
+    """Test that saving multiple DCI jobs uses batched commits (1 commit, not 30+)"""
+    # Track _maybe_commit() calls to verify batch mode is used
+    maybe_commit_calls = 0
+    original_maybe = kg._maybe_commit
+
+    def counting_maybe():
+        nonlocal maybe_commit_calls
+        maybe_commit_calls += 1
+        original_maybe()
+
+    kg._maybe_commit = counting_maybe
+
+    # Create result with 10 jobs, each with 1 component
+    jobs = []
+    for i in range(10):
+        jobs.append(
+            {
+                "id": f"job-batch-{i}",
+                "status": "success",
+                "created_at": "2026-02-01T10:00:00Z",
+                "components": [{"id": f"comp-batch-{i}", "type": "ocp", "version": "4.19.0", "name": "OCP"}],
+            }
+        )
+
+    result = json.dumps({"hits": jobs})
+
+    await agent_with_kg._save_tool_result_to_kg(
+        tool_name="dci__search_dci_jobs",
+        original_tool_name="search_dci_jobs",
+        arguments={},
+        result_text=result,
+    )
+
+    # _maybe_commit should have been called many times (30: 10 jobs + 10 comps + 10 rels)
+    # but in batch mode, none of them should actually commit
+    # The single real commit happens when batch() context manager exits
+    assert maybe_commit_calls == 30
+
+    # Verify all entities were saved
+    for i in range(10):
+        assert kg.get_entity(f"job-batch-{i}") is not None
+        assert kg.get_entity(f"comp-batch-{i}") is not None

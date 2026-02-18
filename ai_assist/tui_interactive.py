@@ -5,6 +5,8 @@ import json
 import signal
 import sys
 import threading
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -474,6 +476,15 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     console = Console()
     identity = get_identity()
 
+    # Save terminal state before prompt_toolkit changes it
+    saved_terminal_attrs = None
+    try:
+        import termios
+
+        saved_terminal_attrs = termios.tcgetattr(sys.stdin.fileno())
+    except (ImportError, termios.error, OSError):
+        pass
+
     # Setup history file
     history_file = get_config_dir() / "interactive_history.txt"
     history_file.parent.mkdir(parents=True, exist_ok=True)
@@ -564,10 +575,9 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
     agent.on_inner_execution = on_inner_execution
 
-    # Set up security confirmation callback for filesystem tools
-    async def command_confirmation_callback(command: str) -> bool:
-        """Prompt user to approve non-allowlisted commands or destructive actions"""
-        # Remember what was running so we only restart what we stopped
+    # Set up security confirmation callbacks for filesystem tools
+    async def _prompt_user_approval(message: str, detail: str) -> str:
+        """Common approval prompt logic. Returns user's choice string."""
         live = agent._active_live
         live_was_running = live and live._started
         if live_was_running:
@@ -590,8 +600,8 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         except (ImportError, termios.error, OSError):
             pass
 
-        console.print("\n[yellow]Security: The agent wants to run:[/yellow]")
-        console.print(f"  [bold]{command}[/bold]")
+        console.print(f"\n[yellow]{message}[/yellow]")
+        console.print(f"  [bold]{detail}[/bold]")
 
         # asyncio replaces the default SIGINT handler with one that defers
         # KeyboardInterrupt to the next event-loop iteration.  Because input()
@@ -602,14 +612,8 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         try:
             answer = await asyncio.to_thread(input, "Allow? [y/N/a(lways)] ")
             choice = answer.strip().lower()
-            approved = choice in ("y", "yes", "a", "always")
-
-            if choice in ("a", "always"):
-                cmd_name = command.split()[0].rsplit("/", 1)[-1]
-                agent.filesystem_tools.add_permanent_allowed_command(cmd_name)
-                console.print(f"[green]'{cmd_name}' permanently added to allowed commands[/green]")
         except EOFError:
-            approved = False
+            choice = "n"
         except KeyboardInterrupt:
             console.print()
             raise
@@ -621,9 +625,33 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         if live_was_running:
             live.start()
 
+        return choice
+
+    async def command_confirmation_callback(command: str) -> bool:
+        """Prompt user to approve non-allowlisted commands or destructive actions"""
+        choice = await _prompt_user_approval("Security: The agent wants to run:", command)
+        approved = choice in ("y", "yes", "a", "always")
+        if choice in ("a", "always"):
+            cmd_name = command.split()[0].rsplit("/", 1)[-1]
+            agent.filesystem_tools.add_permanent_allowed_command(cmd_name)
+            console.print(f"[green]'{cmd_name}' permanently added to allowed commands[/green]")
+        return approved
+
+    async def path_confirmation_callback(description: str) -> bool:
+        """Prompt user to approve access to a path outside allowed directories"""
+        choice = await _prompt_user_approval("Security: The agent wants to access:", description)
+        approved = choice in ("y", "yes", "a", "always")
+        if choice in ("a", "always"):
+            # Extract path from description ("Access path: /foo/bar/file.txt")
+            # Add the parent directory for broader usability
+            path_str = description.replace("Access path: ", "")
+            parent_dir = str(Path(path_str).parent)
+            agent.filesystem_tools.add_permanent_allowed_path(parent_dir)
+            console.print(f"[green]'{parent_dir}' permanently added to allowed paths[/green]")
         return approved
 
     agent.filesystem_tools.confirmation_callback = command_confirmation_callback
+    agent.filesystem_tools.path_confirmation_callback = path_confirmation_callback
 
     try:
         while True:
@@ -729,6 +757,22 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                                 }
                             )
 
+                            # Save to knowledge graph for cross-session memory (fire-and-forget)
+                            if kg_context and kg_context.knowledge_graph:
+
+                                async def _save_conv2(kg=kg_context.knowledge_graph, u=user_input, r=full_response):
+                                    try:
+                                        await asyncio.to_thread(
+                                            kg.insert_entity,
+                                            entity_type="conversation",
+                                            data={"user": u, "assistant": r},
+                                            valid_from=datetime.now(),
+                                        )
+                                    except Exception:
+                                        pass
+
+                                asyncio.create_task(_save_conv2())
+
                         except Exception as e:
                             console.print(f"\n[red]Error: {e}[/red]\n")
 
@@ -813,6 +857,22 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                         {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
                     )
 
+                    # Save to knowledge graph for cross-session memory (fire-and-forget)
+                    if kg_context and kg_context.knowledge_graph:
+
+                        async def _save_conv(kg=kg_context.knowledge_graph, u=user_input, r=response):
+                            try:
+                                await asyncio.to_thread(
+                                    kg.insert_entity,
+                                    entity_type="conversation",
+                                    data={"user": u, "assistant": r},
+                                    valid_from=datetime.now(),
+                                )
+                            except Exception:
+                                pass
+
+                        asyncio.create_task(_save_conv())
+
                 except KeyboardInterrupt:
                     console.print("\n[yellow]Query cancelled[/yellow]")
                     raise
@@ -831,6 +891,15 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         # Stop watchers on exit
         await config_watcher.stop()
         await notification_watcher.stop()
+
+        # Restore terminal to the state saved before prompt_toolkit modified it
+        if saved_terminal_attrs is not None:
+            try:
+                import termios
+
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, saved_terminal_attrs)
+            except (ImportError, termios.error, OSError):
+                pass
 
 
 async def handle_status_command(state_manager: StateManager, console: Console):

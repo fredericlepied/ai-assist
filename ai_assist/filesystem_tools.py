@@ -12,6 +12,7 @@ from typing import Any
 from .config import AiAssistConfig, get_config_dir
 
 ALLOWED_COMMANDS_FILE = "allowed_commands.json"
+ALLOWED_PATHS_FILE = "allowed_paths.json"
 
 
 class FilesystemTools:
@@ -26,8 +27,11 @@ class FilesystemTools:
         self.allowed_commands = list(config.allowed_commands)
         self._load_user_allowed_commands()
         self.allowed_paths = [Path(p).expanduser().resolve() for p in config.allowed_paths if p]
+        self._path_restrictions_enabled = bool(self.allowed_paths)
+        self._load_user_allowed_paths()
         self.confirm_tools = config.confirm_tools
         self.confirmation_callback: Callable[[str], Awaitable[bool]] | None = None
+        self.path_confirmation_callback: Callable[[str], Awaitable[bool]] | None = None
 
     def _load_user_allowed_commands(self):
         """Load user-added allowed commands from persistent file."""
@@ -62,13 +66,49 @@ class FilesystemTools:
             with open(path, "w") as f:
                 json.dump(existing, f, indent=2)
 
-    def _validate_path(self, path_str: str) -> str | None:
+    def _load_user_allowed_paths(self):
+        """Load user-added allowed paths from persistent file."""
+        path = get_config_dir() / ALLOWED_PATHS_FILE
+        if not path.exists():
+            return
+        try:
+            with open(path) as f:
+                paths = json.load(f)
+            for p in paths:
+                resolved = Path(p).expanduser().resolve()
+                if resolved not in self.allowed_paths:
+                    self.allowed_paths.append(resolved)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    def add_permanent_allowed_path(self, path_str: str):
+        """Add a path to the persistent allowed paths list."""
+        resolved = Path(path_str).expanduser().resolve()
+        if resolved not in self.allowed_paths:
+            self.allowed_paths.append(resolved)
+
+        persist_path = get_config_dir() / ALLOWED_PATHS_FILE
+        try:
+            existing: list[str] = []
+            if persist_path.exists():
+                with open(persist_path) as f:
+                    existing = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            existing = []
+
+        if path_str not in existing:
+            existing.append(path_str)
+            with open(persist_path, "w") as f:
+                json.dump(existing, f, indent=2)
+
+    async def _validate_path(self, path_str: str) -> str | None:
         """Validate that a path is within allowed directories.
+        Falls back to path_confirmation_callback if path is blocked.
 
         Returns:
             Error message if path is not allowed, None if validation passes
         """
-        if not self.allowed_paths:
+        if not self._path_restrictions_enabled:
             return None
 
         resolved = Path(path_str).expanduser().resolve()
@@ -79,6 +119,14 @@ class FilesystemTools:
                 return None
             except ValueError:
                 continue
+
+        # Path not in allowlist — try interactive approval
+        if self.path_confirmation_callback is not None:
+            description = f"Access path: {resolved}"
+            approved = await self.path_confirmation_callback(description)
+            if approved:
+                return None
+            return f"Error: Path access rejected by user: {resolved}"
 
         allowed_list = ", ".join(str(p) for p in self.allowed_paths)
         return f"Error: Path '{resolved}' is outside allowed directories: {allowed_list}. Not allowed."
@@ -274,7 +322,7 @@ class FilesystemTools:
         if not path:
             return "Error: path parameter is required"
 
-        path_error = self._validate_path(path)
+        path_error = await self._validate_path(path)
         if path_error:
             return path_error
 
@@ -337,7 +385,7 @@ class FilesystemTools:
         if not path or not pattern:
             return "Error: path and pattern parameters are required"
 
-        path_error = self._validate_path(path)
+        path_error = await self._validate_path(path)
         if path_error:
             return path_error
 
@@ -383,7 +431,7 @@ class FilesystemTools:
         if not path:
             return "Error: path parameter is required"
 
-        path_error = self._validate_path(path)
+        path_error = await self._validate_path(path)
         if path_error:
             return path_error
 
@@ -409,7 +457,7 @@ class FilesystemTools:
         if not path:
             return "Error: path parameter is required"
 
-        path_error = self._validate_path(path)
+        path_error = await self._validate_path(path)
         if path_error:
             return path_error
 

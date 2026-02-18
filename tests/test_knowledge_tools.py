@@ -166,3 +166,43 @@ class TestTriggerSynthesis:
 
         assert "all" in result.lower()
         assert mock_agent._pending_synthesis["focus"] == "all"
+
+
+class TestKnowledgeUpsert:
+    """Test that insert_knowledge updates existing entries instead of failing"""
+
+    async def test_insert_knowledge_twice_same_key(self, knowledge_tools, kg):
+        """Inserting knowledge with the same key updates instead of raising"""
+        await knowledge_tools.save_knowledge(
+            entity_type="user_preference",
+            key="editor",
+            content="I use vim",
+        )
+        # Second insert with same key should update, not raise
+        await knowledge_tools.save_knowledge(
+            entity_type="user_preference",
+            key="editor",
+            content="I switched to neovim",
+        )
+
+        results = kg.search_knowledge(entity_type="user_preference")
+        assert len(results) == 1
+        assert "neovim" in results[0]["content"]
+
+    async def test_upsert_preserves_entity_id(self, knowledge_tools, kg):
+        """Upserting preserves the same entity ID"""
+        await knowledge_tools.save_knowledge(
+            entity_type="lesson_learned",
+            key="testing_tip",
+            content="Always mock external APIs",
+        )
+        await knowledge_tools.save_knowledge(
+            entity_type="lesson_learned",
+            key="testing_tip",
+            content="Use fixtures for test data",
+        )
+
+        entity = kg.get_entity("lesson_learned:testing_tip")
+        assert entity is not None
+        data = entity.data
+        assert "fixtures" in data["content"]

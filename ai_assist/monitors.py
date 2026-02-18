@@ -91,6 +91,9 @@ class MonitoringScheduler:
             return []
 
         try:
+            # Ensure default tasks exist in the file
+            self.loader.ensure_default_tasks()
+
             task_defs = self.loader.load_tasks()
 
             runners = []

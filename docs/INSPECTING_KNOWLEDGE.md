@@ -203,6 +203,10 @@ This allows you to answer questions like:
 - `project_context`: Background information
 - `decision_rationale`: Why choices were made
 
+**Conversations:**
+- `conversation`: User/assistant exchanges (saved on-the-fly during interactive sessions)
+- `synthesis_marker`: Tracks when nightly synthesis last ran
+
 **Automatically Captured:**
 - `dci_job`: DCI jobs from searches
 - `jira_ticket`: Jira tickets from searches

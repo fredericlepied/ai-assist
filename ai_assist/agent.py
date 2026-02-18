@@ -2,7 +2,8 @@
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from anthropic import Anthropic, AnthropicVertex
@@ -23,6 +24,42 @@ from .skills_manager import SkillsManager
 if TYPE_CHECKING:
     from .context import ConversationMemory
     from .knowledge_graph import KnowledgeGraph
+
+
+SYNTHESIS_PROMPT_TEMPLATE = """Review this conversation and identify learnings to save.
+
+Extract:
+- **User Preferences**: Stated preferences about code style, workflows, tools
+- **Lessons Learned**: Insights about bugs, patterns, best practices, gotchas
+- **Project Context**: Background about projects, goals, teams, constraints
+- **Decision Rationale**: Why certain implementation choices were made
+
+For each learning:
+- Write 1-2 sentence summary
+- Suggest unique key (e.g., "python_test_framework", "dci_friday_failures")
+- Assign confidence (0.0-1.0 based on how explicit/clear it was)
+- Add relevant tags
+
+Focus: {focus}
+
+Conversation:
+{history_text}
+
+Output valid JSON only (no markdown):
+{{
+  "insights": [
+    {{
+      "category": "user_preference|lesson_learned|project_context|decision_rationale",
+      "key": "unique_identifier",
+      "content": "1-2 sentence summary",
+      "confidence": 0.9,
+      "tags": ["tag1", "tag2"]
+    }}
+  ]
+}}
+
+If no learnings, return {{"insights": []}}
+"""
 
 
 class AiAssistAgent:
@@ -244,6 +281,15 @@ class AiAssistAgent:
         self.skills_manager.load_installed_skills()
         if self.skills_manager.installed_skills:
             print(f"✓ Loaded {len(self.skills_manager.installed_skills)} installed Agent Skills")
+            self._allow_local_skill_paths()
+
+    def _allow_local_skill_paths(self):
+        """Auto-allow local skill directories for filesystem access"""
+        for skill in self.skills_manager.installed_skills:
+            if skill.source_type == "local":
+                skill_path = Path(skill.cache_path).resolve()
+                if skill_path not in self.filesystem_tools.allowed_paths:
+                    self.filesystem_tools.allowed_paths.append(skill_path)
 
     async def _run_server(self, name: str, config: MCPServerConfig):
         """Run an MCP server connection (as a background task)"""
@@ -587,7 +633,6 @@ class AiAssistAgent:
         """
         import hashlib
         import json
-        import time
 
         # Build messages list
         if messages is None:
@@ -603,8 +648,6 @@ class AiAssistAgent:
             self._cancel_event = cancel_event
 
         # Loop detection tracking (same as query())
-        start_time = time.time()
-        max_time_seconds = 600  # 10 minutes max
         recent_tool_calls = []
         max_recent_calls = 5
         loop_detection_threshold = 3
@@ -626,15 +669,6 @@ class AiAssistAgent:
             # Check cancellation before each turn
             if cancel_event and cancel_event.is_set():
                 yield {"type": "cancelled"}
-                return
-
-            # Check time-based timeout
-            elapsed = time.time() - start_time
-            if elapsed > max_time_seconds:
-                yield {
-                    "type": "error",
-                    "message": f"Task timeout after {int(elapsed)} seconds (max: {max_time_seconds}s)",
-                }
                 return
 
             if progress_callback:
@@ -1122,8 +1156,8 @@ class AiAssistAgent:
             if not entity_type or not entities:
                 return
 
-            # Store entities
-            saved_count = 0
+            # Prepare all entity data (pure Python, fast)
+            prepared: list[tuple[str, dict, datetime, list]] = []
             for entity_data in entities[:20]:  # Limit to 20 entities per call
                 entity_id = entity_data.get("id") or entity_data.get("key")
                 if not entity_id:
@@ -1150,6 +1184,7 @@ class AiAssistAgent:
                             else None
                         ),
                     }
+                    prepared.append((entity_id, stored_data, valid_from, []))
                 elif entity_type == "dci_job":
                     stored_data = {
                         "job_id": entity_id,
@@ -1158,16 +1193,29 @@ class AiAssistAgent:
                         "topic_id": entity_data.get("topic_id"),
                         "state": entity_data.get("state"),
                     }
+                    components = [c for c in entity_data.get("components", []) if c.get("id")]
+                    prepared.append((entity_id, stored_data, valid_from, components))
+                else:
+                    prepared.append((entity_id, entity_data, valid_from, []))
 
-                    # Store components as separate entities
-                    for component in entity_data.get("components", []):
-                        comp_id = component.get("id")
-                        if comp_id:
+            if not prepared:
+                return
+
+            # Batch all KG writes into a single commit, offloaded to thread pool
+            kg = self.knowledge_graph
+
+            def _do_kg_writes():
+                saved = 0
+                with kg.batch():
+                    for eid, sdata, vfrom, comps in prepared:
+                        # Insert components and relationships (DCI jobs)
+                        for component in comps:
+                            comp_id = component["id"]
                             try:
-                                self.knowledge_graph.insert_entity(
+                                kg.insert_entity(
                                     entity_type="dci_component",
                                     entity_id=comp_id,
-                                    valid_from=valid_from,
+                                    valid_from=vfrom,
                                     tx_from=tx_time,
                                     data={
                                         "type": component.get("type"),
@@ -1178,31 +1226,30 @@ class AiAssistAgent:
                             except Exception:
                                 pass  # Entity might already exist
 
-                            # Create relationship
-                            self.knowledge_graph.insert_relationship(
+                            kg.insert_relationship(
                                 rel_type="job_uses_component",
-                                source_id=entity_id,
+                                source_id=eid,
                                 target_id=comp_id,
-                                valid_from=valid_from,
+                                valid_from=vfrom,
                                 tx_from=tx_time,
                                 properties={},
                             )
-                else:
-                    stored_data = entity_data
 
-                # Insert entity
-                try:
-                    self.knowledge_graph.insert_entity(
-                        entity_type=entity_type,
-                        entity_id=entity_id,
-                        valid_from=valid_from,
-                        tx_from=tx_time,
-                        data=stored_data,
-                    )
-                    saved_count += 1
-                except Exception:
-                    # Entity might already exist, that's ok
-                    pass
+                        # Insert main entity
+                        try:
+                            kg.insert_entity(
+                                entity_type=entity_type,
+                                entity_id=eid,
+                                valid_from=vfrom,
+                                tx_from=tx_time,
+                                data=sdata,
+                            )
+                            saved += 1
+                        except Exception:
+                            pass  # Entity might already exist
+                return saved
+
+            saved_count = await asyncio.to_thread(_do_kg_writes)
 
             # Track how many we saved
             if saved_count > 0:
@@ -1239,44 +1286,14 @@ class AiAssistAgent:
             history_parts.append(f"Assistant: {ex['assistant']}")
         history_text = "\n\n".join(history_parts)
 
-        synthesis_prompt = f"""Review this conversation and identify learnings to save.
-
-Extract:
-- **User Preferences**: Stated preferences about code style, workflows, tools
-- **Lessons Learned**: Insights about bugs, patterns, best practices, gotchas
-- **Project Context**: Background about projects, goals, teams, constraints
-- **Decision Rationale**: Why certain implementation choices were made
-
-For each learning:
-- Write 1-2 sentence summary
-- Suggest unique key (e.g., "python_test_framework", "dci_friday_failures")
-- Assign confidence (0.0-1.0 based on how explicit/clear it was)
-- Add relevant tags
-
-Focus: {focus if focus != 'all' else 'everything'}
-
-Conversation:
-{history_text}
-
-Output valid JSON only (no markdown):
-{{
-  "insights": [
-    {{
-      "category": "user_preference|lesson_learned|project_context|decision_rationale",
-      "key": "unique_identifier",
-      "content": "1-2 sentence summary",
-      "confidence": 0.9,
-      "tags": ["tag1", "tag2"]
-    }}
-  ]
-}}
-
-If no learnings, return {{"insights": []}}
-"""
+        synthesis_prompt = SYNTHESIS_PROMPT_TEMPLATE.format(
+            focus=focus if focus != "all" else "everything",
+            history_text=history_text,
+        )
 
         try:
             response = self.anthropic.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model=self.config.model,
                 max_tokens=2000,
                 messages=[{"role": "user", "content": synthesis_prompt}],
             )
@@ -1323,6 +1340,113 @@ If no learnings, return {{"insights": []}}
             print(f"⚠️  Synthesis failed - invalid JSON: {e}")
         except Exception as e:
             print(f"⚠️  Synthesis failed: {e}")
+
+    async def _run_synthesis_from_kg(self, hours: int = 24) -> str:
+        """Review recent conversation entities from KG and extract knowledge
+
+        Args:
+            hours: How many hours back to look for conversations
+
+        Returns:
+            Summary of synthesis results
+        """
+        if not self.knowledge_graph or not self.knowledge_tools:
+            return "Knowledge graph not available"
+
+        now = datetime.now()
+        cutoff = now - timedelta(hours=hours)
+
+        # Check for synthesis marker to avoid re-processing
+        markers = self.knowledge_graph.query_as_of(now, entity_type="synthesis_marker", limit=1)
+        if markers:
+            last_synthesis = markers[0].valid_from
+            if last_synthesis > cutoff:
+                cutoff = last_synthesis
+
+        # Get conversation entities since cutoff
+        conversations = self.knowledge_graph.query_as_of(now, entity_type="conversation", valid_from_after=cutoff)
+
+        if not conversations:
+            print("💭 No new conversations to synthesize")
+            return "No new conversations to synthesize"
+
+        # Build conversation text
+        history_parts = []
+        for conv in conversations:
+            data = conv.data
+            history_parts.append(f"User: {data.get('user', '')}")
+            history_parts.append(f"Assistant: {data.get('assistant', '')}")
+        history_text = "\n\n".join(history_parts)
+
+        synthesis_prompt = SYNTHESIS_PROMPT_TEMPLATE.format(
+            focus="everything",
+            history_text=history_text,
+        )
+
+        try:
+            response = self.anthropic.messages.create(
+                model=self.config.model,
+                max_tokens=2000,
+                messages=[{"role": "user", "content": synthesis_prompt}],
+            )
+
+            first_block = response.content[0]
+            response_text = first_block.text.strip() if hasattr(first_block, "text") else ""
+
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+
+            insights_data = json.loads(response_text)
+            insights = insights_data.get("insights", [])
+
+            if not insights:
+                print("💭 Synthesis complete - no new learnings to save")
+                # Still record the marker so we don't re-process
+                self.knowledge_graph.insert_entity(
+                    entity_type="synthesis_marker",
+                    data={"synthesized_conversations": len(conversations)},
+                    valid_from=now,
+                )
+                return "Synthesis complete - no new learnings"
+
+            saved_count = 0
+            for insight in insights:
+                try:
+                    self.knowledge_graph.insert_knowledge(
+                        entity_type=insight["category"],
+                        key=insight["key"],
+                        content=insight["content"],
+                        metadata={
+                            "tags": insight.get("tags", []),
+                            "source": "auto_synthesis",
+                            "synthesized_at": now.isoformat(),
+                        },
+                        confidence=insight.get("confidence", 1.0),
+                    )
+                    saved_count += 1
+                    print(f"💡 Learned: {insight['category']}:{insight['key']}")
+                except Exception as e:
+                    print(f"⚠️  Failed to save insight {insight.get('key')}: {e}")
+
+            # Record synthesis marker
+            self.knowledge_graph.insert_entity(
+                entity_type="synthesis_marker",
+                data={"synthesized_conversations": len(conversations), "insights_saved": saved_count},
+                valid_from=now,
+            )
+
+            summary = f"Saved {saved_count} new learnings from {len(conversations)} conversations"
+            print(f"✓ {summary}")
+            return summary
+
+        except json.JSONDecodeError as e:
+            print(f"⚠️  Synthesis failed - invalid JSON: {e}")
+            return f"Synthesis failed - invalid JSON: {e}"
+        except Exception as e:
+            print(f"⚠️  Synthesis failed: {e}")
+            return f"Synthesis failed: {e}"
 
     async def check_and_run_synthesis(self, conversation_memory: "ConversationMemory"):
         """Check if synthesis was triggered and run it

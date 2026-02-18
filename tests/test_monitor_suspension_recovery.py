@@ -83,14 +83,16 @@ async def test_no_missed_run_if_not_in_window(mock_agent, temp_schedule_file):
         monitor = scheduler.monitors[0]
         monitor.run = AsyncMock()
 
+        # Mock user tasks too (nightly-synthesis default task)
+        for task in scheduler.user_tasks:
+            task.run = AsyncMock()
+
         # Simulate wake event: Friday 8 AM, suspended for 1 hour
         # Scheduled time 9 AM was NOT missed (still in future)
         now = datetime(2026, 2, 6, 8, 0, 0)  # Friday Feb 6, 8:00 AM
         wall_jump_seconds = 1 * 3600  # 1 hour suspension
 
-        with patch("ai_assist.schedule_recalculator.datetime") as mock_datetime:
-            mock_datetime.now.return_value = now
-            await scheduler._handle_wake_event(wall_jump_seconds)
+        await scheduler._handle_wake_event(wall_jump_seconds, now=now)
 
         # Monitor should NOT have been executed
         monitor.run.assert_not_called()

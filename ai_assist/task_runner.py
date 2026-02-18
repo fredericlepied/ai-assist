@@ -41,8 +41,10 @@ class TaskRunner:
         timestamp = datetime.now()
 
         try:
-            # Detect and execute MCP prompts vs natural language
-            if self.task_def.is_mcp_prompt:
+            # Detect and execute built-in, MCP prompts, or natural language
+            if self.task_def.prompt == "__builtin__:nightly_synthesis":
+                output = await self.agent._run_synthesis_from_kg()
+            elif self.task_def.is_mcp_prompt:
                 server_name, prompt_name = self.task_def.parse_mcp_prompt()
                 output = await self.agent.execute_mcp_prompt(
                     server_name, prompt_name, self.task_def.prompt_arguments, max_turns=self.task_def.max_turns

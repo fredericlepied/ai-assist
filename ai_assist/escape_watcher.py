@@ -107,7 +107,10 @@ class EscapeWatcher:
 
                 if ch == b"\x1b":
                     # Wait briefly for follow-up bytes (escape sequence)
-                    ready, _, _ = select.select([stdin_fd, stop_fd], [], [], self.ESCAPE_TIMEOUT)
+                    try:
+                        ready, _, _ = select.select([stdin_fd, stop_fd], [], [], self.ESCAPE_TIMEOUT)
+                    except (ValueError, OSError):
+                        break
 
                     if stop_fd in ready:
                         break

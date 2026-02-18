@@ -7,7 +7,7 @@ from datetime import date
 import pytest
 
 from ai_assist.config import AiAssistConfig
-from ai_assist.filesystem_tools import ALLOWED_COMMANDS_FILE, FilesystemTools
+from ai_assist.filesystem_tools import ALLOWED_COMMANDS_FILE, ALLOWED_PATHS_FILE, FilesystemTools
 
 # --- Phase 1: Command allowlist + user confirmation ---
 
@@ -429,3 +429,289 @@ async def test_get_current_time():
     result = await tools.execute_tool("get_current_time", {})
 
     assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", result)
+
+
+# --- Phase 7: Interactive path approval ---
+
+
+@pytest.mark.asyncio
+async def test_blocked_path_calls_path_confirmation_callback(tmp_path):
+    """When path is blocked and path_confirmation_callback is set, it is called"""
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[str(tmp_path / "allowed")],
+    )
+    tools = FilesystemTools(config)
+
+    blocked_file = tmp_path / "blocked" / "data.txt"
+    blocked_file.parent.mkdir(parents=True, exist_ok=True)
+    blocked_file.write_text("hello")
+
+    callback_called_with = None
+
+    async def mock_path_callback(description: str) -> bool:
+        nonlocal callback_called_with
+        callback_called_with = description
+        return True
+
+    tools.path_confirmation_callback = mock_path_callback
+
+    result = await tools.execute_tool("read_file", {"path": str(blocked_file)})
+
+    assert callback_called_with is not None
+    assert "hello" in result
+
+
+@pytest.mark.asyncio
+async def test_blocked_path_user_rejects(tmp_path):
+    """When user rejects path via callback, access is denied"""
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[str(tmp_path / "allowed")],
+    )
+    tools = FilesystemTools(config)
+
+    blocked_file = tmp_path / "blocked" / "data.txt"
+    blocked_file.parent.mkdir(parents=True, exist_ok=True)
+    blocked_file.write_text("secret")
+
+    async def reject_callback(description: str) -> bool:
+        return False
+
+    tools.path_confirmation_callback = reject_callback
+
+    result = await tools.execute_tool("read_file", {"path": str(blocked_file)})
+
+    assert "rejected" in result.lower() or "not allowed" in result.lower()
+    assert "secret" not in result
+
+
+@pytest.mark.asyncio
+async def test_blocked_path_no_callback_still_blocks(tmp_path):
+    """Without callback, blocked paths return error (existing behavior)"""
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[str(tmp_path / "allowed")],
+    )
+    tools = FilesystemTools(config)
+
+    blocked_file = tmp_path / "blocked" / "data.txt"
+    blocked_file.parent.mkdir(parents=True, exist_ok=True)
+    blocked_file.write_text("secret")
+
+    # No path_confirmation_callback set
+    result = await tools.execute_tool("read_file", {"path": str(blocked_file)})
+
+    assert "not allowed" in result.lower() or "outside allowed" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_path_callback_works_for_search_in_file(tmp_path):
+    """Path confirmation callback works for search_in_file too"""
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[str(tmp_path / "allowed")],
+    )
+    tools = FilesystemTools(config)
+
+    blocked_file = tmp_path / "blocked" / "data.txt"
+    blocked_file.parent.mkdir(parents=True, exist_ok=True)
+    blocked_file.write_text("findme\nother line")
+
+    async def approve_callback(description: str) -> bool:
+        return True
+
+    tools.path_confirmation_callback = approve_callback
+
+    result = await tools.execute_tool("search_in_file", {"path": str(blocked_file), "pattern": "findme"})
+
+    assert "findme" in result
+
+
+@pytest.mark.asyncio
+async def test_path_callback_works_for_list_directory(tmp_path):
+    """Path confirmation callback works for list_directory too"""
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[str(tmp_path / "allowed")],
+    )
+    tools = FilesystemTools(config)
+
+    blocked_dir = tmp_path / "blocked"
+    blocked_dir.mkdir(parents=True, exist_ok=True)
+    (blocked_dir / "file.txt").write_text("x")
+
+    async def approve_callback(description: str) -> bool:
+        return True
+
+    tools.path_confirmation_callback = approve_callback
+
+    result = await tools.execute_tool("list_directory", {"path": str(blocked_dir)})
+
+    assert "file.txt" in result
+
+
+# --- Phase 8: Persistent path allowlist ---
+
+
+def test_add_permanent_allowed_path(tmp_path):
+    """add_permanent_allowed_path persists path to JSON file"""
+    config = AiAssistConfig(anthropic_api_key="test")
+    tools = FilesystemTools(config)
+
+    new_path = str(tmp_path / "new-allowed")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+        tools.add_permanent_allowed_path(new_path)
+
+    from pathlib import Path
+
+    assert Path(new_path).resolve() in tools.allowed_paths
+
+    json_file = tmp_path / ALLOWED_PATHS_FILE
+    data = json.loads(json_file.read_text())
+    assert new_path in data
+
+
+def test_add_permanent_allowed_path_no_duplicate(tmp_path):
+    """Adding the same path twice does not create duplicates"""
+    config = AiAssistConfig(anthropic_api_key="test")
+    tools = FilesystemTools(config)
+
+    new_path = str(tmp_path / "dup-path")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+        tools.add_permanent_allowed_path(new_path)
+        tools.add_permanent_allowed_path(new_path)
+
+    json_file = tmp_path / ALLOWED_PATHS_FILE
+    data = json.loads(json_file.read_text())
+    assert data.count(new_path) == 1
+
+
+def test_load_user_allowed_paths(tmp_path):
+    """Paths from persistent JSON file are loaded at init"""
+    json_file = tmp_path / ALLOWED_PATHS_FILE
+    json_file.write_text(json.dumps(["/opt/custom", "/data/shared"]))
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+        config = AiAssistConfig(anthropic_api_key="test")
+        tools = FilesystemTools(config)
+
+    from pathlib import Path
+
+    assert Path("/opt/custom").resolve() in tools.allowed_paths
+    assert Path("/data/shared").resolve() in tools.allowed_paths
+
+
+def test_load_user_allowed_paths_no_file():
+    """Missing JSON file does not cause errors"""
+    config = AiAssistConfig(anthropic_api_key="test")
+    tools = FilesystemTools(config)
+    # Should not raise - the file simply doesn't exist
+    assert len(tools.allowed_paths) > 0  # has defaults
+
+
+def test_load_user_allowed_paths_corrupt_json(tmp_path):
+    """Corrupt JSON file is silently ignored"""
+    json_file = tmp_path / ALLOWED_PATHS_FILE
+    json_file.write_text("not valid json {{{")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+        config = AiAssistConfig(anthropic_api_key="test")
+        tools = FilesystemTools(config)
+
+    # Should still have defaults, no crash
+    assert len(tools.allowed_paths) > 0
+
+
+@pytest.mark.asyncio
+async def test_permanently_allowed_path_accessible(tmp_path):
+    """A permanently added path is accessible without callback"""
+    target_dir = tmp_path / "persistent-allowed"
+    target_dir.mkdir()
+    test_file = target_dir / "data.txt"
+    test_file.write_text("persistent data")
+
+    json_file = tmp_path / ALLOWED_PATHS_FILE
+    json_file.write_text(json.dumps([str(target_dir)]))
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+        config = AiAssistConfig(
+            anthropic_api_key="test",
+            allowed_paths=[str(tmp_path / "other")],
+        )
+        tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("read_file", {"path": str(test_file)})
+    assert "persistent data" in result
+
+
+# --- Phase 9: Local skill paths auto-allowed ---
+
+
+def test_local_skill_paths_added_to_allowed_paths(tmp_path):
+    """Local skills have their paths automatically added to allowed_paths on startup"""
+
+    from ai_assist.agent import AiAssistAgent
+    from ai_assist.skills_manager import InstalledSkill
+
+    config = AiAssistConfig(
+        anthropic_api_key="test-key",
+        model="claude-3-5-sonnet-20241022",
+        mcp_servers={},
+    )
+    agent = AiAssistAgent(config)
+
+    # Simulate a local skill in the installed list
+    local_path = tmp_path / "my-local-skill"
+    local_path.mkdir()
+    agent.skills_manager.installed_skills = [
+        InstalledSkill(
+            name="test-local",
+            source=str(local_path),
+            source_type="local",
+            branch="main",
+            installed_at="2026-01-01T00:00:00",
+            cache_path=str(local_path),
+        ),
+    ]
+
+    agent._allow_local_skill_paths()
+
+    assert local_path.resolve() in agent.filesystem_tools.allowed_paths
+
+
+def test_git_skill_paths_not_added_to_allowed_paths(tmp_path):
+    """Git skills (already under config dir) are not redundantly added"""
+    from ai_assist.agent import AiAssistAgent
+    from ai_assist.skills_manager import InstalledSkill
+
+    config = AiAssistConfig(
+        anthropic_api_key="test-key",
+        model="claude-3-5-sonnet-20241022",
+        mcp_servers={},
+    )
+    agent = AiAssistAgent(config)
+
+    initial_count = len(agent.filesystem_tools.allowed_paths)
+
+    agent.skills_manager.installed_skills = [
+        InstalledSkill(
+            name="some-git-skill",
+            source="owner/repo",
+            source_type="git",
+            branch="main",
+            installed_at="2026-01-01T00:00:00",
+            cache_path=str(tmp_path / "cache"),
+        ),
+    ]
+
+    agent._allow_local_skill_paths()
+
+    assert len(agent.filesystem_tools.allowed_paths) == initial_count

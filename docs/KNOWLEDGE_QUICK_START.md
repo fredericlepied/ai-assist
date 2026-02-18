@@ -54,7 +54,7 @@ SQLite database with bi-temporal tracking (when learned, when valid).
 ### Common questions
 
 **Q: Does the agent save everything I say?**
-A: No. Only explicit preferences, lessons, context, and decisions. Not casual conversation.
+A: Yes. All conversation exchanges are stored in the Knowledge Graph as they happen. A nightly synthesis task then reviews the day's conversations and extracts structured knowledge (preferences, lessons, context, decisions).
 
 **Q: Can I delete stored knowledge?**
 A: Yes, manually edit the SQLite database or delete entries.
@@ -66,7 +66,7 @@ A: Only what you explicitly state or the agent learns from conversation. Typical
 A: Knowledge retrieval works offline. Synthesis requires Claude API (uses Haiku model).
 
 **Q: Can I see synthesis happen?**
-A: No, it's transparent. You'll see quiet logs like "💡 Learned: ..." after responses.
+A: Synthesis runs as a nightly scheduled task (configurable in `schedules.json`). You'll see logs in monitor mode when it runs.
 
 ### Example: Real knowledge base
 
