@@ -605,7 +605,22 @@ class KnowledgeGraph:
 
         data = {"key": key, "content": content, "metadata": metadata}
 
-        self.insert_entity(entity_id=entity_id, entity_type=entity_type, data=data, valid_from=valid_from)
+        # Upsert: update existing entity or insert new one
+        existing = self.get_entity(entity_id)
+        if existing:
+            now = datetime.now()
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                UPDATE entities
+                SET data = ?, valid_from = ?, tx_from = ?, tx_to = NULL
+                WHERE id = ?
+            """,
+                (json.dumps(data), valid_from.isoformat(), now.isoformat(), entity_id),
+            )
+            self.conn.commit()
+        else:
+            self.insert_entity(entity_id=entity_id, entity_type=entity_type, data=data, valid_from=valid_from)
 
         return entity_id
 

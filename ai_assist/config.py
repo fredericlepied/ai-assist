@@ -84,7 +84,7 @@ class AiAssistConfig(BaseModel):
 
     # Filesystem path restrictions (Phase 2 security)
     allowed_paths: list[str] = Field(
-        default_factory=lambda: ["~/.ai-assist", "/tmp/ai-assist"],
+        default_factory=lambda: [str(get_config_dir()), "/tmp/ai-assist"],
     )
 
     # Tools requiring user confirmation (Phase 4 security)

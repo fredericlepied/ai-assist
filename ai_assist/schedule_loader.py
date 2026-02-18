@@ -80,13 +80,14 @@ class ScheduleLoader:
         """Ensure default tasks exist in schedules.json
 
         Adds any missing default tasks to the file so the agent can see and edit them.
+        Matches by prompt (functional identifier), not name (user-editable label).
         """
         data = self._load_json()
-        existing_names = {t.get("name") for t in data.get("tasks", [])}
+        existing_prompts = {t.get("prompt") for t in data.get("tasks", [])}
 
         added = []
         for default_task in self.DEFAULT_TASKS:
-            if default_task["name"] not in existing_names:
+            if default_task["prompt"] not in existing_prompts:
                 data["tasks"].append(default_task)
                 added.append(default_task["name"])
 

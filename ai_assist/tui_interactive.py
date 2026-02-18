@@ -6,6 +6,7 @@ import signal
 import sys
 import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -574,10 +575,9 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
     agent.on_inner_execution = on_inner_execution
 
-    # Set up security confirmation callback for filesystem tools
-    async def command_confirmation_callback(command: str) -> bool:
-        """Prompt user to approve non-allowlisted commands or destructive actions"""
-        # Remember what was running so we only restart what we stopped
+    # Set up security confirmation callbacks for filesystem tools
+    async def _prompt_user_approval(message: str, detail: str) -> str:
+        """Common approval prompt logic. Returns user's choice string."""
         live = agent._active_live
         live_was_running = live and live._started
         if live_was_running:
@@ -600,8 +600,8 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         except (ImportError, termios.error, OSError):
             pass
 
-        console.print("\n[yellow]Security: The agent wants to run:[/yellow]")
-        console.print(f"  [bold]{command}[/bold]")
+        console.print(f"\n[yellow]{message}[/yellow]")
+        console.print(f"  [bold]{detail}[/bold]")
 
         # asyncio replaces the default SIGINT handler with one that defers
         # KeyboardInterrupt to the next event-loop iteration.  Because input()
@@ -612,14 +612,8 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         try:
             answer = await asyncio.to_thread(input, "Allow? [y/N/a(lways)] ")
             choice = answer.strip().lower()
-            approved = choice in ("y", "yes", "a", "always")
-
-            if choice in ("a", "always"):
-                cmd_name = command.split()[0].rsplit("/", 1)[-1]
-                agent.filesystem_tools.add_permanent_allowed_command(cmd_name)
-                console.print(f"[green]'{cmd_name}' permanently added to allowed commands[/green]")
         except EOFError:
-            approved = False
+            choice = "n"
         except KeyboardInterrupt:
             console.print()
             raise
@@ -631,9 +625,33 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         if live_was_running:
             live.start()
 
+        return choice
+
+    async def command_confirmation_callback(command: str) -> bool:
+        """Prompt user to approve non-allowlisted commands or destructive actions"""
+        choice = await _prompt_user_approval("Security: The agent wants to run:", command)
+        approved = choice in ("y", "yes", "a", "always")
+        if choice in ("a", "always"):
+            cmd_name = command.split()[0].rsplit("/", 1)[-1]
+            agent.filesystem_tools.add_permanent_allowed_command(cmd_name)
+            console.print(f"[green]'{cmd_name}' permanently added to allowed commands[/green]")
+        return approved
+
+    async def path_confirmation_callback(description: str) -> bool:
+        """Prompt user to approve access to a path outside allowed directories"""
+        choice = await _prompt_user_approval("Security: The agent wants to access:", description)
+        approved = choice in ("y", "yes", "a", "always")
+        if choice in ("a", "always"):
+            # Extract path from description ("Access path: /foo/bar/file.txt")
+            # Add the parent directory for broader usability
+            path_str = description.replace("Access path: ", "")
+            parent_dir = str(Path(path_str).parent)
+            agent.filesystem_tools.add_permanent_allowed_path(parent_dir)
+            console.print(f"[green]'{parent_dir}' permanently added to allowed paths[/green]")
         return approved
 
     agent.filesystem_tools.confirmation_callback = command_confirmation_callback
+    agent.filesystem_tools.path_confirmation_callback = path_confirmation_callback
 
     try:
         while True:

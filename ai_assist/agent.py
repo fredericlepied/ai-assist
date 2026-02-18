@@ -3,6 +3,7 @@
 import asyncio
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from anthropic import Anthropic, AnthropicVertex
@@ -280,6 +281,15 @@ class AiAssistAgent:
         self.skills_manager.load_installed_skills()
         if self.skills_manager.installed_skills:
             print(f"✓ Loaded {len(self.skills_manager.installed_skills)} installed Agent Skills")
+            self._allow_local_skill_paths()
+
+    def _allow_local_skill_paths(self):
+        """Auto-allow local skill directories for filesystem access"""
+        for skill in self.skills_manager.installed_skills:
+            if skill.source_type == "local":
+                skill_path = Path(skill.cache_path).resolve()
+                if skill_path not in self.filesystem_tools.allowed_paths:
+                    self.filesystem_tools.allowed_paths.append(skill_path)
 
     async def _run_server(self, name: str, config: MCPServerConfig):
         """Run an MCP server connection (as a background task)"""
@@ -1270,7 +1280,7 @@ class AiAssistAgent:
 
         try:
             response = self.anthropic.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model=self.config.model,
                 max_tokens=2000,
                 messages=[{"role": "user", "content": synthesis_prompt}],
             )
@@ -1362,7 +1372,7 @@ class AiAssistAgent:
 
         try:
             response = self.anthropic.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model=self.config.model,
                 max_tokens=2000,
                 messages=[{"role": "user", "content": synthesis_prompt}],
             )
