@@ -40,6 +40,7 @@ class AiAssistCompleter(Completer):
             "/skill/uninstall",
             "/skill/list",
             "/skill/search",
+            "/mcp/restart",
             "/exit",
             "/quit",
             "/help",
@@ -65,6 +66,20 @@ class AiAssistCompleter(Completer):
                             start_position=-len(text),
                             display=full_command,
                             display_meta=f"{skill.source}",
+                        )
+                return  # Don't continue to other completions
+
+            if text.startswith("/mcp/restart ") and self.agent:
+                # Complete with configured MCP server names
+                prefix = text.split(" ", 1)[1] if " " in text else ""
+                for server_name in self.agent.config.mcp_servers.keys():
+                    if server_name.startswith(prefix):
+                        full_command = f"/mcp/restart {server_name}"
+                        yield Completion(
+                            full_command,
+                            start_position=-len(text),
+                            display=full_command,
+                            display_meta="MCP server",
                         )
                 return  # Don't continue to other completions
 
@@ -179,6 +194,7 @@ class AiAssistCompleter(Completer):
             "/skill/uninstall": "Uninstall an installed Agent Skill",
             "/skill/list": "List all installed Agent Skills",
             "/skill/search": "Search ClawHub and skills.sh for skills",
+            "/mcp/restart": "Restart an MCP server",
             "/exit": "Exit interactive mode",
             "/quit": "Exit interactive mode",
             "/help": "Show help message",

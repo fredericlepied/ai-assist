@@ -121,6 +121,7 @@ ai-assist
 - `/skill/uninstall <name>` - Uninstall an Agent Skill
 - `/skill/list` - List installed Agent Skills
 - `/skill/search <query>` - Search ClawHub and skills.sh registries
+- `/mcp/restart <server>` - Restart an MCP server (picks up binary updates)
 - `/help` - Show help
 - `/exit` or `/quit` - Exit
 
