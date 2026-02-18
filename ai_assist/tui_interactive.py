@@ -647,6 +647,26 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                     if await handle_skill_management_command(user_input, agent, console):
                         continue
 
+                    # Handle /mcp/restart before prompt command (which would parse it as /mcp/restart)
+                    if user_input.lower().startswith("/mcp/restart"):
+                        parts = user_input.split(maxsplit=1)
+                        if len(parts) < 2 or not parts[1].strip():
+                            console.print("[yellow]Usage: /mcp/restart <server_name>[/yellow]")
+                            server_names = list(agent.config.mcp_servers.keys())
+                            if server_names:
+                                console.print(f"Available servers: {', '.join(server_names)}")
+                            else:
+                                console.print("[dim]No MCP servers configured[/dim]")
+                        else:
+                            server_name = parts[1].strip()
+                            try:
+                                console.print(f"\n[cyan]Restarting MCP server '{server_name}'...[/cyan]")
+                                await agent.restart_mcp_server(server_name)
+                                console.print()
+                            except ValueError as e:
+                                console.print(f"\n[red]{e}[/red]\n")
+                        continue
+
                     # Convert conversation_memory to messages for prompt injection
                     messages = conversation_memory.to_messages()
                     if await handle_prompt_command(user_input, agent, messages, console, session):
@@ -980,6 +1000,7 @@ async def handle_help_command(console: Console):
 - `/skill/uninstall <name>` - Uninstall an Agent Skill
 - `/skill/list` - List installed Agent Skills
 - `/skill/search <query>` - Search ClawHub and skills.sh registries
+- `/mcp/restart <server>` - Restart an MCP server (picks up binary updates)
 - `/exit` or `/quit` - Exit interactive mode
 - `/help` - Show this help
 
