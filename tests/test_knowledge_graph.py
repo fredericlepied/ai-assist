@@ -619,3 +619,78 @@ def test_query_as_of_with_valid_from_after(kg):
     results = kg.query_as_of(query_time, entity_type="conversation", valid_from_after=cutoff)
     assert len(results) == 1
     assert results[0].data["user"] == "Recent question"
+
+
+def test_batch_mode_defers_commit(kg):
+    """Batch mode defers commits until batch exits"""
+    commit_count = 0
+    original_maybe = kg._maybe_commit
+
+    def counting_maybe():
+        nonlocal commit_count
+        commit_count += 1
+        original_maybe()
+
+    kg._maybe_commit = counting_maybe
+
+    with kg.batch():
+        kg.insert_entity(
+            entity_type="test",
+            entity_id="batch-1",
+            valid_from=datetime(2026, 2, 18, 10, 0),
+            data={"x": 1},
+        )
+        kg.insert_entity(
+            entity_type="test",
+            entity_id="batch-2",
+            valid_from=datetime(2026, 2, 18, 10, 0),
+            data={"x": 2},
+        )
+        # _maybe_commit was called but should not have committed (batch mode)
+        assert commit_count == 2
+
+    # Both entities should be readable after batch exits
+    assert kg.get_entity("batch-1") is not None
+    assert kg.get_entity("batch-2") is not None
+
+
+def test_batch_mode_commits_on_exception(kg):
+    """Batch mode commits even when exception occurs inside the block"""
+    try:
+        with kg.batch():
+            kg.insert_entity(
+                entity_type="test",
+                entity_id="batch-ex",
+                valid_from=datetime(2026, 2, 18, 10, 0),
+                data={"x": 1},
+            )
+            raise ValueError("test error")
+    except ValueError:
+        pass
+
+    # Entity should still be committed
+    assert kg.get_entity("batch-ex") is not None
+
+
+def test_non_batch_mode_commits_immediately(kg):
+    """Without batch mode, each insert commits immediately (backward compat)"""
+    # Insert first entity
+    kg.insert_entity(
+        entity_type="test",
+        entity_id="immediate-1",
+        valid_from=datetime(2026, 2, 18, 10, 0),
+        data={"x": 1},
+    )
+    assert kg.get_entity("immediate-1") is not None
+
+    # Insert second entity
+    kg.insert_entity(
+        entity_type="test",
+        entity_id="immediate-2",
+        valid_from=datetime(2026, 2, 18, 10, 0),
+        data={"x": 2},
+    )
+    assert kg.get_entity("immediate-2") is not None
+
+    # Verify _batch_mode is False by default
+    assert kg._batch_mode is False

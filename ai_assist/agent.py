@@ -1156,8 +1156,8 @@ class AiAssistAgent:
             if not entity_type or not entities:
                 return
 
-            # Store entities
-            saved_count = 0
+            # Prepare all entity data (pure Python, fast)
+            prepared: list[tuple[str, dict, datetime, list]] = []
             for entity_data in entities[:20]:  # Limit to 20 entities per call
                 entity_id = entity_data.get("id") or entity_data.get("key")
                 if not entity_id:
@@ -1184,6 +1184,7 @@ class AiAssistAgent:
                             else None
                         ),
                     }
+                    prepared.append((entity_id, stored_data, valid_from, []))
                 elif entity_type == "dci_job":
                     stored_data = {
                         "job_id": entity_id,
@@ -1192,16 +1193,29 @@ class AiAssistAgent:
                         "topic_id": entity_data.get("topic_id"),
                         "state": entity_data.get("state"),
                     }
+                    components = [c for c in entity_data.get("components", []) if c.get("id")]
+                    prepared.append((entity_id, stored_data, valid_from, components))
+                else:
+                    prepared.append((entity_id, entity_data, valid_from, []))
 
-                    # Store components as separate entities
-                    for component in entity_data.get("components", []):
-                        comp_id = component.get("id")
-                        if comp_id:
+            if not prepared:
+                return
+
+            # Batch all KG writes into a single commit, offloaded to thread pool
+            kg = self.knowledge_graph
+
+            def _do_kg_writes():
+                saved = 0
+                with kg.batch():
+                    for eid, sdata, vfrom, comps in prepared:
+                        # Insert components and relationships (DCI jobs)
+                        for component in comps:
+                            comp_id = component["id"]
                             try:
-                                self.knowledge_graph.insert_entity(
+                                kg.insert_entity(
                                     entity_type="dci_component",
                                     entity_id=comp_id,
-                                    valid_from=valid_from,
+                                    valid_from=vfrom,
                                     tx_from=tx_time,
                                     data={
                                         "type": component.get("type"),
@@ -1212,31 +1226,30 @@ class AiAssistAgent:
                             except Exception:
                                 pass  # Entity might already exist
 
-                            # Create relationship
-                            self.knowledge_graph.insert_relationship(
+                            kg.insert_relationship(
                                 rel_type="job_uses_component",
-                                source_id=entity_id,
+                                source_id=eid,
                                 target_id=comp_id,
-                                valid_from=valid_from,
+                                valid_from=vfrom,
                                 tx_from=tx_time,
                                 properties={},
                             )
-                else:
-                    stored_data = entity_data
 
-                # Insert entity
-                try:
-                    self.knowledge_graph.insert_entity(
-                        entity_type=entity_type,
-                        entity_id=entity_id,
-                        valid_from=valid_from,
-                        tx_from=tx_time,
-                        data=stored_data,
-                    )
-                    saved_count += 1
-                except Exception:
-                    # Entity might already exist, that's ok
-                    pass
+                        # Insert main entity
+                        try:
+                            kg.insert_entity(
+                                entity_type=entity_type,
+                                entity_id=eid,
+                                valid_from=vfrom,
+                                tx_from=tx_time,
+                                data=sdata,
+                            )
+                            saved += 1
+                        except Exception:
+                            pass  # Entity might already exist
+                return saved
+
+            saved_count = await asyncio.to_thread(_do_kg_writes)
 
             # Track how many we saved
             if saved_count > 0:

@@ -757,16 +757,21 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                                 }
                             )
 
-                            # Save to knowledge graph for cross-session memory
+                            # Save to knowledge graph for cross-session memory (fire-and-forget)
                             if kg_context and kg_context.knowledge_graph:
-                                try:
-                                    kg_context.knowledge_graph.insert_entity(
-                                        entity_type="conversation",
-                                        data={"user": user_input, "assistant": full_response},
-                                        valid_from=datetime.now(),
-                                    )
-                                except Exception:
-                                    pass
+
+                                async def _save_conv2(kg=kg_context.knowledge_graph, u=user_input, r=full_response):
+                                    try:
+                                        await asyncio.to_thread(
+                                            kg.insert_entity,
+                                            entity_type="conversation",
+                                            data={"user": u, "assistant": r},
+                                            valid_from=datetime.now(),
+                                        )
+                                    except Exception:
+                                        pass
+
+                                asyncio.create_task(_save_conv2())
 
                         except Exception as e:
                             console.print(f"\n[red]Error: {e}[/red]\n")
@@ -852,16 +857,21 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                         {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
                     )
 
-                    # Save to knowledge graph for cross-session memory
+                    # Save to knowledge graph for cross-session memory (fire-and-forget)
                     if kg_context and kg_context.knowledge_graph:
-                        try:
-                            kg_context.knowledge_graph.insert_entity(
-                                entity_type="conversation",
-                                data={"user": user_input, "assistant": response},
-                                valid_from=datetime.now(),
-                            )
-                        except Exception:
-                            pass
+
+                        async def _save_conv(kg=kg_context.knowledge_graph, u=user_input, r=response):
+                            try:
+                                await asyncio.to_thread(
+                                    kg.insert_entity,
+                                    entity_type="conversation",
+                                    data={"user": u, "assistant": r},
+                                    valid_from=datetime.now(),
+                                )
+                            except Exception:
+                                pass
+
+                        asyncio.create_task(_save_conv())
 
                 except KeyboardInterrupt:
                     console.print("\n[yellow]Query cancelled[/yellow]")

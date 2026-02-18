@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
@@ -128,7 +129,8 @@ class KnowledgeGraph:
             db_path = str(get_config_dir() / "knowledge_graph.db")
 
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path, timeout=30)
+        self.conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+        self._batch_mode = False
         try:
             self.conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.OperationalError:
@@ -227,6 +229,25 @@ class KnowledgeGraph:
 
         self.conn.commit()
 
+    def _maybe_commit(self):
+        """Commit unless we are in batch mode."""
+        if not self._batch_mode:
+            self.conn.commit()
+
+    @contextmanager
+    def batch(self):
+        """Context manager for batching multiple writes into a single commit.
+
+        Defers conn.commit() until the batch exits, which is dramatically
+        faster for multiple sequential inserts.
+        """
+        self._batch_mode = True
+        try:
+            yield self
+        finally:
+            self._batch_mode = False
+            self.conn.commit()
+
     def insert_entity(
         self,
         entity_type: str,
@@ -283,7 +304,7 @@ class KnowledgeGraph:
                 json.dumps(entity.data),
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
         return entity
 
@@ -331,7 +352,7 @@ class KnowledgeGraph:
                 entity_id,
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
         return entity
 
@@ -403,7 +424,7 @@ class KnowledgeGraph:
                 json.dumps(relationship.properties),
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
         return relationship
 
@@ -618,7 +639,7 @@ class KnowledgeGraph:
             """,
                 (json.dumps(data), valid_from.isoformat(), now.isoformat(), entity_id),
             )
-            self.conn.commit()
+            self._maybe_commit()
         else:
             self.insert_entity(entity_id=entity_id, entity_type=entity_type, data=data, valid_from=valid_from)
 
