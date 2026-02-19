@@ -179,3 +179,152 @@ tasks:
     assert len(tasks) == 1
     assert tasks[0].interval == "morning on weekdays"
     assert tasks[0].is_time_based is True
+
+
+# --- Interval-with-range tests ---
+
+
+def test_parse_interval_with_range():
+    """Test parsing '1h between 9:00 and 23:00'"""
+    schedule = TaskLoader.parse_interval_with_range("1h between 9:00 and 23:00")
+
+    assert schedule["interval_seconds"] == 3600
+    assert schedule["start"] == dt_time(9, 0)
+    assert schedule["end"] == dt_time(23, 0)
+    assert schedule["days"] is None
+
+
+def test_parse_interval_with_range_and_days():
+    """Test parsing '1h between 9:00 and 17:00 on weekdays'"""
+    schedule = TaskLoader.parse_interval_with_range("1h between 9:00 and 17:00 on weekdays")
+
+    assert schedule["interval_seconds"] == 3600
+    assert schedule["start"] == dt_time(9, 0)
+    assert schedule["end"] == dt_time(17, 0)
+    assert schedule["days"] == [0, 1, 2, 3, 4]
+
+
+def test_is_interval_with_range():
+    """Test TaskDefinition detects interval-with-range correctly"""
+    range_task = TaskDefinition(
+        name="Hourly Synthesis",
+        prompt="Do synthesis",
+        interval="1h between 9:00 and 23:00",
+    )
+    interval_task = TaskDefinition(
+        name="Simple Interval",
+        prompt="Do something",
+        interval="5m",
+    )
+    time_task = TaskDefinition(
+        name="Time Task",
+        prompt="Do something",
+        interval="morning on weekdays",
+    )
+
+    assert range_task.is_interval_with_range is True
+    assert range_task.is_time_based is False
+    assert interval_task.is_interval_with_range is False
+    assert time_task.is_interval_with_range is False
+
+
+def test_calculate_next_interval_run_within_range():
+    """Test next run when current time is within the range"""
+    schedule = {
+        "interval_seconds": 3600,
+        "start": dt_time(9, 0),
+        "end": dt_time(23, 0),
+        "days": None,
+    }
+
+    # At 10:30, next run should be 11:30 (1h later, within range)
+    from_time = datetime(2026, 2, 19, 10, 30)
+    next_run = TaskLoader.calculate_next_interval_run(schedule, from_time)
+
+    assert next_run == datetime(2026, 2, 19, 11, 30)
+
+
+def test_calculate_next_interval_run_outside_range_before():
+    """Test next run when current time is before the range"""
+    schedule = {
+        "interval_seconds": 3600,
+        "start": dt_time(9, 0),
+        "end": dt_time(23, 0),
+        "days": None,
+    }
+
+    # At 7:00, next run should be 9:00 (start of range)
+    from_time = datetime(2026, 2, 19, 7, 0)
+    next_run = TaskLoader.calculate_next_interval_run(schedule, from_time)
+
+    assert next_run == datetime(2026, 2, 19, 9, 0)
+
+
+def test_calculate_next_interval_run_outside_range_after():
+    """Test next run when current time is after the range"""
+    schedule = {
+        "interval_seconds": 3600,
+        "start": dt_time(9, 0),
+        "end": dt_time(23, 0),
+        "days": None,
+    }
+
+    # At 23:30, next run should be next day 9:00
+    from_time = datetime(2026, 2, 19, 23, 30)
+    next_run = TaskLoader.calculate_next_interval_run(schedule, from_time)
+
+    assert next_run == datetime(2026, 2, 20, 9, 0)
+
+
+def test_calculate_next_interval_run_would_exceed_range():
+    """Test next run when interval would push past end of range"""
+    schedule = {
+        "interval_seconds": 3600,
+        "start": dt_time(9, 0),
+        "end": dt_time(23, 0),
+        "days": None,
+    }
+
+    # At 22:30, adding 1h would be 23:30 which is past end (23:00)
+    # Next run should be next day 9:00
+    from_time = datetime(2026, 2, 19, 22, 30)
+    next_run = TaskLoader.calculate_next_interval_run(schedule, from_time)
+
+    assert next_run == datetime(2026, 2, 20, 9, 0)
+
+
+def test_calculate_next_interval_run_with_days_skip_weekend():
+    """Test next run skips weekend days when 'on weekdays' is set"""
+    schedule = {
+        "interval_seconds": 3600,
+        "start": dt_time(9, 0),
+        "end": dt_time(23, 0),
+        "days": [0, 1, 2, 3, 4],  # weekdays
+    }
+
+    # Friday 23:30 -> should skip to Monday 9:00
+    from_time = datetime(2026, 2, 20, 23, 30)  # Friday
+    assert from_time.weekday() == 4  # Verify it's Friday
+    next_run = TaskLoader.calculate_next_interval_run(schedule, from_time)
+
+    assert next_run == datetime(2026, 2, 23, 9, 0)  # Monday
+    assert next_run.weekday() == 0
+
+
+def test_validate_interval_with_range():
+    """Test that interval-with-range schedules are validated correctly"""
+    # Valid
+    task = TaskDefinition(
+        name="Test",
+        prompt="Test",
+        interval="1h between 9:00 and 23:00",
+    )
+    task.validate()  # Should not raise
+
+    # Valid with days
+    task2 = TaskDefinition(
+        name="Test",
+        prompt="Test",
+        interval="30m between 8:00 and 18:00 on weekdays",
+    )
+    task2.validate()  # Should not raise

@@ -33,9 +33,15 @@ class TaskDefinition:
         return TaskLoader.parse_interval(self.interval)
 
     @property
+    def is_interval_with_range(self) -> bool:
+        """Check if this is an interval-with-range schedule (e.g. '1h between 9:00 and 23:00')"""
+        lower = self.interval.lower()
+        return " between " in lower and " and " in lower
+
+    @property
     def is_time_based(self) -> bool:
         """Check if this is a time-based schedule"""
-        return " on " in self.interval.lower()
+        return " on " in self.interval.lower() and not self.is_interval_with_range
 
     @property
     def is_mcp_prompt(self) -> bool:
@@ -97,7 +103,9 @@ class TaskDefinition:
 
         # Validate interval format
         try:
-            if self.is_time_based:
+            if self.is_interval_with_range:
+                TaskLoader.parse_interval_with_range(self.interval)
+            elif self.is_time_based:
                 TaskLoader.parse_time_schedule(self.interval)
             else:
                 # Validate interval_seconds can be computed
@@ -237,6 +245,153 @@ class TaskLoader:
             raise ValueError(f"Could not find next run time for schedule: {schedule}")
 
         return next_run
+
+    @staticmethod
+    def parse_interval_with_range(schedule_str: str) -> dict:
+        """Parse interval-with-range schedule string
+
+        Formats:
+        - "1h between 9:00 and 23:00"
+        - "30m between 8:00 and 18:00 on weekdays"
+
+        Returns:
+            dict with 'interval_seconds' (int), 'start' (time), 'end' (time), 'days' (list|None)
+        """
+        schedule_str = schedule_str.strip().lower()
+
+        pattern = r"^(.+?)\s+between\s+(\d{1,2}:\d{2})\s+and\s+(\d{1,2}:\d{2})(?:\s+on\s+(.+))?$"
+        match = re.match(pattern, schedule_str)
+        if not match:
+            raise ValueError(
+                f"Invalid interval-with-range format: '{schedule_str}'. "
+                "Use format like '1h between 9:00 and 23:00' or '30m between 8:00 and 18:00 on weekdays'"
+            )
+
+        duration_str = match.group(1).strip()
+        start_str = match.group(2)
+        end_str = match.group(3)
+        days_str = match.group(4)
+
+        # Parse duration using existing parse_interval
+        interval_seconds = TaskLoader.parse_interval(duration_str)
+
+        # Parse start time
+        try:
+            sh, sm = map(int, start_str.split(":"))
+            if not (0 <= sh < 24 and 0 <= sm < 60):
+                raise ValueError("Start time out of range")
+            start_time = dt_time(sh, sm)
+        except (ValueError, AttributeError) as e:
+            raise ValueError(f"Invalid start time: '{start_str}'") from e
+
+        # Parse end time
+        try:
+            eh, em = map(int, end_str.split(":"))
+            if not (0 <= eh < 24 and 0 <= em < 60):
+                raise ValueError("End time out of range")
+            end_time = dt_time(eh, em)
+        except (ValueError, AttributeError) as e:
+            raise ValueError(f"Invalid end time: '{end_str}'") from e
+
+        # Parse optional days
+        days = None
+        if days_str:
+            days_str = days_str.strip()
+            if days_str in TaskLoader.DAY_GROUPS:
+                days = TaskLoader.DAY_GROUPS[days_str]
+            else:
+                day_names = {
+                    "monday": 0,
+                    "mon": 0,
+                    "tuesday": 1,
+                    "tue": 1,
+                    "wednesday": 2,
+                    "wed": 2,
+                    "thursday": 3,
+                    "thu": 3,
+                    "friday": 4,
+                    "fri": 4,
+                    "saturday": 5,
+                    "sat": 5,
+                    "sunday": 6,
+                    "sun": 6,
+                }
+                day_parts = [d.strip() for d in days_str.split(",")]
+                days = []
+                for day in day_parts:
+                    if day in day_names:
+                        days.append(day_names[day])
+                    else:
+                        raise ValueError(f"Invalid day: '{day}'")
+                days = sorted(set(days))
+
+        return {
+            "interval_seconds": interval_seconds,
+            "start": start_time,
+            "end": end_time,
+            "days": days,
+        }
+
+    @staticmethod
+    def calculate_next_interval_run(schedule: dict, from_time: datetime | None = None) -> datetime:
+        """Calculate next run time for an interval-with-range schedule
+
+        Args:
+            schedule: Dict with 'interval_seconds', 'start', 'end', 'days'
+            from_time: Calculate from this time (default: now)
+
+        Returns:
+            Next datetime when task should run
+        """
+        if from_time is None:
+            from_time = datetime.now()
+
+        start = schedule["start"]
+        end = schedule["end"]
+        interval = schedule["interval_seconds"]
+        allowed_days = set(schedule["days"]) if schedule["days"] is not None else None
+
+        current_time = from_time.time()
+        today = from_time.date()
+
+        def _is_allowed_day(d: datetime) -> bool:
+            if allowed_days is None:
+                return True
+            return d.weekday() in allowed_days
+
+        def _next_allowed_day_at_start(base_date) -> datetime:
+            """Find next allowed day starting from base_date, at the start time."""
+            candidate = datetime.combine(base_date, start)
+            max_attempts = 7
+            for _ in range(max_attempts):
+                if _is_allowed_day(candidate):
+                    return candidate
+                candidate += timedelta(days=1)
+            raise ValueError(f"Could not find next allowed day for schedule: {schedule}")
+
+        # Check if we're within the active range today
+        if current_time < start:
+            # Before range: next run is today at start (if allowed day)
+            candidate = datetime.combine(today, start)
+            if _is_allowed_day(candidate):
+                return candidate
+            return _next_allowed_day_at_start(today + timedelta(days=1))
+
+        if current_time >= end:
+            # After range: next run is tomorrow at start (next allowed day)
+            return _next_allowed_day_at_start(today + timedelta(days=1))
+
+        # Within range: next run is from_time + interval
+        next_run = from_time + timedelta(seconds=interval)
+        if next_run.time() >= end:
+            # Would exceed range: next run is tomorrow at start
+            return _next_allowed_day_at_start(today + timedelta(days=1))
+
+        # Still within range and on an allowed day
+        if _is_allowed_day(next_run):
+            return next_run
+
+        return _next_allowed_day_at_start(today + timedelta(days=1))
 
     @staticmethod
     def parse_interval(interval_str: str) -> int:

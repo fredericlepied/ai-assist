@@ -139,7 +139,11 @@ class MonitoringScheduler:
 
             # Restart monitor tasks
             for monitor in self.monitors:
-                interval = 0 if monitor.task_def.is_time_based else monitor.task_def.interval_seconds
+                interval = (
+                    0
+                    if (monitor.task_def.is_time_based or monitor.task_def.is_interval_with_range)
+                    else monitor.task_def.interval_seconds
+                )
                 task_handle = asyncio.create_task(
                     self._schedule_task(monitor.task_def.name, monitor.run, interval, task_def=monitor.task_def)
                 )
@@ -147,7 +151,11 @@ class MonitoringScheduler:
 
             # Restart user tasks
             for task_runner in self.user_tasks:
-                interval = 0 if task_runner.task_def.is_time_based else task_runner.task_def.interval_seconds
+                interval = (
+                    0
+                    if (task_runner.task_def.is_time_based or task_runner.task_def.is_interval_with_range)
+                    else task_runner.task_def.interval_seconds
+                )
                 task_handle = asyncio.create_task(
                     self._schedule_task(
                         task_runner.task_def.name, task_runner.run, interval, task_def=task_runner.task_def
@@ -176,7 +184,11 @@ class MonitoringScheduler:
         tasks = []
 
         for monitor in self.monitors:
-            interval = 0 if monitor.task_def.is_time_based else monitor.task_def.interval_seconds
+            interval = (
+                0
+                if (monitor.task_def.is_time_based or monitor.task_def.is_interval_with_range)
+                else monitor.task_def.interval_seconds
+            )
             task_handle = asyncio.create_task(
                 self._schedule_task(monitor.task_def.name, monitor.run, interval, task_def=monitor.task_def)
             )
@@ -187,7 +199,11 @@ class MonitoringScheduler:
             print(f"Scheduled {len(self.monitors)} monitors")
 
         for task_runner in self.user_tasks:
-            interval = 0 if task_runner.task_def.is_time_based else task_runner.task_def.interval_seconds
+            interval = (
+                0
+                if (task_runner.task_def.is_time_based or task_runner.task_def.is_interval_with_range)
+                else task_runner.task_def.interval_seconds
+            )
             task_handle = asyncio.create_task(
                 self._schedule_task(task_runner.task_def.name, task_runner.run, interval, task_def=task_runner.task_def)
             )
@@ -243,7 +259,16 @@ class MonitoringScheduler:
         """Schedule a periodic task"""
         while self.running:
             try:
-                if task_def and task_def.is_time_based:
+                if task_def and task_def.is_interval_with_range:
+                    schedule = TaskLoader.parse_interval_with_range(task_def.interval)
+                    next_run = TaskLoader.calculate_next_interval_run(schedule)
+                    now = datetime.now()
+
+                    wait_seconds = (next_run - now).total_seconds()
+                    if wait_seconds > 0:
+                        print(f"{name}: Next run at {next_run.strftime('%Y-%m-%d %H:%M')}")
+                        await asyncio.sleep(wait_seconds)
+                elif task_def and task_def.is_time_based:
                     schedule = TaskLoader.parse_time_schedule(task_def.interval)
                     next_run = TaskLoader.calculate_next_run(schedule)
                     now = datetime.now()
@@ -275,7 +300,7 @@ class MonitoringScheduler:
             except Exception as e:
                 print(f"Error in {name}: {e}")
 
-            if not (task_def and task_def.is_time_based):
+            if not (task_def and (task_def.is_time_based or task_def.is_interval_with_range)):
                 try:
                     await asyncio.sleep(interval)
                 except asyncio.CancelledError:
