@@ -88,8 +88,10 @@ class AiAssistConfig(BaseModel):
     )
 
     # Tools requiring user confirmation (Phase 4 security)
+    # Note: create_directory no longer needs confirmation here because
+    # path validation + path_confirmation_callback already handles security
     confirm_tools: list[str] = Field(
-        default_factory=lambda: ["internal__create_directory"],
+        default_factory=list,
     )
 
     @classmethod
