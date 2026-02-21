@@ -28,6 +28,7 @@ from .escape_watcher import EscapeWatcher
 from .file_watchdog import FileWatchdog
 from .identity import get_identity
 from .knowledge_graph import KnowledgeGraph
+from .prompt_utils import extract_prompt_messages
 from .state import StateManager
 from .tui import AiAssistCompleter, format_tool_args, format_tool_display_name
 
@@ -438,17 +439,7 @@ async def handle_prompt_command(
         result = await session.get_prompt(prompt_name, arguments=arguments)
 
         # Convert prompt messages to conversation messages
-        prompt_content = []
-        for msg in result.messages:
-            # Extract text content
-            if hasattr(msg.content, "text"):
-                content = msg.content.text
-            else:
-                content = str(msg.content)
-
-            # Add to conversation history
-            conversation_history.append({"role": msg.role, "content": content})
-            prompt_content.append(content)
+        prompt_content = extract_prompt_messages(result, conversation_history)
 
         # Display prompt content to user
         console.print(

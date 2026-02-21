@@ -14,6 +14,7 @@ from .identity import AssistantIdentity, Identity, UserIdentity, get_identity
 from .kg_queries import KnowledgeGraphQueries
 from .knowledge_graph import KnowledgeGraph
 from .monitors import MonitoringScheduler
+from .prompt_utils import extract_prompt_messages
 from .state import StateManager
 from .tui import format_tool_display_name
 
@@ -90,15 +91,7 @@ async def handle_prompt_command_basic(command: str, agent: AiAssistAgent, conver
         result = await session.get_prompt(prompt_name, arguments=arguments)
 
         # Convert prompt messages to conversation messages
-        for msg in result.messages:
-            # Extract text content
-            if hasattr(msg.content, "text"):
-                content = msg.content.text
-            else:
-                content = str(msg.content)
-
-            # Add to conversation history
-            conversation_history.append({"role": msg.role, "content": content})
+        extract_prompt_messages(result, conversation_history)
 
         # Display prompt loaded
         print(f"\n✓ Loaded prompt: {prompt_name} from {server_name}")
