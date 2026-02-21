@@ -242,6 +242,25 @@ Example: Search for previous mentions of "DCI failures" in conversation.
                 }
             )
 
+        # Always add get_tool_help (works with any agent reference)
+        tools.append(
+            {
+                "name": "introspection__get_tool_help",
+                "description": "Get full documentation for a tool including query syntax, available fields, and examples.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "tool_name": {
+                            "type": "string",
+                            "description": "Full tool name (e.g., 'dci__search_dci_jobs')",
+                        },
+                    },
+                    "required": ["tool_name"],
+                },
+                "_server": "introspection",
+            }
+        )
+
         return tools
 
     async def execute_tool(self, tool_name: str, arguments: dict) -> str:
@@ -266,6 +285,8 @@ Example: Search for previous mentions of "DCI failures" in conversation.
             return self._inspect_mcp_prompt(arguments)
         elif tool_name == "execute_mcp_prompt":
             return await self._execute_mcp_prompt(arguments)
+        elif tool_name == "get_tool_help":
+            return self._get_tool_help(arguments)
         else:
             return json.dumps({"error": f"Unknown introspection tool: {tool_name}"})
 
@@ -534,3 +555,29 @@ Example: Search for previous mentions of "DCI failures" in conversation.
                 {"success": False, "error": str(e), "message": f"Failed to execute {server}/{prompt}: {str(e)}"},
                 indent=2,
             )
+
+    def _get_tool_help(self, arguments: dict) -> str:
+        """Return full documentation for a tool (progressive disclosure).
+
+        Args:
+            arguments: Dict with 'tool_name' key
+
+        Returns:
+            JSON string with full description and input_schema
+        """
+        tool_name = arguments.get("tool_name", "")
+        if not self.agent:
+            return json.dumps({"error": "Agent reference not available"})
+
+        for tool in self.agent.available_tools:
+            if tool["name"] == tool_name:
+                return json.dumps(
+                    {
+                        "tool_name": tool_name,
+                        "description": tool.get("_full_description", tool["description"]),
+                        "input_schema": tool["input_schema"],
+                    },
+                    indent=2,
+                )
+
+        return json.dumps({"error": f"Tool not found: {tool_name}"})
