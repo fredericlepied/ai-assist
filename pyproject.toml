@@ -151,7 +151,7 @@ disable = "all"
 enable = "similarities"
 
 [tool.pylint.similarities]
-min-similarity-lines = 6
+min-similarity-lines = 5
 ignore-comments = true
 ignore-docstrings = true
 ignore-imports = true

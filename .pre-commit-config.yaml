@@ -55,7 +55,7 @@ repos:
     hooks:
       - id: pylint-similarities
         name: pylint-similarities
-        entry: pylint --disable=all --enable=similarities --min-similarity-lines=6 ai_assist/
+        entry: pylint --disable=all --enable=similarities --min-similarity-lines=5 ai_assist/
         language: system
         pass_filenames: false
         always_run: true
