@@ -317,9 +317,11 @@ class AiAssistAgent:
 
                     tools_list = await session.list_tools()
                     for tool in tools_list.tools:
+                        desc = tool.description or ""
                         tool_def = {
                             "name": f"{name}__{tool.name}",
-                            "description": tool.description or "",
+                            "description": desc,
+                            "_full_description": desc,
                             "input_schema": tool.inputSchema,
                             "_server": name,
                             "_original_name": tool.name,
@@ -433,6 +435,64 @@ class AiAssistAgent:
 
         print("✅ MCP server reload complete\n")
 
+    @staticmethod
+    def _truncate_description(description: str, max_length: int = 200) -> str:
+        """Truncate tool description to first sentence for progressive disclosure.
+
+        Args:
+            description: Full tool description
+            max_length: Maximum length before truncation kicks in
+
+        Returns:
+            Truncated description (first sentence or paragraph)
+        """
+        if not description or len(description) <= max_length:
+            return description
+
+        # Try sentence boundaries in order of preference
+        for sep in [". ", ".\n", "\n\n", "\n"]:
+            idx = description.find(sep)
+            if 0 < idx <= max_length:
+                # Include the period if boundary is ". " or ".\n"
+                end = idx + 1 if sep.startswith(".") else idx
+                return description[:end]
+
+        # Fallback: truncate at max_length on word boundary
+        truncated = description[:max_length]
+        last_space = truncated.rfind(" ")
+        if last_space > 0:
+            truncated = truncated[:last_space]
+        return truncated + "..."
+
+    def _build_api_tools(self) -> list[dict]:
+        """Build tool definitions for the Claude API with progressive disclosure.
+
+        Long MCP tool descriptions are truncated to save context tokens.
+        The model can call introspection__get_tool_help to get full documentation.
+
+        Returns:
+            List of tool dicts with name, description, input_schema
+        """
+        api_tools = []
+        for tool in self.available_tools:
+            desc = tool["description"]
+            full_desc = tool.get("_full_description")
+
+            # Truncate if tool has a full description and it's long
+            if full_desc and len(full_desc) > 200:
+                desc = (
+                    self._truncate_description(full_desc) + " Use introspection__get_tool_help for full documentation."
+                )
+
+            api_tools.append(
+                {
+                    "name": tool["name"],
+                    "description": desc,
+                    "input_schema": tool["input_schema"],
+                }
+            )
+        return api_tools
+
     def _build_system_prompt(self) -> str:
         """Build complete system prompt including identity and skills
 
@@ -447,10 +507,19 @@ class AiAssistAgent:
             script_execution_enabled=self.script_execution_tools.enabled
         )
 
+        prompt = identity_prompt
         if skills_section:
-            return f"{identity_prompt}\n\n{skills_section}"
-        else:
-            return identity_prompt
+            prompt += f"\n\n{skills_section}"
+
+        # Add MCP tools guidance
+        mcp_servers = list(self.sessions.keys())
+        if mcp_servers:
+            prompt += "\n\n# Available Data Sources\n\n"
+            prompt += "You have access to tools from these MCP servers: " + ", ".join(mcp_servers) + ".\n"
+            prompt += "Always use tools to retrieve real data. Never fabricate information that could be obtained through a tool call.\n"
+            prompt += "For detailed tool documentation (query syntax, available fields, examples), call introspection__get_tool_help with the tool name.\n"
+
+        return prompt
 
     async def query(
         self,
@@ -486,15 +555,8 @@ class AiAssistAgent:
             # Use provided messages
             messages = messages.copy()  # Don't modify caller's list
 
-        # Filter out custom internal fields from tools before sending to API
-        api_tools = [
-            {
-                "name": tool["name"],
-                "description": tool["description"],
-                "input_schema": tool["input_schema"],
-            }
-            for tool in self.available_tools
-        ]
+        # Build tools with progressive disclosure (truncated descriptions)
+        api_tools = self._build_api_tools()
 
         # Loop detection tracking
         start_time = time.time()
@@ -645,15 +707,8 @@ class AiAssistAgent:
         max_recent_calls = 5
         loop_detection_threshold = 3
 
-        # Filter out custom internal fields from tools before sending to API
-        api_tools = [
-            {
-                "name": tool["name"],
-                "description": tool["description"],
-                "input_schema": tool["input_schema"],
-            }
-            for tool in self.available_tools
-        ]
+        # Build tools with progressive disclosure (truncated descriptions)
+        api_tools = self._build_api_tools()
 
         if progress_callback:
             progress_callback("thinking", 0, max_turns, None)
