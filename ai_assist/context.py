@@ -1,8 +1,9 @@
 """Context management for intelligent conversations"""
 
+import logging
 import re
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from .knowledge_graph import KnowledgeGraph
@@ -16,15 +17,18 @@ class ConversationMemory:
     conversation flow.
     """
 
-    def __init__(self, max_exchanges: int = 10):
+    def __init__(self, max_exchanges: int = 10, compaction_threshold: int = 8):
         """Initialize conversation memory
 
         Args:
             max_exchanges: Maximum number of exchanges to keep in memory.
                           Older exchanges are dropped to manage context window.
+            compaction_threshold: Number of exchanges that triggers compaction.
+                                When reached, the oldest half is summarized into one exchange.
         """
         self.exchanges: list[dict[str, str]] = []  # List of {user, assistant, timestamp}
         self.max_exchanges = max_exchanges
+        self.compaction_threshold = compaction_threshold
 
     def add_exchange(self, user_input: str, assistant_response: str):
         """Add a conversation exchange
@@ -72,6 +76,84 @@ class ConversationMemory:
                 )
         if len(self.exchanges) > self.max_exchanges:
             self.exchanges = self.exchanges[-self.max_exchanges :]
+
+    def needs_compaction(self) -> bool:
+        """Check if conversation memory should be compacted.
+
+        Returns:
+            True if number of exchanges has reached the compaction threshold
+        """
+        return len(self.exchanges) >= self.compaction_threshold
+
+    def compact(self, anthropic_client: Any, model: str, keep_recent: int = 4) -> bool:
+        """Compact old exchanges into a summary using Claude.
+
+        Takes the oldest exchanges (all except keep_recent most recent),
+        summarizes them into a single synthetic exchange, and replaces them.
+
+        Args:
+            anthropic_client: Anthropic or AnthropicVertex client instance
+            model: Model name to use for summarization
+            keep_recent: Number of recent exchanges to keep verbatim
+
+        Returns:
+            True if compaction was performed, False if not needed
+        """
+        if len(self.exchanges) <= keep_recent:
+            return False
+
+        old_exchanges = self.exchanges[:-keep_recent]
+        recent_exchanges = self.exchanges[-keep_recent:]
+
+        # Build text from old exchanges
+        history_lines = []
+        for ex in old_exchanges:
+            history_lines.append(f"User: {ex['user']}")
+            history_lines.append(f"Assistant: {ex['assistant']}")
+        history_text = "\n".join(history_lines)
+
+        compaction_prompt = (
+            "Summarize this conversation history into key facts, decisions, entities mentioned, "
+            "and pending items. Be concise but preserve important details like ticket numbers, "
+            "job IDs, error messages, and action items. Output a brief summary paragraph."
+        )
+
+        try:
+            response = anthropic_client.messages.create(
+                model=model,
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"{compaction_prompt}\n\n{history_text}",
+                    }
+                ],
+            )
+
+            summary_text = ""
+            for block in response.content:
+                if hasattr(block, "text"):
+                    summary_text += block.text
+
+            if summary_text.strip():
+                # Replace old exchanges with a single synthetic summary exchange
+                summary_exchange = {
+                    "user": "[Conversation summary]",
+                    "assistant": summary_text.strip(),
+                    "timestamp": datetime.now().isoformat(),
+                }
+                self.exchanges = [summary_exchange] + recent_exchanges
+                logging.info(
+                    "Compacted %d old exchanges into summary (%d recent kept)",
+                    len(old_exchanges),
+                    len(recent_exchanges),
+                )
+                return True
+
+        except Exception as e:
+            logging.warning("Context compaction failed: %s", e)
+
+        return False
 
     def clear(self):
         """Clear all conversation history"""

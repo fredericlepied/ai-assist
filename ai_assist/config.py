@@ -94,6 +94,14 @@ class AiAssistConfig(BaseModel):
         default_factory=list,
     )
 
+    # Extended context window (1M tokens, beta)
+    # When enabled, the agent can dynamically activate the 1M context window
+    # if token usage approaches the 200K default limit. Costs 2x input above 200K.
+    allow_extended_context: bool = Field(
+        default_factory=lambda: os.getenv("AI_ASSIST_ALLOW_EXTENDED_CONTEXT", "false").lower() == "true",
+        description="Allow dynamic activation of 1M context window when needed (beta, higher cost)",
+    )
+
     @classmethod
     def from_env(cls, mcp_servers_file: Path | None = None, config_dir: Path | None = None) -> "AiAssistConfig":
         """Load configuration from environment variables and YAML files

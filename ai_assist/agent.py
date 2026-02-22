@@ -89,6 +89,26 @@ class AiAssistAgent:
         "claude-3-haiku-20240307": 4096,
     }
 
+    # Model-specific context window sizes (input tokens)
+    MODEL_CONTEXT_WINDOWS = {
+        "claude-opus-4-6": 200000,
+        "claude-opus-4-5": 200000,
+        "claude-sonnet-4-5": 200000,
+        "claude-3-5-sonnet": 200000,
+        "claude-3-5-haiku": 200000,
+        "claude-3-opus": 200000,
+        "claude-3-sonnet": 200000,
+        "claude-3-haiku": 200000,
+    }
+
+    CONTEXT_BUDGET_WARNING_THRESHOLD = 0.8
+
+    # Extended context window (1M tokens, beta)
+    EXTENDED_CONTEXT_MODELS = {"claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-sonnet-4"}
+    EXTENDED_CONTEXT_WINDOW = 1000000
+    EXTENDED_CONTEXT_BETA_HEADER = "context-1m-2025-08-07"
+    EXTENDED_CONTEXT_ACTIVATION_THRESHOLD = 0.75  # Activate at 75% of 200K (150K tokens)
+
     def __init__(self, config: AiAssistConfig, knowledge_graph: Optional["KnowledgeGraph"] = None):
         self.config = config
         self.knowledge_graph = knowledge_graph
@@ -144,6 +164,11 @@ class AiAssistAgent:
         # Display model configuration
         max_tokens = self.get_max_tokens()
         print(f"🤖 Model: {config.model} (max output tokens: {max_tokens:,})")
+        if self._supports_extended_context():
+            print("   Extended context: available (1M, activates on demand)")
+
+        # Track whether extended context is currently active (per-query)
+        self._extended_context_active = False
 
         self.sessions: dict[str, ClientSession] = {}
         self.available_tools: list[dict] = []
@@ -177,6 +202,9 @@ class AiAssistAgent:
 
         # Track synthesis flag
         self._pending_synthesis: Any = None
+
+        # Token usage tracking per query
+        self._turn_token_usage: list[dict[str, Any]] = []
 
     def get_max_tokens(self) -> int:
         """Get max output tokens for the current model
@@ -493,6 +521,144 @@ class AiAssistAgent:
             )
         return api_tools
 
+    def get_context_window_size(self) -> int:
+        """Get context window size for the current model.
+
+        Returns 1M if extended context is currently active, otherwise the
+        standard context window for the model.
+
+        Returns:
+            Context window size in tokens
+        """
+        if self._extended_context_active:
+            return self.EXTENDED_CONTEXT_WINDOW
+        model = self.config.model
+        # Try exact match first, then prefix match
+        for key, size in self.MODEL_CONTEXT_WINDOWS.items():
+            if key in model:
+                return size
+        return 200000  # Default for unknown models
+
+    def _supports_extended_context(self) -> bool:
+        """Check if extended context is allowed and the model supports it."""
+        if not self.config.allow_extended_context:
+            return False
+        model = self.config.model.lower()
+        return any(m in model for m in self.EXTENDED_CONTEXT_MODELS)
+
+    def _needs_extended_context(self) -> bool:
+        """Check if token usage warrants activating extended context.
+
+        Returns True when input_tokens in the last turn exceed the activation
+        threshold (75% of the standard 200K window).
+        """
+        if not self._supports_extended_context():
+            return False
+        if not self._turn_token_usage:
+            return False
+        last_input = self._turn_token_usage[-1]["input_tokens"]
+        standard_window = 200000
+        return last_input > standard_window * self.EXTENDED_CONTEXT_ACTIVATION_THRESHOLD
+
+    def _get_extra_headers(self) -> dict[str, str] | None:
+        """Get extra headers for API calls, including the 1M beta header if needed."""
+        if self._extended_context_active:
+            return {"anthropic-beta": self.EXTENDED_CONTEXT_BETA_HEADER}
+        return None
+
+    def _track_token_usage(self, response, turn: int):
+        """Record token usage from an API response.
+
+        Args:
+            response: API response with usage field
+            turn: Current turn number (0-indexed)
+        """
+        import logging
+
+        if not hasattr(response, "usage"):
+            return
+
+        usage = response.usage
+        entry = {
+            "turn": turn,
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+        }
+
+        # Track cache metrics if available
+        if hasattr(usage, "cache_creation_input_tokens"):
+            entry["cache_creation_input_tokens"] = usage.cache_creation_input_tokens
+        if hasattr(usage, "cache_read_input_tokens"):
+            entry["cache_read_input_tokens"] = usage.cache_read_input_tokens
+
+        self._turn_token_usage.append(entry)
+
+        # Warn if approaching context limit
+        context_window = self.get_context_window_size()
+        utilization = usage.input_tokens / context_window
+        if utilization >= self.CONTEXT_BUDGET_WARNING_THRESHOLD:
+            logging.warning(
+                "Context budget warning: using %d/%d tokens (%.0f%% of context window)",
+                usage.input_tokens,
+                context_window,
+                utilization * 100,
+            )
+
+    def get_token_usage(self) -> list[dict[str, Any]]:
+        """Get per-turn token usage from the last query.
+
+        Returns:
+            List of dicts with turn, input_tokens, output_tokens, and optional cache fields
+        """
+        return self._turn_token_usage.copy()
+
+    @staticmethod
+    def _truncate_tool_result(result: str, max_size: int = 20000) -> str:
+        """Truncate large tool results to prevent context overflow.
+
+        Args:
+            result: Tool result string
+            max_size: Maximum allowed size in characters (~5K tokens at 4 chars/token)
+
+        Returns:
+            Original or truncated result
+        """
+        if len(result) <= max_size:
+            return result
+        truncated = result[:max_size]
+        truncated += f"\n\n... [Result truncated: {len(result)} chars total, showing first {max_size} chars]"
+        return truncated
+
+    @staticmethod
+    def _mask_old_observations(messages: list, keep_recent: int = 2) -> None:
+        """Replace old tool results with compact placeholders in-place.
+
+        Scans the message list and replaces tool result content from older turns
+        with short placeholders. Keeps the most recent `keep_recent` rounds of
+        tool results untouched.
+
+        Args:
+            messages: Message list (modified in-place)
+            keep_recent: Number of recent tool-result rounds to preserve
+        """
+        # Find all user messages that contain tool results
+        tool_result_indices = []
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+                # Check if this is a tool results message
+                if any(isinstance(item, dict) and item.get("type") == "tool_result" for item in msg["content"]):
+                    tool_result_indices.append(i)
+
+        # Keep the most recent `keep_recent` rounds
+        indices_to_mask = tool_result_indices[:-keep_recent] if len(tool_result_indices) > keep_recent else []
+
+        for idx in indices_to_mask:
+            content = messages[idx]["content"]
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "tool_result":
+                        item["content"] = "[Previous tool result — call the tool again if needed]"
+
     def _build_system_prompt(self) -> str:
         """Build complete system prompt including identity and skills
 
@@ -558,6 +724,10 @@ class AiAssistAgent:
         # Build tools with progressive disclosure (truncated descriptions)
         api_tools = self._build_api_tools()
 
+        # Reset token tracking and extended context for this query
+        self._turn_token_usage = []
+        self._extended_context_active = False
+
         # Loop detection tracking
         start_time = time.time()
         max_time_seconds = 600  # 10 minutes max
@@ -578,6 +748,19 @@ class AiAssistAgent:
             if progress_callback:
                 progress_callback("calling_claude", turn + 1, max_turns, None)
 
+            # Mask old tool results to save context tokens
+            self._mask_old_observations(messages)
+
+            # Check if we need to activate extended context
+            if not self._extended_context_active and self._needs_extended_context():
+                self._extended_context_active = True
+                import logging
+
+                last_input = self._turn_token_usage[-1]["input_tokens"]
+                logging.info("Activating 1M extended context (input tokens: %d/200000)", last_input)
+
+            extra_headers = self._get_extra_headers()
+
             max_tokens = self.get_max_tokens()
             # Use streaming for large max_tokens to avoid HTTP timeouts
             if max_tokens > 8192:
@@ -587,6 +770,7 @@ class AiAssistAgent:
                     system=self._build_system_prompt(),
                     tools=api_tools,  # type: ignore[arg-type]
                     messages=messages,  # type: ignore[arg-type]
+                    extra_headers=extra_headers,
                 ) as stream:
                     response = stream.get_final_message()
             else:
@@ -596,7 +780,11 @@ class AiAssistAgent:
                     system=self._build_system_prompt(),
                     tools=api_tools,  # type: ignore[arg-type]
                     messages=messages,  # type: ignore[arg-type]
+                    extra_headers=extra_headers,
                 )
+
+            # Track token usage
+            self._track_token_usage(response, turn)
 
             messages.append({"role": "assistant", "content": response.content})
 
@@ -607,6 +795,9 @@ class AiAssistAgent:
                         progress_callback("executing_tool", turn + 1, max_turns, block.name)
 
                     result = await self._execute_tool(block.name, block.input)
+
+                    # Truncate large tool results to prevent context overflow
+                    result = self._truncate_tool_result(result)
 
                     # Check if result is an error (starts with "Error:")
                     is_error = isinstance(result, str) and result.startswith("Error:")
@@ -710,6 +901,10 @@ class AiAssistAgent:
         # Build tools with progressive disclosure (truncated descriptions)
         api_tools = self._build_api_tools()
 
+        # Reset token tracking and extended context for this query
+        self._turn_token_usage = []
+        self._extended_context_active = False
+
         if progress_callback:
             progress_callback("thinking", 0, max_turns, None)
 
@@ -722,6 +917,19 @@ class AiAssistAgent:
             if progress_callback:
                 progress_callback("calling_claude", turn + 1, max_turns, None)
 
+            # Mask old tool results to save context tokens
+            self._mask_old_observations(messages)
+
+            # Check if we need to activate extended context
+            if not self._extended_context_active and self._needs_extended_context():
+                self._extended_context_active = True
+                import logging
+
+                last_input = self._turn_token_usage[-1]["input_tokens"]
+                logging.info("Activating 1M extended context (input tokens: %d/200000)", last_input)
+
+            extra_headers = self._get_extra_headers()
+
             # Use streaming API
             with self.anthropic.messages.stream(
                 model=self.config.model,
@@ -729,6 +937,7 @@ class AiAssistAgent:
                 system=self._build_system_prompt(),
                 tools=api_tools,  # type: ignore[arg-type]
                 messages=messages,  # type: ignore[arg-type]
+                extra_headers=extra_headers,
             ) as stream:
                 # Track content blocks
                 current_text = ""
@@ -761,6 +970,10 @@ class AiAssistAgent:
 
                 # Get final message from stream
                 final_message = stream.get_final_message()
+
+                # Track token usage
+                self._track_token_usage(final_message, turn)
+
                 messages.append({"role": "assistant", "content": final_message.content})
 
                 # Yield tool use notifications with complete inputs
@@ -783,12 +996,7 @@ class AiAssistAgent:
                         result = await self._execute_tool(block.name, block.input)
 
                         # Truncate large tool results to prevent context overflow
-                        # Estimate ~4 chars per token, so 20K chars ≈ 5K tokens
-                        max_result_size = 20000  # 20KB
-                        if len(result) > max_result_size:
-                            truncated_result = result[:max_result_size]
-                            truncated_result += f"\n\n... [Result truncated: {len(result)} chars total, showing first {max_result_size} chars]"
-                            result = truncated_result
+                        result = self._truncate_tool_result(result)
 
                         # Check if result is an error
                         is_error = isinstance(result, str) and result.startswith("Error:")
