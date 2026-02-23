@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ai_assist.agent import AiAssistAgent
 from ai_assist.config import AiAssistConfig
 from ai_assist.context import ConversationMemory
@@ -371,8 +373,12 @@ class TestConversationCompaction:
 class TestExtendedContext:
     """Tests for adaptive 1M extended context window"""
 
+    @patch.dict("os.environ", {}, clear=False)
     def test_config_default_disabled(self):
         """Extended context is disabled by default"""
+        import os
+
+        os.environ.pop("AI_ASSIST_ALLOW_EXTENDED_CONTEXT", None)
         config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
         assert config.allow_extended_context is False
 
@@ -456,3 +462,126 @@ class TestExtendedContext:
         config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={}, allow_extended_context=True)
         agent = AiAssistAgent(config)
         assert agent._extended_context_active is False
+
+
+class TestGroundingNudge:
+    """Tests for grounding nudge when tools available but not called"""
+
+    @pytest.mark.asyncio
+    async def test_nudge_triggers_when_tools_available_no_tools_called(self):
+        """Grounding nudge injects user message when model responds without calling tools"""
+        config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
+        agent = AiAssistAgent(config)
+
+        # Add a tool so api_tools is non-empty
+        agent.available_tools.append(
+            {
+                "name": "dci__search_dci_jobs",
+                "description": "Search DCI jobs.",
+                "input_schema": {"type": "object", "properties": {}},
+                "_server": "dci",
+                "_original_name": "search_dci_jobs",
+            }
+        )
+
+        # Mock response: text only (no tool calls)
+        mock_block_text = MagicMock()
+        mock_block_text.type = "text"
+        mock_block_text.text = "The job status is failure."
+
+        mock_response = MagicMock()
+        mock_response.content = [mock_block_text]
+        mock_response.stop_reason = "end_turn"
+        mock_response.usage.input_tokens = 1000
+        mock_response.usage.output_tokens = 500
+        del mock_response.usage.cache_creation_input_tokens
+        del mock_response.usage.cache_read_input_tokens
+
+        agent.anthropic = MagicMock()
+        agent.anthropic.messages.create.return_value = mock_response
+
+        # Force non-streaming path (max_tokens <= 8192)
+        with patch.object(agent, "get_max_tokens", return_value=8192):
+            result = await agent.query("What is the status of the latest DCI job?")
+
+        # Should have been called twice (initial + nudge turn)
+        assert agent.anthropic.messages.create.call_count == 2
+        assert "failure" in result
+
+        # The nudge message should be in the second call's messages
+        second_call_kwargs = agent.anthropic.messages.create.call_args_list[1][1]
+        nudge_found = any(
+            isinstance(m.get("content"), str) and "verify" in m["content"].lower()
+            for m in second_call_kwargs["messages"]
+            if m.get("role") == "user"
+        )
+        assert nudge_found
+
+    @pytest.mark.asyncio
+    async def test_no_nudge_when_no_tools_available(self):
+        """No grounding nudge when no tools are available"""
+        config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
+        agent = AiAssistAgent(config)
+
+        # No tools added -> api_tools is empty
+
+        mock_block_text = MagicMock()
+        mock_block_text.type = "text"
+        mock_block_text.text = "Python was created by Guido van Rossum."
+
+        mock_response = MagicMock()
+        mock_response.content = [mock_block_text]
+        mock_response.stop_reason = "end_turn"
+        mock_response.usage.input_tokens = 1000
+        mock_response.usage.output_tokens = 500
+        del mock_response.usage.cache_creation_input_tokens
+        del mock_response.usage.cache_read_input_tokens
+
+        agent.anthropic = MagicMock()
+        agent.anthropic.messages.create.return_value = mock_response
+
+        with patch.object(agent, "get_max_tokens", return_value=8192):
+            result = await agent.query("Who created Python?")
+
+        # Should have been called only once (no nudge because no tools)
+        assert agent.anthropic.messages.create.call_count == 1
+        assert "Guido" in result
+
+    @pytest.mark.asyncio
+    async def test_no_infinite_nudge_loop(self):
+        """Grounding nudge only happens once per query, preventing infinite loops"""
+        config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
+        agent = AiAssistAgent(config)
+
+        agent.available_tools.append(
+            {
+                "name": "dci__today",
+                "description": "Get today's date.",
+                "input_schema": {"type": "object", "properties": {}},
+                "_server": "dci",
+                "_original_name": "today",
+            }
+        )
+
+        # Both responses are text-only (model ignores nudge)
+        mock_block = MagicMock()
+        mock_block.type = "text"
+        mock_block.text = "I confirmed no relevant tool applies."
+
+        mock_response = MagicMock()
+        mock_response.content = [mock_block]
+        mock_response.stop_reason = "end_turn"
+        mock_response.usage.input_tokens = 1000
+        mock_response.usage.output_tokens = 200
+        del mock_response.usage.cache_creation_input_tokens
+        del mock_response.usage.cache_read_input_tokens
+
+        agent.anthropic = MagicMock()
+        agent.anthropic.messages.create.return_value = mock_response
+
+        with patch.object(agent, "get_max_tokens", return_value=8192):
+            result = await agent.query("What is the meaning of life?")
+
+        # Exactly 2 calls: initial + nudge. No infinite loop.
+        assert agent.anthropic.messages.create.call_count == 2
+        assert "confirmed" in result

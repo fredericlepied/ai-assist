@@ -218,3 +218,22 @@ class TestSystemPromptToolGuidance:
 
         prompt = agent._build_system_prompt()
         assert "Available Data Sources" not in prompt
+
+    def test_system_prompt_always_includes_honesty_directive(self):
+        """System prompt always includes honesty and clarification section"""
+        config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
+        agent = AiAssistAgent(config)
+
+        prompt = agent._build_system_prompt()
+        assert "Never guess" in prompt
+        assert "ask the user for clarification" in prompt
+
+    def test_system_prompt_includes_citation_requirement(self):
+        """System prompt includes source citation requirements"""
+        config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
+        agent = AiAssistAgent(config)
+
+        prompt = agent._build_system_prompt()
+        assert "Source Citation" in prompt
+        assert "MUST cite the tool call" in prompt
+        assert "general knowledge" in prompt.lower()

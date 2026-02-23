@@ -685,6 +685,28 @@ class AiAssistAgent:
             prompt += "Always use tools to retrieve real data. Never fabricate information that could be obtained through a tool call.\n"
             prompt += "For detailed tool documentation (query syntax, available fields, examples), call introspection__get_tool_help with the tool name.\n"
 
+        # Add Knowledge Graph guidance
+        if self.knowledge_graph:
+            prompt += "\n\n# Knowledge Graph\n\n"
+            prompt += "You have a Knowledge Graph containing lessons learned, user preferences, project context, and decision rationale from previous conversations.\n"
+            prompt += "Instead of guessing or making assumptions, search it with internal__search_knowledge.\n"
+            prompt += "Use it when:\n"
+            prompt += "- You are unsure about user preferences or conventions\n"
+            prompt += "- You need context about a project, workflow, or tool\n"
+            prompt += "- You want to check if a similar problem was solved before\n"
+            prompt += "- You are about to recommend an approach and want to verify past decisions\n"
+
+        # Add honesty directive with source citation requirements
+        prompt += "\n\n# Honesty and Clarification\n\n"
+        prompt += "Never guess or make assumptions when you are unsure. "
+        prompt += "If you do not know the answer after searching available tools and knowledge, "
+        prompt += "say so honestly and ask the user for clarification.\n\n"
+        prompt += "## Source Citation\n\n"
+        prompt += "Every factual claim about specific data (job statuses, ticket details, dates, counts, component versions, test results) "
+        prompt += "MUST cite the tool call that provided it. Use inline references like: (source: search_dci_jobs) or (source: get_jira_ticket).\n"
+        prompt += "If you are about to state a specific fact but cannot cite a tool that provided it, call the appropriate tool first.\n"
+        prompt += "For general knowledge not from tools, prefix with: 'Based on my general knowledge: ...' to distinguish it from tool-sourced data.\n"
+
         return prompt
 
     async def query(
@@ -736,6 +758,7 @@ class AiAssistAgent:
         loop_detection_threshold = 3  # If same call appears 3 times in recent history, it's a loop
         no_progress_count = 0  # Count turns with no text response
         max_no_progress = 10  # Allow 10 turns without text before declaring stuck
+        grounding_nudged = False  # Track if grounding nudge has been sent
 
         if progress_callback:
             progress_callback("thinking", 0, max_turns, None)
@@ -827,9 +850,6 @@ class AiAssistAgent:
                         return f"Loop detected: {block.name} called repeatedly with same arguments ({recent_tool_calls.count(tool_signature)} times)"
 
             if not tool_results:
-                if progress_callback:
-                    progress_callback("complete", turn + 1, max_turns, None)
-
                 final_text = ""
                 for block in response.content:
                     if hasattr(block, "text"):
@@ -837,6 +857,25 @@ class AiAssistAgent:
 
                 # Check if we got actual content
                 if final_text.strip():
+                    # Grounding nudge: if tools are available but none were called,
+                    # ask the model to verify its claims with tools (once only)
+                    if api_tools and not grounding_nudged:
+                        grounding_nudged = True
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Before I accept this answer: you have tools available but did not call any. "
+                                    "Please verify any specific factual claims (dates, statuses, counts, versions) "
+                                    "by calling the appropriate tool. If your answer is based purely on general "
+                                    "knowledge and no tool is relevant, confirm that explicitly."
+                                ),
+                            }
+                        )
+                        continue
+
+                    if progress_callback:
+                        progress_callback("complete", turn + 1, max_turns, None)
                     return final_text
                 else:
                     # No text and no tool calls - agent gave up
@@ -904,6 +943,7 @@ class AiAssistAgent:
         # Reset token tracking and extended context for this query
         self._turn_token_usage = []
         self._extended_context_active = False
+        grounding_nudged = False  # Track if grounding nudge has been sent
 
         if progress_callback:
             progress_callback("thinking", 0, max_turns, None)
@@ -1027,8 +1067,25 @@ class AiAssistAgent:
                             }
                             return
 
-                # If no tool calls, we're done
+                # If no tool calls, check for grounding nudge
                 if not tool_results:
+                    # Grounding nudge: if tools are available but none were called,
+                    # ask the model to verify its claims with tools (once only)
+                    if api_tools and not grounding_nudged and current_text.strip():
+                        grounding_nudged = True
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Before I accept this answer: you have tools available but did not call any. "
+                                    "Please verify any specific factual claims (dates, statuses, counts, versions) "
+                                    "by calling the appropriate tool. If your answer is based purely on general "
+                                    "knowledge and no tool is relevant, confirm that explicitly."
+                                ),
+                            }
+                        )
+                        continue
+
                     if progress_callback:
                         progress_callback("complete", turn + 1, max_turns, None)
 
