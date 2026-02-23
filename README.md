@@ -241,6 +241,17 @@ Run `scripts/check_fillable_fields.py` to detect form fields.
 
 📋 **Security details:** See [SECURITY.md](SECURITY.md) for the complete security model
 
+#### Extended Context Window
+
+For complex tasks that exceed the standard 200K token context, the agent can activate a 1M token context window on demand. **Disabled by default** to avoid premium pricing (2x input above 200K).
+
+```bash
+export AI_ASSIST_ALLOW_EXTENDED_CONTEXT=true
+ai-assist
+```
+
+When enabled, the agent monitors token usage and automatically activates the extended context only when approaching the 200K limit. Supported on Opus 4.6, Sonnet 4.6, Sonnet 4.5, and Sonnet 4.
+
 ### Monitoring Mode
 
 Run periodic monitoring with automated checks:
