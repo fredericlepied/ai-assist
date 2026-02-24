@@ -767,7 +767,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                             try:
                                 from .eval import TraceStore
 
-                                trace = agent.capture_trace(user_input, full_response, prompt_start_time, 0)
+                                trace = agent.capture_trace(user_input, full_response, prompt_start_time)
                                 TraceStore().append(trace)
                             except Exception:
                                 pass  # Never break the user flow
@@ -1084,6 +1084,8 @@ async def handle_eval_stats_command(console: Console):
     table.add_row("Avg total tokens", f"{metrics.avg_total_tokens:,}")
     table.add_row("Avg duration", f"{metrics.avg_duration_seconds:.1f}s")
     table.add_row("Grounding nudge rate", f"{metrics.nudge_rate:.1%}")
+    table.add_row("Avg duplicate tool calls", f"{metrics.avg_duplicate_tool_calls:.1f}")
+    table.add_row("Queries with duplicates", str(metrics.queries_with_duplicates))
 
     console.print()
     console.print(table)

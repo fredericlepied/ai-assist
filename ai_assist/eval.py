@@ -56,6 +56,9 @@ class QueryTrace:
     model: str = ""
     tools_available_count: int = 0
 
+    # Dedup
+    duplicate_tool_calls: int = 0
+
     def to_jsonl_line(self) -> str:
         """Serialize to a single JSON line."""
         return json.dumps(asdict(self), default=str)
@@ -129,6 +132,10 @@ class EvalMetrics:
     # Grounding nudge
     nudge_rate: float
 
+    # Dedup
+    avg_duplicate_tool_calls: float
+    queries_with_duplicates: int
+
 
 class QueryEvaluator:
     """Compute evaluation metrics from query traces.
@@ -169,6 +176,8 @@ class QueryEvaluator:
                 avg_total_tokens=0,
                 avg_duration_seconds=0.0,
                 nudge_rate=0.0,
+                avg_duplicate_tool_calls=0.0,
+                queries_with_duplicates=0,
             )
 
         n = len(traces)
@@ -177,6 +186,8 @@ class QueryEvaluator:
         queries_with_tools = sum(1 for t in traces if t.tool_calls)
         total_tool_calls = sum(len(t.tool_calls) for t in traces)
         nudge_count = sum(1 for t in traces if t.grounding_nudge_fired)
+        total_duplicates = sum(t.duplicate_tool_calls for t in traces)
+        queries_with_dupes = sum(1 for t in traces if t.duplicate_tool_calls > 0)
 
         return EvalMetrics(
             total_queries=n,
@@ -188,4 +199,6 @@ class QueryEvaluator:
             avg_total_tokens=int(sum(t.total_input_tokens + t.total_output_tokens for t in traces) / n),
             avg_duration_seconds=round(sum(t.duration_seconds for t in traces) / n, 1),
             nudge_rate=nudge_count / n,
+            avg_duplicate_tool_calls=total_duplicates / n,
+            queries_with_duplicates=queries_with_dupes,
         )

@@ -73,6 +73,7 @@ class TestQueryTrace:
         assert trace.response_text == ""
         assert trace.total_input_tokens == 0
         assert trace.model == ""
+        assert trace.duplicate_tool_calls == 0
 
 
 class TestTraceStore:
@@ -275,9 +276,43 @@ class TestEvaluateTraces:
             avg_total_tokens=5000,
             avg_duration_seconds=4.2,
             nudge_rate=0.1,
+            avg_duplicate_tool_calls=0.5,
+            queries_with_duplicates=3,
         )
         assert metrics.total_queries == 10
         assert metrics.nudge_rate == 0.1
+        assert metrics.avg_duplicate_tool_calls == 0.5
+        assert metrics.queries_with_duplicates == 3
+
+    def test_duplicate_tool_calls_metric(self):
+        """Duplicate tool call metrics are computed correctly"""
+        traces = [
+            QueryTrace(
+                query_text="q1",
+                timestamp="2026-02-23T10:00:00",
+                duplicate_tool_calls=2,
+            ),
+            QueryTrace(
+                query_text="q2",
+                timestamp="2026-02-23T10:01:00",
+                duplicate_tool_calls=0,
+            ),
+            QueryTrace(
+                query_text="q3",
+                timestamp="2026-02-23T10:02:00",
+                duplicate_tool_calls=1,
+            ),
+        ]
+        metrics = QueryEvaluator.evaluate_traces(traces)
+
+        assert metrics.avg_duplicate_tool_calls == 1.0  # (2+0+1)/3
+        assert metrics.queries_with_duplicates == 2  # q1 and q3
+
+    def test_empty_traces_duplicate_metrics(self):
+        """Empty traces returns zero duplicate metrics"""
+        metrics = QueryEvaluator.evaluate_traces([])
+        assert metrics.avg_duplicate_tool_calls == 0.0
+        assert metrics.queries_with_duplicates == 0
 
 
 class TestCaptureTrace:
@@ -313,3 +348,23 @@ class TestCaptureTrace:
         assert len(trace.tool_calls) == 1
         # Results should NOT be in the trace (keeps traces small)
         assert "result" not in trace.tool_calls[0]
+
+    def test_capture_trace_uses_last_turn_count(self):
+        """capture_trace reads _last_turn_count when turn_count not passed"""
+        from ai_assist.config import AiAssistConfig
+
+        config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
+        agent = __import__("ai_assist.agent", fromlist=["AiAssistAgent"]).AiAssistAgent(config)
+
+        agent.last_tool_calls = []
+        agent._grounding_nudge_fired = False
+        agent._turn_token_usage = []
+        agent._last_turn_count = 15
+
+        import time
+
+        start = time.time() - 1.0
+
+        trace = agent.capture_trace("test query", "test response", start)
+
+        assert trace.turn_count == 15

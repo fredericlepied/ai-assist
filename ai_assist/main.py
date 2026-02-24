@@ -279,7 +279,7 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
             try:
                 from .eval import TraceStore
 
-                trace = agent.capture_trace(user_input, response, start_time, 0)
+                trace = agent.capture_trace(user_input, response, start_time)
                 TraceStore().append(trace)
             except Exception:
                 pass
@@ -324,7 +324,7 @@ async def run_query(agent: AiAssistAgent, query: str):
     try:
         from .eval import TraceStore
 
-        trace = agent.capture_trace(query, response, start_time, 0)
+        trace = agent.capture_trace(query, response, start_time)
         TraceStore().append(trace)
     except Exception:
         pass
@@ -484,6 +484,8 @@ def eval_stats_command():
     print(f"  Avg total tokens:       {metrics.avg_total_tokens:,}")
     print(f"  Avg duration:           {metrics.avg_duration_seconds:.1f}s")
     print(f"  Grounding nudge rate:   {metrics.nudge_rate:.1%}")
+    print(f"  Avg duplicate calls:    {metrics.avg_duplicate_tool_calls:.1f}")
+    print(f"  Queries with duplicates:{metrics.queries_with_duplicates}")
     print()
 
 
