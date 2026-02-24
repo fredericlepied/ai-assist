@@ -14,6 +14,195 @@ from .config import AiAssistConfig, get_config_dir
 ALLOWED_COMMANDS_FILE = "allowed_commands.json"
 ALLOWED_PATHS_FILE = "allowed_paths.json"
 
+SHELL_BUILTINS = frozenset(
+    {
+        "cd",
+        "echo",
+        "export",
+        "source",
+        ".",
+        "set",
+        "unset",
+        "pwd",
+        "pushd",
+        "popd",
+        "dirs",
+        "type",
+        "hash",
+        "alias",
+        "unalias",
+        "read",
+        "true",
+        "false",
+        "test",
+        "[",
+        "printf",
+        "eval",
+        "exec",
+        "builtin",
+        "command",
+        "declare",
+        "local",
+        "readonly",
+        "shift",
+        "trap",
+        "return",
+        "exit",
+        "break",
+        "continue",
+        "wait",
+        "bg",
+        "fg",
+        "jobs",
+        "umask",
+        "ulimit",
+        "shopt",
+        "enable",
+        "help",
+        "history",
+        "let",
+        "getopts",
+        "mapfile",
+        "readarray",
+        "compgen",
+        "complete",
+        "logout",
+        "times",
+    }
+)
+
+ENV_VAR_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _strip_shell_comments(command: str) -> str:
+    """Strip shell comments (# to end) outside of quotes.
+
+    Respects single quotes, double quotes, and backslash escapes.
+    """
+    result: list[str] = []
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(command):
+        c = command[i]
+        if c == "\\" and not in_single and i + 1 < len(command):
+            result.append(c)
+            result.append(command[i + 1])
+            i += 2
+            continue
+        if c == "'" and not in_double:
+            in_single = not in_single
+        elif c == '"' and not in_single:
+            in_double = not in_double
+        elif c == "#" and not in_single and not in_double:
+            break
+        result.append(c)
+        i += 1
+    return "".join(result)
+
+
+def _split_shell_commands(command: str) -> list[str]:
+    """Split command on shell operators (&&, ||, ;, |, &) outside of quotes."""
+    segments: list[str] = []
+    current: list[str] = []
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(command):
+        c = command[i]
+        if c == "\\" and not in_single and i + 1 < len(command):
+            current.append(c)
+            current.append(command[i + 1])
+            i += 2
+            continue
+        if c == "'" and not in_double:
+            in_single = not in_single
+            current.append(c)
+        elif c == '"' and not in_single:
+            in_double = not in_double
+            current.append(c)
+        elif not in_single and not in_double:
+            if c == ";":
+                segments.append("".join(current))
+                current = []
+            elif c == "|":
+                if i + 1 < len(command) and command[i + 1] == "|":
+                    segments.append("".join(current))
+                    current = []
+                    i += 1
+                else:
+                    segments.append("".join(current))
+                    current = []
+            elif c == "&":
+                if i + 1 < len(command) and command[i + 1] == "&":
+                    segments.append("".join(current))
+                    current = []
+                    i += 1
+                else:
+                    segments.append("".join(current))
+                    current = []
+            else:
+                current.append(c)
+        else:
+            current.append(c)
+        i += 1
+    if current:
+        segments.append("".join(current))
+    return [s.strip() for s in segments if s.strip()]
+
+
+def _is_safe_env_assignment(token: str) -> bool:
+    """Check if a token is a safe env var assignment (no command substitution).
+
+    Returns False for assignments containing $( ), backticks, or ${ } which
+    can execute arbitrary commands during variable expansion.
+    """
+    if not ENV_VAR_PATTERN.match(token):
+        return False
+    value = token.split("=", 1)[1]
+    if "$(" in value or "`" in value or "${" in value:
+        return False
+    return True
+
+
+def extract_command_names(command: str) -> list[str]:
+    """Extract all command names from a shell command string.
+
+    Handles comments, env var prefixes, compound commands, pipes,
+    and full paths. Detects unsafe env var assignments containing
+    command substitution.
+    """
+    stripped = _strip_shell_comments(command)
+    if not stripped.strip():
+        return []
+
+    segments = _split_shell_commands(stripped)
+    commands: list[str] = []
+
+    for segment in segments:
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            tokens = segment.split()
+
+        if not tokens:
+            continue
+
+        # Skip safe env var assignments, flag unsafe ones
+        idx = 0
+        while idx < len(tokens) and ENV_VAR_PATTERN.match(tokens[idx]):
+            if not _is_safe_env_assignment(tokens[idx]):
+                commands.append("<shell-expansion>")
+            idx += 1
+
+        if idx >= len(tokens):
+            continue
+
+        cmd_name = Path(tokens[idx]).name
+        commands.append(cmd_name)
+
+    return commands
+
 
 class FilesystemTools:
     """Internal filesystem tools for the agent"""
@@ -490,14 +679,18 @@ class FilesystemTools:
         except Exception as e:
             return f"Error listing directory: {str(e)}"
 
-    async def _check_command_allowed(self, cmd_token: str, full_command: str) -> str | None:
-        """Check if a command is allowed, prompting for confirmation if needed.
+    async def _check_command_allowed(self, cmd_names: list[str], full_command: str) -> str | None:
+        """Check if all commands in a command line are allowed.
+
+        Shell builtins are always allowed. Other commands must be in the
+        allowlist or approved via the confirmation callback.
 
         Returns:
             Error message if blocked, None if allowed
         """
-        cmd_name = Path(cmd_token).name
-        if cmd_name in self.allowed_commands:
+        non_allowed = [name for name in cmd_names if name not in SHELL_BUILTINS and name not in self.allowed_commands]
+
+        if not non_allowed:
             return None
 
         if self.confirmation_callback is not None:
@@ -507,7 +700,7 @@ class FilesystemTools:
             return f"Error: Command '{full_command}' was rejected by the user. Try a different approach or use only allowed commands: {', '.join(self.allowed_commands)}."
 
         allowed_list = ", ".join(self.allowed_commands)
-        return f"Error: Command '{cmd_name}' is not in the allowed commands list: {allowed_list}. Not allowed."
+        return f"Error: Command '{', '.join(non_allowed)}' is not in the allowed commands list: {allowed_list}. Not allowed."
 
     async def _execute_command(self, args: dict) -> str:
         """Execute a command with allowlist enforcement"""
@@ -526,15 +719,9 @@ class FilesystemTools:
         else:
             timeout = min(timeout, 300)  # Max 5 minutes
 
-        try:
-            cmd_parts = shlex.split(command)
-        except ValueError as e:
-            return f"Error: Invalid command syntax: {e}"
+        cmd_names = extract_command_names(command)
 
-        if not cmd_parts:
-            return "Error: Empty command"
-
-        error = await self._check_command_allowed(cmd_parts[0], command)
+        error = await self._check_command_allowed(cmd_names, command)
         if error:
             return error
 

@@ -268,6 +268,7 @@ class SkillsManager:
         for skill_name, content in self.loaded_skills.items():
             sections.append(f"\n## Skill: {skill_name}")
             sections.append(f"{content.metadata.description}\n")
+            # Skill body is validated at load time in skills_loader._parse_skill_file()
             sections.append(content.body)
             sections.append("")
 

