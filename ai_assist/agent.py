@@ -337,7 +337,7 @@ class AiAssistAgent:
                 # to start the _receive_loop task that processes incoming messages!
                 async with ClientSession(read_stream, write_stream) as session:
                     try:
-                        await asyncio.wait_for(session.initialize(), timeout=10.0)
+                        await asyncio.wait_for(session.initialize(), timeout=60.0)
                     except TimeoutError:
                         print(f"⚠ Warning: {name} timed out during initialization", flush=True)
                         raise

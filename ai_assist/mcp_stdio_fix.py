@@ -91,14 +91,18 @@ async def stdio_client_fixed(server: StdioServerParameters, errlog: TextIO = sys
                         try:
                             message = types.JSONRPCMessage.model_validate_json(line)
                             session_message = SessionMessage(message)
-                            await read_stream_writer.send(session_message)
                         except Exception as exc:
                             logger.error(f"Failed to parse JSONRPC message: {line[:100]}")
                             logger.exception("Parse error")
-                            await read_stream_writer.send(exc)
+                            try:
+                                await read_stream_writer.send(exc)
+                            except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+                                return
+                        else:
+                            await read_stream_writer.send(session_message)
                 logger.debug("[FIX] TextReceiveStream ended (EOF)")
-        except anyio.ClosedResourceError as e:
-            logger.info(f"[FIX] ClosedResourceError in stdout_reader: {e}")
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError) as e:
+            logger.info(f"[FIX] Stream closed in stdout_reader: {e}")
             await anyio.lowlevel.checkpoint()
         except Exception as e:
             logger.error(f"[FIX] stdout_reader error: {e}")
@@ -119,7 +123,7 @@ async def stdio_client_fixed(server: StdioServerParameters, errlog: TextIO = sys
                         )
                     )
                     logger.debug("[FIX] stdin_writer sent message")
-        except anyio.ClosedResourceError:
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
             await anyio.lowlevel.checkpoint()
         except Exception as e:
             logger.error(f"stdin_writer error: {e}")
