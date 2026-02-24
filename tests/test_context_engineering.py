@@ -207,7 +207,7 @@ class TestObservationMasking:
         AiAssistAgent._mask_old_observations(messages, keep_recent=2)
 
         # First tool result should be masked
-        assert "Previous tool result" in messages[2]["content"][0]["content"]
+        assert "Result already retrieved" in messages[2]["content"][0]["content"]
         # Last two should be preserved
         assert messages[4]["content"][0]["content"] == "mid result"
         assert messages[6]["content"][0]["content"] == "recent result"
@@ -266,8 +266,8 @@ class TestObservationMasking:
         ]
         AiAssistAgent._mask_old_observations(messages, keep_recent=2)
         # Both results in the first tool results message should be masked
-        assert "Previous tool result" in messages[2]["content"][0]["content"]
-        assert "Previous tool result" in messages[2]["content"][1]["content"]
+        assert "Result already retrieved" in messages[2]["content"][0]["content"]
+        assert "Result already retrieved" in messages[2]["content"][1]["content"]
 
     def test_empty_messages(self):
         """Empty messages list is handled gracefully"""
@@ -585,3 +585,143 @@ class TestGroundingNudge:
         # Exactly 2 calls: initial + nudge. No infinite loop.
         assert agent.anthropic.messages.create.call_count == 2
         assert "confirmed" in result
+
+    @pytest.mark.asyncio
+    async def test_no_nudge_when_tools_already_called(self):
+        """Grounding nudge does NOT fire when tools were already called during the query"""
+        config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
+        agent = AiAssistAgent(config)
+
+        agent.available_tools.append(
+            {
+                "name": "dci__search_dci_jobs",
+                "description": "Search DCI jobs.",
+                "input_schema": {"type": "object", "properties": {}},
+                "_server": "dci",
+                "_original_name": "search_dci_jobs",
+            }
+        )
+
+        def make_usage_mock():
+            m = MagicMock()
+            m.input_tokens = 1000
+            m.output_tokens = 200
+            del m.cache_creation_input_tokens
+            del m.cache_read_input_tokens
+            return m
+
+        # Response 1: tool call
+        mock_tool_block = MagicMock()
+        mock_tool_block.type = "tool_use"
+        mock_tool_block.name = "dci__search_dci_jobs"
+        mock_tool_block.input = {"query": "status=failure"}
+        mock_tool_block.id = "call_1"
+
+        mock_response_1 = MagicMock()
+        mock_response_1.content = [mock_tool_block]
+        mock_response_1.stop_reason = "tool_use"
+        mock_response_1.usage = make_usage_mock()
+
+        # Response 2: text answer — nudge should NOT fire because tools were called
+        mock_text_block = MagicMock()
+        mock_text_block.type = "text"
+        mock_text_block.text = "Two jobs failed yesterday."
+
+        mock_response_2 = MagicMock()
+        mock_response_2.content = [mock_text_block]
+        mock_response_2.stop_reason = "end_turn"
+        mock_response_2.usage = make_usage_mock()
+
+        agent.anthropic = MagicMock()
+        agent.anthropic.messages.create.side_effect = [mock_response_1, mock_response_2]
+
+        async def fake_execute(name, args):
+            return '{"jobs": [{"id": "j1", "status": "failure"}]}'
+
+        with (
+            patch.object(agent, "get_max_tokens", return_value=8192),
+            patch.object(agent, "_execute_tool", side_effect=fake_execute),
+        ):
+            result = await agent.query("What jobs failed?")
+
+        # Only 2 calls: tool call turn + text answer. No nudge turn.
+        assert agent.anthropic.messages.create.call_count == 2
+        assert "failed" in result
+
+
+class TestToolResultCache:
+    """Tests for per-query tool result dedup cache"""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_tool_call_returns_cached_result(self):
+        """Second identical tool call in same query returns cached result without re-execution"""
+        config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
+        agent = AiAssistAgent(config)
+
+        agent.available_tools.append(
+            {
+                "name": "dci__today",
+                "description": "Get today's date.",
+                "input_schema": {"type": "object", "properties": {}},
+                "_server": "dci",
+                "_original_name": "today",
+            }
+        )
+
+        def make_usage_mock():
+            m = MagicMock()
+            m.input_tokens = 1000
+            m.output_tokens = 200
+            del m.cache_creation_input_tokens
+            del m.cache_read_input_tokens
+            return m
+
+        # Response 1: two identical tool calls in one turn
+        mock_tool_block_1 = MagicMock()
+        mock_tool_block_1.type = "tool_use"
+        mock_tool_block_1.name = "dci__today"
+        mock_tool_block_1.input = {}
+        mock_tool_block_1.id = "call_1"
+
+        mock_tool_block_2 = MagicMock()
+        mock_tool_block_2.type = "tool_use"
+        mock_tool_block_2.name = "dci__today"
+        mock_tool_block_2.input = {}
+        mock_tool_block_2.id = "call_2"
+
+        mock_response_1 = MagicMock()
+        mock_response_1.content = [mock_tool_block_1, mock_tool_block_2]
+        mock_response_1.stop_reason = "tool_use"
+        mock_response_1.usage = make_usage_mock()
+
+        # Response 2: text answer (no grounding nudge since tools were already called)
+        mock_text_block = MagicMock()
+        mock_text_block.type = "text"
+        mock_text_block.text = "Today is 2026-02-24."
+
+        mock_response_2 = MagicMock()
+        mock_response_2.content = [mock_text_block]
+        mock_response_2.stop_reason = "end_turn"
+        mock_response_2.usage = make_usage_mock()
+
+        agent.anthropic = MagicMock()
+        agent.anthropic.messages.create.side_effect = [mock_response_1, mock_response_2]
+
+        execute_call_count = 0
+
+        async def counting_execute(name, args):
+            nonlocal execute_call_count
+            execute_call_count += 1
+            return '{"date": "2026-02-24"}'
+
+        with (
+            patch.object(agent, "get_max_tokens", return_value=8192),
+            patch.object(agent, "_execute_tool", side_effect=counting_execute),
+        ):
+            result = await agent.query("What is today?")
+
+        # _execute_tool should have been called only once (second call was cached)
+        assert execute_call_count == 1
+        # Duplicate count should be 1
+        assert agent._duplicate_tool_call_count == 1
+        assert "2026-02-24" in result

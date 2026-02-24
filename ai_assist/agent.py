@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -169,6 +170,8 @@ class AiAssistAgent:
 
         # Track whether extended context is currently active (per-query)
         self._extended_context_active = False
+        # Track whether grounding nudge fired during current query
+        self._grounding_nudge_fired = False
 
         self.sessions: dict[str, ClientSession] = {}
         self.available_tools: list[dict] = []
@@ -334,7 +337,7 @@ class AiAssistAgent:
                 # to start the _receive_loop task that processes incoming messages!
                 async with ClientSession(read_stream, write_stream) as session:
                     try:
-                        await asyncio.wait_for(session.initialize(), timeout=10.0)
+                        await asyncio.wait_for(session.initialize(), timeout=60.0)
                     except TimeoutError:
                         print(f"⚠ Warning: {name} timed out during initialization", flush=True)
                         raise
@@ -612,6 +615,51 @@ class AiAssistAgent:
         """
         return self._turn_token_usage.copy()
 
+    def capture_trace(
+        self,
+        query_text: str,
+        response_text: str,
+        start_time: float,
+        turn_count: int | None = None,
+    ):
+        """Build a QueryTrace from current agent state after a query completes.
+
+        Call this BEFORE clear_tool_calls() so tool call data is still available.
+
+        Args:
+            query_text: The original query
+            response_text: The agent's response
+            start_time: Query start time (from time.time())
+            turn_count: Number of turns used. If None, reads from self._last_turn_count.
+        """
+        if turn_count is None:
+            turn_count = getattr(self, "_last_turn_count", 0)
+        from .eval import QueryTrace
+
+        # Extract tool names + args (no results) from last_tool_calls
+        tool_calls = [{"tool_name": tc["tool_name"], "arguments": tc["arguments"]} for tc in self.last_tool_calls]
+
+        # Get token usage
+        token_usage = self.get_token_usage()
+        total_input = sum(t.get("input_tokens", 0) for t in token_usage)
+        total_output = sum(t.get("output_tokens", 0) for t in token_usage)
+
+        return QueryTrace(
+            query_text=query_text,
+            timestamp=datetime.fromtimestamp(start_time).isoformat(),
+            tool_calls=tool_calls,
+            turn_count=turn_count,
+            grounding_nudge_fired=self._grounding_nudge_fired,
+            response_text=response_text,
+            token_usage=token_usage,
+            total_input_tokens=total_input,
+            total_output_tokens=total_output,
+            duration_seconds=round(time.time() - start_time, 2),
+            model=self.config.model,
+            tools_available_count=len(self.available_tools),
+            duplicate_tool_calls=getattr(self, "_duplicate_tool_call_count", 0),
+        )
+
     @staticmethod
     def _truncate_tool_result(result: str, max_size: int = 20000) -> str:
         """Truncate large tool results to prevent context overflow.
@@ -630,7 +678,7 @@ class AiAssistAgent:
         return truncated
 
     @staticmethod
-    def _mask_old_observations(messages: list, keep_recent: int = 2) -> None:
+    def _mask_old_observations(messages: list, keep_recent: int = 10) -> None:
         """Replace old tool results with compact placeholders in-place.
 
         Scans the message list and replaces tool result content from older turns
@@ -639,7 +687,7 @@ class AiAssistAgent:
 
         Args:
             messages: Message list (modified in-place)
-            keep_recent: Number of recent tool-result rounds to preserve
+            keep_recent: Number of recent tool-result rounds to preserve (default: 10)
         """
         # Find all user messages that contain tool results
         tool_result_indices = []
@@ -657,7 +705,23 @@ class AiAssistAgent:
             if isinstance(content, list):
                 for item in content:
                     if isinstance(item, dict) and item.get("type") == "tool_result":
-                        item["content"] = "[Previous tool result — call the tool again if needed]"
+                        item["content"] = "[Result already retrieved]"
+
+    # Threshold: only start masking when input tokens exceed 50% of context window
+    OBSERVATION_MASKING_THRESHOLD = 0.5
+
+    def _should_mask_observations(self) -> bool:
+        """Check if context usage is high enough to warrant masking old tool results.
+
+        Returns True when the last turn's input tokens exceed the masking threshold
+        of the context window. This avoids premature masking that forces the agent
+        to re-call tools it already called.
+        """
+        if not self._turn_token_usage:
+            return False
+        last_input = self._turn_token_usage[-1]["input_tokens"]
+        context_window = self.get_context_window_size()
+        return last_input > context_window * self.OBSERVATION_MASKING_THRESHOLD
 
     def _build_system_prompt(self) -> str:
         """Build complete system prompt including identity and skills
@@ -731,8 +795,6 @@ class AiAssistAgent:
             The assistant's response text
         """
         import hashlib
-        import json
-        import time
 
         # Build messages list
         if messages is None:
@@ -750,7 +812,7 @@ class AiAssistAgent:
         self._turn_token_usage = []
         self._extended_context_active = False
 
-        # Loop detection tracking
+        # Loop detection and dedup tracking
         start_time = time.time()
         max_time_seconds = 600  # 10 minutes max
         recent_tool_calls = []  # Track last 5 tool calls
@@ -758,7 +820,12 @@ class AiAssistAgent:
         loop_detection_threshold = 3  # If same call appears 3 times in recent history, it's a loop
         no_progress_count = 0  # Count turns with no text response
         max_no_progress = 10  # Allow 10 turns without text before declaring stuck
-        grounding_nudged = False  # Track if grounding nudge has been sent
+        self._grounding_nudge_fired = False
+        self._wrapup_nudge_fired = False
+        self._tool_result_cache: dict[str, str] = {}  # Per-query dedup cache
+        self._duplicate_tool_call_count = 0
+        self._last_turn_count = 0
+        any_tools_called = False  # Track if any tools were called during the entire query
 
         if progress_callback:
             progress_callback("thinking", 0, max_turns, None)
@@ -767,12 +834,14 @@ class AiAssistAgent:
             # Check time-based timeout
             elapsed = time.time() - start_time
             if elapsed > max_time_seconds:
+                self._last_turn_count = turn + 1
                 return f"Task timeout after {int(elapsed)} seconds (max: {max_time_seconds}s)"
             if progress_callback:
                 progress_callback("calling_claude", turn + 1, max_turns, None)
 
-            # Mask old tool results to save context tokens
-            self._mask_old_observations(messages)
+            # Only mask old tool results when context is getting large
+            if self._should_mask_observations():
+                self._mask_old_observations(messages)
 
             # Check if we need to activate extended context
             if not self._extended_context_active and self._needs_extended_context():
@@ -817,10 +886,20 @@ class AiAssistAgent:
                     if progress_callback:
                         progress_callback("executing_tool", turn + 1, max_turns, block.name)
 
-                    result = await self._execute_tool(block.name, block.input)
+                    # Compute signature for dedup and loop detection
+                    tool_signature = (
+                        f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
+                    )
 
-                    # Truncate large tool results to prevent context overflow
-                    result = self._truncate_tool_result(result)
+                    # Check per-query cache for duplicate tool call
+                    if tool_signature in self._tool_result_cache:
+                        result = self._tool_result_cache[tool_signature]
+                        self._duplicate_tool_call_count += 1
+                    else:
+                        result = await self._execute_tool(block.name, block.input)
+                        # Truncate large tool results to prevent context overflow
+                        result = self._truncate_tool_result(result)
+                        self._tool_result_cache[tool_signature] = result
 
                     # Check if result is an error (starts with "Error:")
                     is_error = isinstance(result, str) and result.startswith("Error:")
@@ -837,16 +916,14 @@ class AiAssistAgent:
 
                     tool_results.append(tool_result)
 
-                    # Track tool call for loop detection
-                    tool_signature = (
-                        f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
-                    )
+                    # Track for loop detection
                     recent_tool_calls.append(tool_signature)
                     if len(recent_tool_calls) > max_recent_calls:
                         recent_tool_calls.pop(0)
 
                     # Check for loops - same tool call repeated multiple times
                     if recent_tool_calls.count(tool_signature) >= loop_detection_threshold:
+                        self._last_turn_count = turn + 1
                         return f"Loop detected: {block.name} called repeatedly with same arguments ({recent_tool_calls.count(tool_signature)} times)"
 
             if not tool_results:
@@ -857,10 +934,11 @@ class AiAssistAgent:
 
                 # Check if we got actual content
                 if final_text.strip():
-                    # Grounding nudge: if tools are available but none were called,
-                    # ask the model to verify its claims with tools (once only)
-                    if api_tools and not grounding_nudged:
-                        grounding_nudged = True
+                    # Grounding nudge: if tools are available but none were called
+                    # during the entire query, ask the model to verify (once only).
+                    # Skip if tools were already used — the answer is already grounded.
+                    if api_tools and not any_tools_called and not self._grounding_nudge_fired:
+                        self._grounding_nudge_fired = True
                         messages.append(
                             {
                                 "role": "user",
@@ -876,20 +954,39 @@ class AiAssistAgent:
 
                     if progress_callback:
                         progress_callback("complete", turn + 1, max_turns, None)
+                    self._last_turn_count = turn + 1
                     return final_text
                 else:
                     # No text and no tool calls - agent gave up
                     no_progress_count += 1
                     if no_progress_count >= max_no_progress:
+                        self._last_turn_count = turn + 1
                         return "Agent stopped responding (no progress detected)"
                     # Continue to next turn
                     continue
 
             # We have tool results - reset no-progress counter (agent is actively working)
             no_progress_count = 0
+            any_tools_called = True
 
             messages.append({"role": "user", "content": tool_results})
 
+            # Wrap-up nudge: when approaching the turn limit, ask the agent to synthesize
+            if not self._wrapup_nudge_fired and turn >= int(max_turns * 0.8):
+                self._wrapup_nudge_fired = True
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "You are approaching the maximum number of tool calls allowed. "
+                            "Please synthesize the information you have gathered so far into "
+                            "a final answer. Do not make additional tool calls unless absolutely "
+                            "necessary to complete the answer."
+                        ),
+                    }
+                )
+
+        self._last_turn_count = max_turns
         return "Maximum turns reached without final answer"
 
     async def query_streaming(
@@ -932,10 +1029,14 @@ class AiAssistAgent:
         if cancel_event is not None:
             self._cancel_event = cancel_event
 
-        # Loop detection tracking (same as query())
+        # Loop detection and dedup tracking (same as query())
         recent_tool_calls = []
         max_recent_calls = 5
         loop_detection_threshold = 3
+        self._tool_result_cache = {}
+        self._duplicate_tool_call_count = 0
+        self._last_turn_count = 0
+        any_tools_called = False
 
         # Build tools with progressive disclosure (truncated descriptions)
         api_tools = self._build_api_tools()
@@ -943,7 +1044,8 @@ class AiAssistAgent:
         # Reset token tracking and extended context for this query
         self._turn_token_usage = []
         self._extended_context_active = False
-        grounding_nudged = False  # Track if grounding nudge has been sent
+        self._grounding_nudge_fired = False
+        self._wrapup_nudge_fired = False
 
         if progress_callback:
             progress_callback("thinking", 0, max_turns, None)
@@ -951,14 +1053,16 @@ class AiAssistAgent:
         for turn in range(max_turns):
             # Check cancellation before each turn
             if cancel_event and cancel_event.is_set():
+                self._last_turn_count = turn
                 yield {"type": "cancelled"}
                 return
 
             if progress_callback:
                 progress_callback("calling_claude", turn + 1, max_turns, None)
 
-            # Mask old tool results to save context tokens
-            self._mask_old_observations(messages)
+            # Only mask old tool results when context is getting large
+            if self._should_mask_observations():
+                self._mask_old_observations(messages)
 
             # Check if we need to activate extended context
             if not self._extended_context_active and self._needs_extended_context():
@@ -985,6 +1089,7 @@ class AiAssistAgent:
                 for event in stream:
                     # Check cancellation during streaming
                     if cancel_event and cancel_event.is_set():
+                        self._last_turn_count = turn + 1
                         yield {"type": "cancelled"}
                         return
 
@@ -1027,16 +1132,25 @@ class AiAssistAgent:
                     if block.type == "tool_use":
                         # Check cancellation before each tool execution
                         if cancel_event and cancel_event.is_set():
+                            self._last_turn_count = turn + 1
                             yield {"type": "cancelled"}
                             return
 
                         if progress_callback:
                             progress_callback("executing_tool", turn + 1, max_turns, block.name)
 
-                        result = await self._execute_tool(block.name, block.input)
+                        # Compute signature for dedup and loop detection
+                        tool_signature = f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
 
-                        # Truncate large tool results to prevent context overflow
-                        result = self._truncate_tool_result(result)
+                        # Check per-query cache for duplicate tool call
+                        if tool_signature in self._tool_result_cache:
+                            result = self._tool_result_cache[tool_signature]
+                            self._duplicate_tool_call_count += 1
+                        else:
+                            result = await self._execute_tool(block.name, block.input)
+                            # Truncate large tool results to prevent context overflow
+                            result = self._truncate_tool_result(result)
+                            self._tool_result_cache[tool_signature] = result
 
                         # Check if result is an error
                         is_error = isinstance(result, str) and result.startswith("Error:")
@@ -1053,14 +1167,14 @@ class AiAssistAgent:
 
                         tool_results.append(tool_result)
 
-                        # Track tool call for loop detection
-                        tool_signature = f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
+                        # Track for loop detection
                         recent_tool_calls.append(tool_signature)
                         if len(recent_tool_calls) > max_recent_calls:
                             recent_tool_calls.pop(0)
 
                         # Check for loops
                         if recent_tool_calls.count(tool_signature) >= loop_detection_threshold:
+                            self._last_turn_count = turn + 1
                             yield {
                                 "type": "error",
                                 "message": f"Loop detected: {block.name} called repeatedly with same arguments ({recent_tool_calls.count(tool_signature)} times)",
@@ -1069,10 +1183,11 @@ class AiAssistAgent:
 
                 # If no tool calls, check for grounding nudge
                 if not tool_results:
-                    # Grounding nudge: if tools are available but none were called,
-                    # ask the model to verify its claims with tools (once only)
-                    if api_tools and not grounding_nudged and current_text.strip():
-                        grounding_nudged = True
+                    # Grounding nudge: if tools are available but none were called
+                    # during the entire query, ask the model to verify (once only).
+                    # Skip if tools were already used — the answer is already grounded.
+                    if api_tools and not any_tools_called and not self._grounding_nudge_fired and current_text.strip():
+                        self._grounding_nudge_fired = True
                         messages.append(
                             {
                                 "role": "user",
@@ -1089,13 +1204,31 @@ class AiAssistAgent:
                     if progress_callback:
                         progress_callback("complete", turn + 1, max_turns, None)
 
+                    self._last_turn_count = turn + 1
                     yield {"type": "done", "turns": turn + 1}
                     return
 
                 # Continue with tool results
+                any_tools_called = True
                 messages.append({"role": "user", "content": tool_results})
 
+                # Wrap-up nudge: when approaching the turn limit, ask the agent to synthesize
+                if not self._wrapup_nudge_fired and turn >= int(max_turns * 0.8):
+                    self._wrapup_nudge_fired = True
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "You are approaching the maximum number of tool calls allowed. "
+                                "Please synthesize the information you have gathered so far into "
+                                "a final answer. Do not make additional tool calls unless absolutely "
+                                "necessary to complete the answer."
+                            ),
+                        }
+                    )
+
         # Max turns reached
+        self._last_turn_count = max_turns
         yield {"type": "error", "message": "Maximum turns reached without final answer"}
 
     async def execute_mcp_prompt(
@@ -1412,165 +1545,55 @@ class AiAssistAgent:
             return error_msg
 
     async def _save_tool_result_to_kg(self, tool_name: str, original_tool_name: str, arguments: dict, result_text: str):
-        """Save tool result to knowledge graph if it contains entities
+        """Save tool result to knowledge graph as a generic tool_result entity.
 
-        Supports:
-        - search_dci_jobs -> dci_job entities
-        - search_jira_tickets -> jira_ticket entities
-        - get_jira_ticket -> jira_ticket entity
+        Stores the tool name (without MCP prefix), arguments, and parsed JSON result.
+        Large results (>10000 chars) are stored without the result blob to keep the KG manageable.
         """
-        # Double-check kg_save_enabled (defensive programming)
         if not self.kg_save_enabled or not self.knowledge_graph:
             return
 
-        if not result_text or "Error" in result_text:
+        if not result_text or result_text.startswith("Error:"):
             return
 
         try:
-            # Parse JSON result
-            try:
-                data = json.loads(result_text)
-            except json.JSONDecodeError:
-                # Not JSON, skip
-                return
+            data = json.loads(result_text)
+        except json.JSONDecodeError:
+            return
 
+        try:
+            import hashlib
+
+            entity_id = (
+                f"{original_tool_name}:"
+                f"{hashlib.md5(json.dumps(arguments, sort_keys=True).encode()).hexdigest()[:8]}"
+            )
+            stored_data = {
+                "tool_name": original_tool_name,
+                "arguments": arguments,
+                "result": data if len(result_text) <= 10000 else None,
+            }
             tx_time = datetime.now()
-
-            # Determine entity type from tool name
-            entity_type = None
-            entities = []
-
-            if "jira" in original_tool_name.lower():
-                entity_type = "jira_ticket"
-                # Handle different response formats
-                if isinstance(data, list):
-                    entities = data
-                elif isinstance(data, dict):
-                    if "issues" in data:
-                        entities = data["issues"]
-                    elif "key" in data:
-                        # Single ticket
-                        entities = [data]
-
-            elif "dci" in original_tool_name.lower() and "job" in original_tool_name.lower():
-                entity_type = "dci_job"
-                # Handle different response formats
-                if isinstance(data, list):
-                    entities = data
-                elif isinstance(data, dict):
-                    if "hits" in data:
-                        entities = data["hits"]
-                    elif "jobs" in data:
-                        entities = data["jobs"]
-                    elif "id" in data:
-                        # Single job
-                        entities = [data]
-
-            if not entity_type or not entities:
-                return
-
-            # Prepare all entity data (pure Python, fast)
-            prepared: list[tuple[str, dict, datetime, list]] = []
-            for entity_data in entities[:20]:  # Limit to 20 entities per call
-                entity_id = entity_data.get("id") or entity_data.get("key")
-                if not entity_id:
-                    continue
-
-                # Parse valid_from timestamp
-                created_str = entity_data.get("created_at") or entity_data.get("fields", {}).get("created", "")
-                try:
-                    valid_from = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
-                except (ValueError, AttributeError):
-                    valid_from = tx_time
-
-                # Prepare entity data based on type
-                if entity_type == "jira_ticket":
-                    stored_data = {
-                        "key": entity_data.get("key"),
-                        "project": entity_data.get("fields", {}).get("project", {}).get("key"),
-                        "summary": entity_data.get("fields", {}).get("summary"),
-                        "status": entity_data.get("fields", {}).get("status", {}).get("name"),
-                        "priority": entity_data.get("fields", {}).get("priority", {}).get("name"),
-                        "assignee": (
-                            entity_data.get("fields", {}).get("assignee", {}).get("displayName")
-                            if entity_data.get("fields", {}).get("assignee")
-                            else None
-                        ),
-                    }
-                    prepared.append((entity_id, stored_data, valid_from, []))
-                elif entity_type == "dci_job":
-                    stored_data = {
-                        "job_id": entity_id,
-                        "status": entity_data.get("status", "unknown"),
-                        "remoteci_id": entity_data.get("remoteci_id"),
-                        "topic_id": entity_data.get("topic_id"),
-                        "state": entity_data.get("state"),
-                    }
-                    components = [c for c in entity_data.get("components", []) if c.get("id")]
-                    prepared.append((entity_id, stored_data, valid_from, components))
-                else:
-                    prepared.append((entity_id, entity_data, valid_from, []))
-
-            if not prepared:
-                return
-
-            # Batch all KG writes into a single commit, offloaded to thread pool
             kg = self.knowledge_graph
 
-            def _do_kg_writes():
-                saved = 0
-                with kg.batch():
-                    for eid, sdata, vfrom, comps in prepared:
-                        # Insert components and relationships (DCI jobs)
-                        for component in comps:
-                            comp_id = component["id"]
-                            try:
-                                kg.insert_entity(
-                                    entity_type="dci_component",
-                                    entity_id=comp_id,
-                                    valid_from=vfrom,
-                                    tx_from=tx_time,
-                                    data={
-                                        "type": component.get("type"),
-                                        "version": component.get("version"),
-                                        "name": component.get("name"),
-                                    },
-                                )
-                            except Exception:
-                                pass  # Entity might already exist
+            def _do_write():
+                try:
+                    kg.upsert_entity(
+                        entity_type="tool_result",
+                        entity_id=entity_id,
+                        data=stored_data,
+                        valid_from=tx_time,
+                        tx_from=tx_time,
+                    )
+                    return 1
+                except Exception:
+                    return 0
 
-                            kg.insert_relationship(
-                                rel_type="job_uses_component",
-                                source_id=eid,
-                                target_id=comp_id,
-                                valid_from=vfrom,
-                                tx_from=tx_time,
-                                properties={},
-                            )
-
-                        # Insert main entity
-                        try:
-                            kg.insert_entity(
-                                entity_type=entity_type,
-                                entity_id=eid,
-                                valid_from=vfrom,
-                                tx_from=tx_time,
-                                data=sdata,
-                            )
-                            saved += 1
-                        except Exception:
-                            pass  # Entity might already exist
-                return saved
-
-            saved_count = await asyncio.to_thread(_do_kg_writes)
-
-            # Track how many we saved
-            if saved_count > 0:
-                self.last_tool_calls[-1]["kg_saved_count"] = saved_count
-
+            saved = await asyncio.to_thread(_do_write)
+            if saved and self.last_tool_calls:
+                self.last_tool_calls[-1]["kg_saved_count"] = self.last_tool_calls[-1].get("kg_saved_count", 0) + saved
         except Exception:
-            # Silently fail - KG storage is best-effort
-            pass
+            pass  # Best-effort
 
     def get_last_kg_saved_count(self) -> int:
         """Get the number of entities saved to KG in the last tool calls"""

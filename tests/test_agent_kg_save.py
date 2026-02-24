@@ -1,4 +1,4 @@
-"""Tests for agent knowledge graph auto-save"""
+"""Tests for agent knowledge graph auto-save (generic tool results)"""
 
 import json
 from datetime import datetime
@@ -54,13 +54,11 @@ def test_kg_save_can_be_toggled(agent_with_kg):
 
 def test_tool_calls_tracked(agent_with_kg):
     """Test tool calls are tracked in last_tool_calls"""
-    # Initially empty
     assert len(agent_with_kg.last_tool_calls) == 0
 
-    # Add a mock tool call
     agent_with_kg.last_tool_calls.append(
         {
-            "tool_name": "dci__search_dci_jobs",
+            "tool_name": "my_server__search_items",
             "arguments": {"query": "test"},
             "result": "test result",
             "timestamp": datetime.now(),
@@ -72,12 +70,10 @@ def test_tool_calls_tracked(agent_with_kg):
 
 def test_clear_tool_calls(agent_with_kg):
     """Test clearing tool calls"""
-    # Add some calls
     agent_with_kg.last_tool_calls.append({"test": "data"})
     agent_with_kg.last_tool_calls.append({"test": "data2"})
     assert len(agent_with_kg.last_tool_calls) == 2
 
-    # Clear
     agent_with_kg.clear_tool_calls()
     assert len(agent_with_kg.last_tool_calls) == 0
 
@@ -90,156 +86,129 @@ def test_get_last_kg_saved_count_zero(agent_with_kg):
 
 def test_get_last_kg_saved_count_with_saves(agent_with_kg):
     """Test getting saved count when entities were saved"""
-    # Add tool calls with saved counts
-    agent_with_kg.last_tool_calls.append({"tool_name": "dci__search_dci_jobs", "kg_saved_count": 5})
-    agent_with_kg.last_tool_calls.append({"tool_name": "dci__search_jira_tickets", "kg_saved_count": 3})
+    agent_with_kg.last_tool_calls.append({"tool_name": "search_items", "kg_saved_count": 5})
+    agent_with_kg.last_tool_calls.append({"tool_name": "get_ticket", "kg_saved_count": 3})
 
     count = agent_with_kg.get_last_kg_saved_count()
-    assert count == 8  # 5 + 3
+    assert count == 8
 
 
 def test_get_last_kg_saved_count_mixed(agent_with_kg):
     """Test getting saved count with mixed results"""
-    # Some with saves, some without
-    agent_with_kg.last_tool_calls.append({"tool_name": "dci__search_dci_jobs", "kg_saved_count": 5})
-    agent_with_kg.last_tool_calls.append(
-        {
-            "tool_name": "some__other_tool"
-            # No kg_saved_count
-        }
-    )
+    agent_with_kg.last_tool_calls.append({"tool_name": "search_items", "kg_saved_count": 5})
+    agent_with_kg.last_tool_calls.append({"tool_name": "some_other_tool"})
 
     count = agent_with_kg.get_last_kg_saved_count()
     assert count == 5
 
 
 @pytest.mark.asyncio
-async def test_save_jira_result_to_kg(agent_with_kg, kg):
-    """Test saving Jira ticket result to KG"""
-    # Mock Jira API response
-    jira_result = """
-    {
-        "key": "CILAB-123",
-        "fields": {
-            "summary": "Test issue",
-            "status": {"name": "Open"},
-            "priority": {"name": "High"},
-            "project": {"key": "CILAB"},
-            "created": "2026-02-01T10:00:00Z"
-        }
-    }
-    """
+async def test_save_generic_json_result(agent_with_kg, kg):
+    """Test saving any JSON tool result as a tool_result entity"""
+    result = json.dumps({"name": "widget", "status": "active", "count": 42})
 
-    # Call the save method
-    await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__get_jira_ticket",
-        original_tool_name="get_jira_ticket",
-        arguments={"ticket_key": "CILAB-123"},
-        result_text=jira_result,
+    agent_with_kg.last_tool_calls.append(
+        {"tool_name": "server__get_widget", "arguments": {"id": "w1"}, "timestamp": datetime.now()}
     )
 
-    # Verify entity was saved
-    entity = kg.get_entity("CILAB-123")
-    assert entity is not None
-    assert entity.entity_type == "jira_ticket"
-    assert entity.data["key"] == "CILAB-123"
-    assert entity.data["summary"] == "Test issue"
-    assert entity.data["status"] == "Open"
+    await agent_with_kg._save_tool_result_to_kg(
+        tool_name="server__get_widget",
+        original_tool_name="get_widget",
+        arguments={"id": "w1"},
+        result_text=result,
+    )
+
+    # Verify entity was saved with generic type
+    stats = kg.get_stats()
+    assert stats["total_entities"] == 1
+
+    # Verify the entity data
+    entities = kg.query_as_of(datetime.now(), entity_type="tool_result")
+    assert len(entities) == 1
+    entity = entities[0]
+    assert entity.entity_type == "tool_result"
+    assert entity.data["tool_name"] == "get_widget"
+    assert entity.data["arguments"] == {"id": "w1"}
+    assert entity.data["result"]["name"] == "widget"
+    assert entity.data["result"]["count"] == 42
 
 
 @pytest.mark.asyncio
-async def test_save_jira_list_to_kg(agent_with_kg, kg):
-    """Test saving list of Jira tickets to KG"""
-    jira_result = """
-    {
-        "issues": [
-            {
-                "key": "CILAB-1",
-                "fields": {
-                    "summary": "Issue 1",
-                    "status": {"name": "Open"},
-                    "project": {"key": "CILAB"},
-                    "created": "2026-02-01T10:00:00Z"
-                }
-            },
-            {
-                "key": "CILAB-2",
-                "fields": {
-                    "summary": "Issue 2",
-                    "status": {"name": "Closed"},
-                    "project": {"key": "CILAB"},
-                    "created": "2026-02-01T11:00:00Z"
-                }
-            }
-        ]
-    }
-    """
+async def test_save_stores_original_tool_name_not_prefixed(agent_with_kg, kg):
+    """Test that the MCP prefix is NOT stored — only the original tool name"""
+    result = json.dumps({"key": "value"})
 
-    await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__search_jira_tickets",
-        original_tool_name="search_jira_tickets",
-        arguments={"jql": "project=CILAB"},
-        result_text=jira_result,
+    agent_with_kg.last_tool_calls.append(
+        {"tool_name": "myserver__fetch_data", "arguments": {}, "timestamp": datetime.now()}
     )
 
-    # Verify both entities saved
-    entity1 = kg.get_entity("CILAB-1")
-    entity2 = kg.get_entity("CILAB-2")
+    await agent_with_kg._save_tool_result_to_kg(
+        tool_name="myserver__fetch_data",
+        original_tool_name="fetch_data",
+        arguments={},
+        result_text=result,
+    )
 
-    assert entity1 is not None
-    assert entity2 is not None
-    assert entity1.data["summary"] == "Issue 1"
-    assert entity2.data["summary"] == "Issue 2"
+    entities = kg.query_as_of(datetime.now(), entity_type="tool_result")
+    assert len(entities) == 1
+    # Must store "fetch_data", NOT "myserver__fetch_data"
+    assert entities[0].data["tool_name"] == "fetch_data"
+    assert "myserver" not in entities[0].id
 
 
 @pytest.mark.asyncio
-async def test_save_dci_job_to_kg(agent_with_kg, kg):
-    """Test saving DCI job to KG"""
-    dci_result = """
-    {
-        "hits": [
-            {
-                "id": "job-123",
-                "status": "failure",
-                "created_at": "2026-02-01T10:00:00Z",
-                "remoteci_id": "rci-1",
-                "topic_id": "topic-1",
-                "state": "error",
-                "components": [
-                    {
-                        "id": "comp-1",
-                        "type": "ocp",
-                        "version": "4.19.0",
-                        "name": "OpenShift"
-                    }
-                ]
-            }
-        ]
-    }
-    """
+async def test_save_large_result_omits_data(agent_with_kg, kg):
+    """Test that large results (>10000 chars) are stored without the result blob"""
+    large_data = {"items": ["x" * 500 for _ in range(30)]}  # >10000 chars
+    result = json.dumps(large_data)
+    assert len(result) > 10000
 
-    await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__search_dci_jobs",
-        original_tool_name="search_dci_jobs",
-        arguments={"query": "status=failure"},
-        result_text=dci_result,
+    agent_with_kg.last_tool_calls.append(
+        {"tool_name": "server__big_query", "arguments": {"q": "all"}, "timestamp": datetime.now()}
     )
 
-    # Verify job entity saved
-    job = kg.get_entity("job-123")
-    assert job is not None
-    assert job.entity_type == "dci_job"
-    assert job.data["status"] == "failure"
+    await agent_with_kg._save_tool_result_to_kg(
+        tool_name="server__big_query",
+        original_tool_name="big_query",
+        arguments={"q": "all"},
+        result_text=result,
+    )
 
-    # Verify component entity saved
-    component = kg.get_entity("comp-1")
-    assert component is not None
-    assert component.entity_type == "dci_component"
-    assert component.data["version"] == "4.19.0"
+    entities = kg.query_as_of(datetime.now(), entity_type="tool_result")
+    assert len(entities) == 1
+    # Result should be None for large results
+    assert entities[0].data["result"] is None
+    # But tool name and arguments are still stored
+    assert entities[0].data["tool_name"] == "big_query"
+    assert entities[0].data["arguments"] == {"q": "all"}
 
-    # Verify relationship exists
-    relationships = kg.get_related_entities("job-123", rel_type="job_uses_component")
-    assert len(relationships) == 1
+
+@pytest.mark.asyncio
+async def test_save_dedup_same_args(agent_with_kg, kg):
+    """Test that same tool+args produces same entity_id (dedup)"""
+    result = json.dumps({"value": 1})
+    args = {"key": "abc"}
+
+    agent_with_kg.last_tool_calls.append({"tool_name": "s__get_item", "arguments": args, "timestamp": datetime.now()})
+
+    await agent_with_kg._save_tool_result_to_kg(
+        tool_name="s__get_item", original_tool_name="get_item", arguments=args, result_text=result
+    )
+
+    # Call again with same args — should produce same entity_id
+    agent_with_kg.last_tool_calls.append({"tool_name": "s__get_item", "arguments": args, "timestamp": datetime.now()})
+
+    await agent_with_kg._save_tool_result_to_kg(
+        tool_name="s__get_item", original_tool_name="get_item", arguments=args, result_text=result
+    )
+
+    # Should still be 1 entity (upsert by entity_id)
+    stats = kg.get_stats()
+    assert stats["total_entities"] == 1
+
+    # Both calls should report kg_saved_count=1 (upsert always succeeds)
+    assert agent_with_kg.last_tool_calls[0].get("kg_saved_count") == 1
+    assert agent_with_kg.last_tool_calls[1].get("kg_saved_count") == 1
 
 
 @pytest.mark.asyncio
@@ -247,27 +216,23 @@ async def test_save_disabled_when_kg_save_off(agent_with_kg, kg):
     """Test that KG save is skipped when disabled"""
     agent_with_kg.kg_save_enabled = False
 
-    jira_result = '{"key": "CILAB-999", "fields": {"summary": "Test"}}'
+    result = json.dumps({"key": "value"})
 
     await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__get_jira_ticket", original_tool_name="get_jira_ticket", arguments={}, result_text=jira_result
+        tool_name="server__get_data", original_tool_name="get_data", arguments={}, result_text=result
     )
 
-    # Entity should NOT be saved
-    entity = kg.get_entity("CILAB-999")
-    assert entity is None
+    stats = kg.get_stats()
+    assert stats["total_entities"] == 0
 
 
 @pytest.mark.asyncio
 async def test_save_skips_non_json(agent_with_kg, kg):
     """Test that non-JSON results are skipped"""
-    result = "This is not JSON"
-
     await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__search_dci_jobs", original_tool_name="search_dci_jobs", arguments={}, result_text=result
+        tool_name="server__get_data", original_tool_name="get_data", arguments={}, result_text="This is not JSON"
     )
 
-    # No error should occur, just silently skip
     stats = kg.get_stats()
     assert stats["total_entities"] == 0
 
@@ -275,10 +240,11 @@ async def test_save_skips_non_json(agent_with_kg, kg):
 @pytest.mark.asyncio
 async def test_save_skips_error_results(agent_with_kg, kg):
     """Test that error results are not saved"""
-    error_result = "Error: Something went wrong"
-
     await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__search_dci_jobs", original_tool_name="search_dci_jobs", arguments={}, result_text=error_result
+        tool_name="server__get_data",
+        original_tool_name="get_data",
+        arguments={},
+        result_text="Error: Something went wrong",
     )
 
     stats = kg.get_stats()
@@ -286,65 +252,27 @@ async def test_save_skips_error_results(agent_with_kg, kg):
 
 
 @pytest.mark.asyncio
-async def test_save_limits_entities(agent_with_kg, kg):
-    """Test that entity saving is limited to 20 per call"""
-    # Create result with 30 jobs
-    jobs = []
-    for i in range(30):
-        jobs.append({"id": f"job-{i}", "status": "success", "created_at": "2026-02-01T10:00:00Z"})
-
-    result = f'{{"hits": {jobs}}}'
-
+async def test_save_skips_empty_result(agent_with_kg, kg):
+    """Test that empty results are not saved"""
     await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__search_dci_jobs", original_tool_name="search_dci_jobs", arguments={}, result_text=result
+        tool_name="server__get_data", original_tool_name="get_data", arguments={}, result_text=""
     )
 
-    # Should only save first 20
     stats = kg.get_stats()
-    assert stats["total_entities"] <= 20
+    assert stats["total_entities"] == 0
 
 
 @pytest.mark.asyncio
-async def test_save_dci_jobs_batched_commits(agent_with_kg, kg):
-    """Test that saving multiple DCI jobs uses batched commits (1 commit, not 30+)"""
-    # Track _maybe_commit() calls to verify batch mode is used
-    maybe_commit_calls = 0
-    original_maybe = kg._maybe_commit
+async def test_save_tracks_count(agent_with_kg, kg):
+    """Test that saved count is tracked in last_tool_calls"""
+    result = json.dumps({"value": 1})
 
-    def counting_maybe():
-        nonlocal maybe_commit_calls
-        maybe_commit_calls += 1
-        original_maybe()
-
-    kg._maybe_commit = counting_maybe
-
-    # Create result with 10 jobs, each with 1 component
-    jobs = []
-    for i in range(10):
-        jobs.append(
-            {
-                "id": f"job-batch-{i}",
-                "status": "success",
-                "created_at": "2026-02-01T10:00:00Z",
-                "components": [{"id": f"comp-batch-{i}", "type": "ocp", "version": "4.19.0", "name": "OCP"}],
-            }
-        )
-
-    result = json.dumps({"hits": jobs})
-
-    await agent_with_kg._save_tool_result_to_kg(
-        tool_name="dci__search_dci_jobs",
-        original_tool_name="search_dci_jobs",
-        arguments={},
-        result_text=result,
+    agent_with_kg.last_tool_calls.append(
+        {"tool_name": "server__get_data", "arguments": {}, "timestamp": datetime.now()}
     )
 
-    # _maybe_commit should have been called many times (30: 10 jobs + 10 comps + 10 rels)
-    # but in batch mode, none of them should actually commit
-    # The single real commit happens when batch() context manager exits
-    assert maybe_commit_calls == 30
+    await agent_with_kg._save_tool_result_to_kg(
+        tool_name="server__get_data", original_tool_name="get_data", arguments={}, result_text=result
+    )
 
-    # Verify all entities were saved
-    for i in range(10):
-        assert kg.get_entity(f"job-batch-{i}") is not None
-        assert kg.get_entity(f"comp-batch-{i}") is not None
+    assert agent_with_kg.last_tool_calls[-1].get("kg_saved_count") == 1
