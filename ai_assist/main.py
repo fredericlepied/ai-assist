@@ -268,9 +268,21 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
             messages.append({"role": "user", "content": user_input})
 
             # Query with full message history (including any injected prompts)
+            import time
+
+            start_time = time.time()
             response = await agent.query(messages=messages)
             print(response)
             print()
+
+            # Capture trace (best-effort)
+            try:
+                from .eval import TraceStore
+
+                trace = agent.capture_trace(user_input, response, start_time, 0)
+                TraceStore().append(trace)
+            except Exception:
+                pass
 
             # Add assistant response to messages
             messages.append({"role": "assistant", "content": response})
@@ -302,8 +314,20 @@ async def monitoring_mode(agent: AiAssistAgent, config, state_manager: StateMana
 
 async def run_query(agent: AiAssistAgent, query: str):
     """Run a single query"""
+    import time
+
+    start_time = time.time()
     response = await agent.query(query)
     print(response)
+
+    # Capture trace (best-effort)
+    try:
+        from .eval import TraceStore
+
+        trace = agent.capture_trace(query, response, start_time, 0)
+        TraceStore().append(trace)
+    except Exception:
+        pass
 
 
 def kg_stats_command(kg: KnowledgeGraph):
@@ -436,6 +460,33 @@ def kg_show_command(kg: KnowledgeGraph, entity_id: str):
     print()
 
 
+def eval_stats_command():
+    """Show evaluation metrics from query traces"""
+    from .eval import QueryEvaluator, TraceStore
+
+    store = TraceStore()
+    traces = store.read_all()
+
+    if not traces:
+        print("\nNo query traces found yet.")
+        print("Traces are captured automatically as you use the agent.\n")
+        return
+
+    metrics = QueryEvaluator.evaluate_traces(traces)
+
+    print(f"\nEvaluation Metrics ({metrics.total_queries} queries)")
+    print("=" * 50)
+    print(f"  Avg citation ratio:     {metrics.avg_citation_ratio:.1%}")
+    print(f"  Queries with citations: {metrics.queries_with_citations}")
+    print(f"  Tool usage rate:        {metrics.tool_usage_rate:.1%}")
+    print(f"  Avg tools per query:    {metrics.avg_tools_per_query:.1f}")
+    print(f"  Avg turns:              {metrics.avg_turns:.1f}")
+    print(f"  Avg total tokens:       {metrics.avg_total_tokens:,}")
+    print(f"  Avg duration:           {metrics.avg_duration_seconds:.1f}s")
+    print(f"  Grounding nudge rate:   {metrics.nudge_rate:.1%}")
+    print()
+
+
 def identity_show_command():
     """Show current identity configuration"""
     identity = get_identity()
@@ -536,7 +587,8 @@ async def main_async():
     identity_commands = ["identity-show", "identity-init"]
     state_commands = ["status", "clear-cache"]
     action_commands = ["cleanup-actions"]
-    no_agent_commands = kg_commands + identity_commands + state_commands + action_commands + ["help"]
+    eval_commands = ["eval-stats"]
+    no_agent_commands = kg_commands + identity_commands + state_commands + action_commands + eval_commands + ["help"]
 
     needs_agent = command not in no_agent_commands
 
@@ -593,6 +645,7 @@ async def main_async():
                 print("  /kg-show <id>      - Show entity details with context")
                 print("  /kg-viz            - Visualize knowledge graph in browser")
                 print("  /cleanup-actions   - Archive old completed/failed actions")
+                print("  /eval-stats        - Show evaluation metrics from query traces")
                 print("\nRun without arguments for interactive mode\n")
                 sys.exit(0)
 
@@ -651,6 +704,8 @@ async def main_async():
                 filepath = open_kg_visualization(knowledge_graph)
                 print("Knowledge graph visualization opened in browser")
                 print(f"File: {filepath}")
+            elif command == "eval-stats":
+                eval_stats_command()
             elif command == "cleanup-actions":
                 from .scheduled_actions import ScheduledActionManager
 

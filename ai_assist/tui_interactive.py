@@ -5,6 +5,7 @@ import json
 import signal
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -134,6 +135,7 @@ async def query_with_feedback(
         The assistant's response text
     """
     identity = get_identity()
+    start_time = time.time()
 
     # Enrich prompt with knowledge graph context if available
     context_summary: list[str] = []
@@ -268,6 +270,16 @@ async def query_with_feedback(
             console.print(
                 f"[dim]💾 Saved {kg_saved_count} entit{'y' if kg_saved_count == 1 else 'ies'} to knowledge graph[/dim]"
             )
+
+        # Capture trace before clearing tool calls (best-effort)
+        try:
+            from .eval import TraceStore
+
+            turn: int = feedback_state["turn"]  # type: ignore[assignment]
+            trace = agent.capture_trace(prompt, full_response, start_time, turn)
+            TraceStore().append(trace)
+        except Exception:
+            pass  # Never break the user flow
 
         # Clear tool calls for next query
         agent.clear_tool_calls()
@@ -693,6 +705,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                         # The prompt has been injected into 'messages' and is the last user message
                         try:
                             console.print()  # Blank line before response
+                            prompt_start_time = time.time()
 
                             # Use streaming query with the messages that now include the prompt
                             full_response = ""
@@ -749,6 +762,16 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                                 console.print(
                                     f"[dim]💾 Saved {kg_saved_count} entit{'y' if kg_saved_count == 1 else 'ies'} to knowledge graph[/dim]"
                                 )
+
+                            # Capture trace before clearing tool calls (best-effort)
+                            try:
+                                from .eval import TraceStore
+
+                                trace = agent.capture_trace(user_input, full_response, prompt_start_time, 0)
+                                TraceStore().append(trace)
+                            except Exception:
+                                pass  # Never break the user flow
+
                             agent.clear_tool_calls()
 
                             # Extract the prompt content (last user message) for conversation tracking
@@ -840,6 +863,10 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                     else:
                         status = "enabled" if agent.kg_save_enabled else "disabled"
                         console.print(f"\n[cyan]Knowledge graph auto-save is currently {status}[/cyan]\n")
+                    continue
+
+                if user_input.lower() == "/eval-stats":
+                    await handle_eval_stats_command(console)
                     continue
 
                 # Validate command before sending to agent
@@ -1029,6 +1056,40 @@ async def handle_prompt_info_command(agent: AiAssistAgent, console: Console, pro
     console.print()
 
 
+async def handle_eval_stats_command(console: Console):
+    """Handle /eval-stats command - show evaluation metrics from traces"""
+    from .eval import QueryEvaluator, TraceStore
+
+    store = TraceStore()
+    traces = store.read_all()
+
+    if not traces:
+        console.print(
+            "\n[yellow]No query traces found yet. Traces are captured automatically as you use the agent.[/yellow]\n"
+        )
+        return
+
+    metrics = QueryEvaluator.evaluate_traces(traces)
+
+    table = Table(title=f"Evaluation Metrics ({metrics.total_queries} queries)")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("Total queries", str(metrics.total_queries))
+    table.add_row("Avg citation ratio", f"{metrics.avg_citation_ratio:.1%}")
+    table.add_row("Queries with citations", str(metrics.queries_with_citations))
+    table.add_row("Tool usage rate", f"{metrics.tool_usage_rate:.1%}")
+    table.add_row("Avg tools per query", f"{metrics.avg_tools_per_query:.1f}")
+    table.add_row("Avg turns", f"{metrics.avg_turns:.1f}")
+    table.add_row("Avg total tokens", f"{metrics.avg_total_tokens:,}")
+    table.add_row("Avg duration", f"{metrics.avg_duration_seconds:.1f}s")
+    table.add_row("Grounding nudge rate", f"{metrics.nudge_rate:.1%}")
+
+    console.print()
+    console.print(table)
+    console.print()
+
+
 async def handle_kg_viz_command(kg, console: Console):
     """Handle /kg-viz command"""
     from .kg_visualization import open_kg_visualization
@@ -1060,6 +1121,7 @@ async def handle_help_command(console: Console):
 - `/skill/uninstall <name>` - Uninstall an Agent Skill
 - `/skill/list` - List installed Agent Skills
 - `/skill/search <query>` - Search ClawHub and skills.sh registries
+- `/eval-stats` - Show evaluation metrics from query traces
 - `/mcp/restart <server>` - Restart an MCP server (picks up binary updates)
 - `/exit` or `/quit` - Exit interactive mode
 - `/help` - Show this help

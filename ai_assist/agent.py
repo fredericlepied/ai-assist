@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -169,6 +170,8 @@ class AiAssistAgent:
 
         # Track whether extended context is currently active (per-query)
         self._extended_context_active = False
+        # Track whether grounding nudge fired during current query
+        self._grounding_nudge_fired = False
 
         self.sessions: dict[str, ClientSession] = {}
         self.available_tools: list[dict] = []
@@ -612,6 +615,42 @@ class AiAssistAgent:
         """
         return self._turn_token_usage.copy()
 
+    def capture_trace(
+        self,
+        query_text: str,
+        response_text: str,
+        start_time: float,
+        turn_count: int,
+    ):
+        """Build a QueryTrace from current agent state after a query completes.
+
+        Call this BEFORE clear_tool_calls() so tool call data is still available.
+        """
+        from .eval import QueryTrace
+
+        # Extract tool names + args (no results) from last_tool_calls
+        tool_calls = [{"tool_name": tc["tool_name"], "arguments": tc["arguments"]} for tc in self.last_tool_calls]
+
+        # Get token usage
+        token_usage = self.get_token_usage()
+        total_input = sum(t.get("input_tokens", 0) for t in token_usage)
+        total_output = sum(t.get("output_tokens", 0) for t in token_usage)
+
+        return QueryTrace(
+            query_text=query_text,
+            timestamp=datetime.fromtimestamp(start_time).isoformat(),
+            tool_calls=tool_calls,
+            turn_count=turn_count,
+            grounding_nudge_fired=self._grounding_nudge_fired,
+            response_text=response_text,
+            token_usage=token_usage,
+            total_input_tokens=total_input,
+            total_output_tokens=total_output,
+            duration_seconds=round(time.time() - start_time, 2),
+            model=self.config.model,
+            tools_available_count=len(self.available_tools),
+        )
+
     @staticmethod
     def _truncate_tool_result(result: str, max_size: int = 20000) -> str:
         """Truncate large tool results to prevent context overflow.
@@ -731,8 +770,6 @@ class AiAssistAgent:
             The assistant's response text
         """
         import hashlib
-        import json
-        import time
 
         # Build messages list
         if messages is None:
@@ -758,7 +795,7 @@ class AiAssistAgent:
         loop_detection_threshold = 3  # If same call appears 3 times in recent history, it's a loop
         no_progress_count = 0  # Count turns with no text response
         max_no_progress = 10  # Allow 10 turns without text before declaring stuck
-        grounding_nudged = False  # Track if grounding nudge has been sent
+        self._grounding_nudge_fired = False
 
         if progress_callback:
             progress_callback("thinking", 0, max_turns, None)
@@ -859,8 +896,8 @@ class AiAssistAgent:
                 if final_text.strip():
                     # Grounding nudge: if tools are available but none were called,
                     # ask the model to verify its claims with tools (once only)
-                    if api_tools and not grounding_nudged:
-                        grounding_nudged = True
+                    if api_tools and not self._grounding_nudge_fired:
+                        self._grounding_nudge_fired = True
                         messages.append(
                             {
                                 "role": "user",
@@ -943,7 +980,7 @@ class AiAssistAgent:
         # Reset token tracking and extended context for this query
         self._turn_token_usage = []
         self._extended_context_active = False
-        grounding_nudged = False  # Track if grounding nudge has been sent
+        self._grounding_nudge_fired = False
 
         if progress_callback:
             progress_callback("thinking", 0, max_turns, None)
@@ -1071,8 +1108,8 @@ class AiAssistAgent:
                 if not tool_results:
                     # Grounding nudge: if tools are available but none were called,
                     # ask the model to verify its claims with tools (once only)
-                    if api_tools and not grounding_nudged and current_text.strip():
-                        grounding_nudged = True
+                    if api_tools and not self._grounding_nudge_fired and current_text.strip():
+                        self._grounding_nudge_fired = True
                         messages.append(
                             {
                                 "role": "user",
