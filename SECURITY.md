@@ -1,273 +1,203 @@
 # Security Model
 
-This document describes the security controls for Agent Skills script execution in ai-assist.
+This document describes the security controls in ai-assist for protecting against attacks on AI agents.
 
 ## Overview
 
-Agent Skills can include executable scripts that Claude can run to perform tasks. **Script execution is disabled by default and requires explicit opt-in.**
+ai-assist implements defense-in-depth with multiple security layers:
 
-## Security Controls
+1. **Prompt injection detection** — scans MCP tool results for injection patterns
+2. **Tool poisoning detection** — validates MCP tool descriptions for hidden instructions
+3. **Rug-pull detection** — detects tool definition changes after initial connection
+4. **Script execution sandboxing** — constrains Agent Skills scripts
+5. **Tool argument validation** — validates inputs against JSON schemas
+6. **Audit logging** — records all tool calls for forensic analysis
+7. **Secret redaction** — filters sensitive environment variables
+8. **Command/path allowlists** — restricts filesystem and command access
 
-### 1. Disabled by Default
+## 1. Prompt Injection Detection
 
-Script execution is **OFF** unless explicitly enabled. Enable it by adding to your `.env` file:
+Untrusted content entering the agent can contain adversarial instructions designed to hijack behavior (indirect prompt injection). ai-assist scans multiple entry points for known injection patterns.
+
+**Module:** `ai_assist/security.py` — `sanitize_tool_result()`
+
+**Detected patterns:**
+- `ignore_instructions` — "ignore/disregard/override previous instructions"
+- `new_instructions` — "you are now / from now on / new instructions"
+- `system_prompt_extraction` — "reveal/show your system prompt"
+- `role_hijack` — "pretend to be / roleplay as"
+- `output_manipulation` — "do not mention / hide this fact"
+- `delimiter_injection` — `</system>`, `[SYSTEM]`, `[INST]`, `<<SYS>>`
+
+**Behavior:**
+- Suspicious results are wrapped in `[UNTRUSTED_TOOL_OUTPUT_START]` / `[UNTRUSTED_TOOL_OUTPUT_END]` sentinel markers
+- The system prompt instructs the model to treat marked content as raw data only
+- All detections are logged as warnings
+- Results are not blocked — the agent sees the data but is warned
+
+**Scope:** All untrusted entry points are scanned:
+- MCP server tool results (`_execute_tool()`)
+- MCP prompt messages (`execute_mcp_prompt()`)
+- Agent Skill script output (`execute_skill_script`)
+
+Internal tools (introspection, filesystem, reports, schedules, knowledge) are trusted and not scanned.
+
+## 2. Tool & Content Poisoning Detection
+
+Descriptions and instruction text from external sources can contain hidden instructions that manipulate the agent's behavior (tool poisoning). ai-assist validates these at load/connect time.
+
+**Module:** `ai_assist/security.py` — `validate_tool_description()`
+
+**Detected patterns:**
+- `imperative_to_model` — "you must", "always include", "make sure to"
+- `references_system_prompt` — "system prompt", "hidden instructions"
+- `behavioral_override` — "ignore all other", "disregard previous"
+- `data_exfiltration` — "send to", "include in every response"
+- `hidden_instructions` — "when called, also always", "before responding, also"
+
+**Additional checks:**
+- Description length limit (default: 5000 chars) to detect excessively long descriptions that may hide instructions
+
+**Scope:** All external descriptions and instruction text are validated:
+- MCP tool descriptions (at server connection)
+- MCP prompt descriptions (at server connection)
+- Agent Skill descriptions (at skill load time, in `skills_loader.py`)
+- Agent Skill instruction bodies (at load time and when injected into system prompt, in `skills_manager.py`)
+
+**Behavior:** Warnings are logged but content is not blocked, allowing the operator to investigate.
+
+## 3. Rug-Pull Detection
+
+MCP servers can change their tool definitions after initial approval (rug-pull attack). ai-assist fingerprints tool definitions at connection time and checks for changes on reconnect.
+
+**Module:** `ai_assist/security.py` — `ToolDefinitionRegistry`, `compute_tool_fingerprint()`
+
+**How it works:**
+1. When a server connects, each tool's `(name, description, input_schema)` is hashed (SHA-256)
+2. On server restart or reload, new definitions are compared against stored fingerprints
+3. Changes are classified as `modified`, `added`, or `removed`
+4. Warnings are printed and logged
+
+**Integration points:**
+- `_run_server()` — registers fingerprints at initial connection
+- `restart_mcp_server()` — checks for changes after reconnect
+- `reload_mcp_servers()` — checks for changes after config reload
+
+## 4. Script Execution Sandboxing
+
+Agent Skills can include executable scripts. **Script execution is disabled by default.**
+
+### Enabling
 
 ```bash
 # In .env file
 AI_ASSIST_ALLOW_SCRIPT_EXECUTION=true
 ```
 
-Or via environment variable:
+### Controls
 
-```bash
-export AI_ASSIST_ALLOW_SCRIPT_EXECUTION=true
-```
+| Control | Description |
+|---------|-------------|
+| **Disabled by default** | Requires explicit opt-in via environment variable |
+| **Permission system** | Skills must declare `allowed-tools: "internal__execute_skill_script"` |
+| **Path validation** | Scripts must be in the skill's `scripts/` directory; traversal blocked |
+| **Environment filtering** | API keys, tokens, secrets filtered before execution |
+| **Timeout** | 30-second hard limit |
+| **Output limit** | 20KB maximum output |
+| **No shell injection** | `subprocess.run()` with `shell=False` |
 
-**Recommended**: Use `.env` for persistent configuration. This prevents accidental execution of untrusted code.
+### Filtered environment patterns
 
-### 2. Permission Enforcement
+`*API_KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `ANTHROPIC_*`, `GOOGLE_*`, `AWS_*`, `AZURE_*`, `GITHUB_TOKEN`, `JIRA_*`
 
-Skills must explicitly declare script execution permission in their `SKILL.md` frontmatter:
+## 5. Tool Argument Validation
 
-```yaml
----
-name: my-skill
-description: My skill that uses scripts
-allowed-tools: "internal__execute_skill_script"
----
-```
+Before executing any tool, arguments are validated against the tool's JSON schema. Invalid arguments are rejected without execution.
 
-**Note:** The `allowed-tools` field is **optional**. If not specified, skills with scripts are allowed to execute them by default (when script execution is globally enabled). Skills can explicitly restrict execution by setting `allowed-tools` to exclude `internal__execute_skill_script`.
+**Implementation:** `_validate_tool_arguments()` in `agent.py`
 
-### 3. Path Validation
+## 6. Audit Logging
 
-All script paths are validated to prevent directory traversal attacks:
+All tool calls are logged with:
+- Tool name and arguments
+- Result text
+- Success/failure status
+- Timestamp
 
-- Scripts must exist in the skill's `scripts/` directory
-- Resolved paths must be within the skill directory
-- Attempts to access `../../../etc/passwd` or similar are blocked
+**Implementation:** `ai_assist/audit.py` — `AuditLogger`
 
-### 4. Environment Filtering
+## 7. Source Citation / Grounding
 
-Sensitive environment variables are filtered before script execution:
-
-**Filtered patterns:**
-- `*API_KEY*`
-- `*TOKEN*`
-- `*SECRET*`
-- `*PASSWORD*`
-- `ANTHROPIC_*`
-- `GOOGLE_*`
-- `AWS_*`
-- `AZURE_*`
-- `GITHUB_TOKEN`
-- `JIRA_*`
-
-Scripts run with a clean environment containing only non-sensitive variables plus `PATH`.
-
-### 5. Resource Limits
-
-Scripts are constrained by resource limits:
-
-- **Timeout:** 30 seconds (hard limit)
-- **Output size:** 20KB maximum (truncated after)
-- **Working directory:** Constrained to skill's `scripts/` directory
-
-### 6. No Shell Injection
-
-Scripts are executed using `subprocess.run()` with `shell=False`:
-
-```python
-# Secure: passes arguments as list
-subprocess.run(["/path/to/script.py", "arg1", "arg2"], shell=False)
-
-# NOT used: would allow shell injection
-subprocess.run("script.py arg1 arg2", shell=True)  # NEVER USED
-```
-
-This prevents injection attacks via malicious arguments.
-
-### 7. Execution Constraints
-
-- Scripts run in the skill's `scripts/` directory (cwd)
-- No network access restrictions (relies on system firewall)
-- No CPU/memory limits (future enhancement)
+The system prompt requires every factual claim to cite the tool call that provided it. This prevents hallucination and makes it easy to verify data provenance.
 
 ## Threat Model
 
 ### What We Protect Against
 
-✅ **Directory traversal attacks**
-- Blocked by path validation
+| Threat | Defense |
+|--------|---------|
+| Indirect prompt injection via tool results | Pattern detection + sentinel markers |
+| Indirect prompt injection via MCP prompts | Prompt message sanitization |
+| Indirect prompt injection via script output | Script output sanitization |
+| Tool poisoning via MCP tool descriptions | Description validation at connect time |
+| Tool poisoning via MCP prompt descriptions | Description validation at connect time |
+| Skill poisoning via description or body | Validation at load time and system prompt injection |
+| Rug-pull attacks (definition changes) | Fingerprint registry + change detection |
+| Directory traversal in scripts | Path validation |
+| Secret leakage in scripts | Environment variable filtering |
+| Script DoS (infinite loops) | 30-second timeout |
+| Script memory exhaustion via output | 20KB output limit |
+| Shell injection in scripts | `shell=False` |
+| Hallucinated data | Grounding nudge + source citation |
 
-✅ **Environment variable leakage**
-- API keys and secrets filtered
+### Known Limitations
 
-✅ **Infinite loops / DoS**
-- 30-second timeout enforced
-
-✅ **Memory exhaustion via output**
-- 20KB output limit
-
-✅ **Shell injection**
-- `shell=False` prevents command injection
-
-✅ **Unauthorized script execution**
-- Permission system (`allowed-tools` field)
-
-### What We Don't Protect Against
-
-❌ **Malicious system calls**
-- Scripts can still call `os.system()`, `subprocess.run()` internally
-- **Mitigation:** Only install trusted skills
-
-❌ **Network attacks**
-- Scripts can make HTTP requests, connect to services
-- **Mitigation:** Review skill code before installation
-
-❌ **Filesystem access**
-- Scripts have same permissions as user running ai-assist
-- **Mitigation:** Run ai-assist with limited user permissions
-
-❌ **Dependency vulnerabilities**
-- Scripts may use vulnerable Python libraries
-- **Mitigation:** Keep dependencies updated, use virtual environments
-
-❌ **CPU/Memory exhaustion**
-- Scripts can use 100% CPU or consume memory
-- **Mitigation:** Monitor system resources (future: cgroups)
+| Risk | Status |
+|------|--------|
+| Novel injection patterns not in regex set | Logged but not blocked |
+| Malicious system calls within scripts | Mitigated by trust model |
+| Network access from scripts | No restriction (relies on system firewall) |
+| CPU/memory exhaustion in scripts | No cgroup limits (future) |
+| Filesystem access from scripts | Same permissions as ai-assist process |
 
 ## Best Practices
 
 ### For Users
 
-1. **Only install trusted skills**
-   - Review skill code before installing
-   - Prefer official skills from `anthropics/skills`
-   - Check skill author/source
-
-2. **Keep script execution disabled unless needed**
-   - Only enable when you need to run scripts
-   - Disable after use: `unset AI_ASSIST_ALLOW_SCRIPT_EXECUTION`
-
-3. **Run with limited permissions**
-   - Don't run ai-assist as root
-   - Use a dedicated user account if processing sensitive data
-
-4. **Review scripts before execution**
-   - Check what the script does
-   - Understand required dependencies
-   - Verify it matches skill description
+1. **Review MCP server sources** — only connect to trusted servers
+2. **Check logs for warnings** — security detections are logged at WARNING level
+3. **Keep script execution disabled** unless needed
+4. **Run with limited permissions** — don't run as root
+5. **Review Agent Skills** before installation
 
 ### For Skill Authors
 
-1. **Declare all required tools**
-   ```yaml
-   allowed-tools: "internal__execute_skill_script Bash Read"
-   ```
-
-2. **Document dependencies clearly**
-   ```yaml
-   compatibility: Requires python3, python3-pypdf, python3-requests
-   ```
-
-3. **Write secure scripts**
-   - Validate inputs
-   - Handle errors gracefully
-   - Avoid calling `eval()`, `exec()`
-   - Use subprocess with `shell=False`
-
-4. **Minimize scope**
-   - Only request permissions you need
-   - Keep scripts focused and simple
-   - Document what each script does
-
-5. **Test error cases**
-   - Handle missing dependencies
-   - Provide helpful error messages
-   - Fail safely
-
-## Dependency Management
-
-Scripts may require external dependencies (Python libraries, system tools). ai-assist **does not install dependencies automatically**.
-
-**User responsibility:**
-1. Read the skill's `compatibility` field
-2. Install required dependencies manually:
-   ```bash
-   # Example for PDF skill
-   pip install pypdf pdfplumber
-   # or
-   apt install python3-pypdf python3-pdfplumber
-   ```
-3. Run the script
-4. If execution fails, check error message for missing dependencies
-
-**Why no automatic installation?**
-- Security: prevents automatic execution of arbitrary installation code
-- Simplicity: follows agentskills.io specification
-- Transparency: users know exactly what's being installed
-
-## Comparison to Other Execution Methods
-
-| Method | Security | Use Case |
-|--------|----------|----------|
-| **Agent Skills Scripts** | Sandboxed, permission-based | Reusable skill-specific tools |
-| **Internal Filesystem Tools** | Same as ai-assist process | File operations |
-| **MCP Server Tools** | Separate process, protocol-isolated | External service integration |
-| **Bash via prompt** | No sandboxing | Ad-hoc commands (requires user approval) |
-
-## Security Validation Checklist
-
-Before deploying script execution:
-
-- [ ] Script execution disabled by default
-- [ ] Skill declares `allowed-tools`
-- [ ] Path validation prevents traversal
-- [ ] Environment variables filtered
-- [ ] Timeout enforced (30s)
-- [ ] Output limited (20KB)
-- [ ] `shell=False` used
-- [ ] Tests verify all controls
-
-## Reporting Security Issues
-
-If you discover a security vulnerability in ai-assist script execution:
-
-1. **Do not** open a public issue
-2. Report via GitHub Security Advisories or email maintainers
-3. Include:
-   - Description of vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Suggested fix (if any)
+1. Declare required tools explicitly in `SKILL.md`
+2. Validate all inputs in scripts
+3. Avoid `eval()`, `exec()`, `shell=True`
+4. Document dependencies clearly
+5. Handle errors gracefully
 
 ## Future Enhancements
 
-Planned security improvements:
+- Container sandboxing for scripts (Docker)
+- Resource limits via cgroups (CPU, memory)
+- Guardrail LLM for injection detection (complement regex patterns)
+- Code signing for Agent Skills
+- Network restrictions for scripts
 
-1. **Container sandboxing**
-   - Run scripts in Docker containers
-   - Complete filesystem isolation
-   - Network restrictions
+## Reporting Security Issues
 
-2. **Resource limits via cgroups**
-   - CPU limits
-   - Memory limits
-   - Process limits
+If you discover a security vulnerability:
 
-3. **Audit logging**
-   - Log all script executions
-   - Track which user ran what
-   - Forensic analysis
-
-4. **Code signing**
-   - Verify skill signatures
-   - Trusted skill registry
-   - Automatic updates
+1. **Do not** open a public issue
+2. Report via GitHub Security Advisories or email maintainers
+3. Include: description, reproduction steps, impact, and suggested fix
 
 ## References
 
+- [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/)
+- [Simon Willison: Prompt Injection](https://simonwillison.net/series/prompt-injection/)
+- [Anthropic MCP Security Guidelines](https://modelcontextprotocol.io/specification/2025-03-26/basic/security)
 - [agentskills.io specification](https://agentskills.io/specification)
-- [OWASP Command Injection](https://owasp.org/www-community/attacks/Command_Injection)
 - [Python subprocess security](https://docs.python.org/3/library/subprocess.html#security-considerations)

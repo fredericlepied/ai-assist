@@ -1,6 +1,7 @@
 """Load and manage Agent Skills following agentskills.io specification"""
 
 import io
+import logging
 import os
 import re
 import shutil
@@ -13,6 +14,9 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from .config import get_config_dir
+from .security import validate_tool_description
+
+logger = logging.getLogger(__name__)
 
 CLAWHUB_DEFAULT_REGISTRY = "https://clawhub.ai"
 SKILLS_SH_DEFAULT_REGISTRY = "https://skills.sh"
@@ -338,6 +342,12 @@ class SkillsLoader:
 
         # Validate metadata
         metadata.validate()
+
+        # Validate skill description and body for injection patterns
+        desc_warnings = validate_tool_description(f"skill:{metadata.name}", metadata.description)
+        body_warnings = validate_tool_description(f"skill:{metadata.name}/body", body)
+        for w in desc_warnings + body_warnings:
+            logger.warning("Skill content warning for %s: %s", metadata.name, w)
 
         return metadata, body
 

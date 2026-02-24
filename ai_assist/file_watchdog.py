@@ -5,12 +5,15 @@ This module provides efficient file watching using OS-level events
 """
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
+
+logger = logging.getLogger(__name__)
 
 
 class FileWatchdog:
@@ -70,7 +73,17 @@ class FileWatchdog:
         self._observer = Observer()
         watch_path = self.file_path.parent
         self._observer.schedule(self._handler, str(watch_path), recursive=False)
-        self._observer.start()
+        try:
+            self._observer.start()
+        except OSError:
+            logger.warning(
+                "Failed to start file watcher for %s (inotify limit reached). "
+                "File change detection disabled for this path.",
+                self.file_path,
+            )
+            self._observer = None
+            self._handler = None
+            self._running = False
 
     async def stop(self) -> None:
         """Stop watching the file."""
