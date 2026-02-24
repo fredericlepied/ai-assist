@@ -635,9 +635,17 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         choice = await _prompt_user_approval("Security: The agent wants to run:", command)
         approved = choice in ("y", "yes", "a", "always")
         if choice in ("a", "always"):
-            cmd_name = command.split()[0].rsplit("/", 1)[-1]
-            agent.filesystem_tools.add_permanent_allowed_command(cmd_name)
-            console.print(f"[green]'{cmd_name}' permanently added to allowed commands[/green]")
+            from .filesystem_tools import SHELL_BUILTINS, extract_command_names
+
+            cmd_names = extract_command_names(command)
+            added = []
+            for name in cmd_names:
+                if name not in SHELL_BUILTINS and name not in agent.filesystem_tools.allowed_commands:
+                    agent.filesystem_tools.add_permanent_allowed_command(name)
+                    added.append(name)
+            if added:
+                label = ", ".join(repr(n) for n in added)
+                console.print(f"[green]{label} permanently added to allowed commands[/green]")
         return approved
 
     async def path_confirmation_callback(description: str) -> bool:
