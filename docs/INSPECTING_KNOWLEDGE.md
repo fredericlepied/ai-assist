@@ -205,7 +205,7 @@ This allows you to answer questions like:
 
 **Conversations:**
 - `conversation`: User/assistant exchanges (saved on-the-fly during interactive sessions)
-- `synthesis_marker`: Tracks when nightly synthesis last ran
+- `synthesis_marker`: Tracks when KG synthesis last ran
 
 **Automatically Captured:**
 - `dci_job`: DCI jobs from searches

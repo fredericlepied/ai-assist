@@ -54,7 +54,7 @@ SQLite database with bi-temporal tracking (when learned, when valid).
 ### Common questions
 
 **Q: Does the agent save everything I say?**
-A: Yes. All conversation exchanges are stored in the Knowledge Graph as they happen. A nightly synthesis task then reviews the day's conversations and extracts structured knowledge (preferences, lessons, context, decisions).
+A: Yes. All conversation exchanges are stored in the Knowledge Graph as they happen. A KG synthesis task then reviews the day's conversations and extracts structured knowledge (preferences, lessons, context, decisions).
 
 **Q: Can I delete stored knowledge?**
 A: Yes, manually edit the SQLite database or delete entries.

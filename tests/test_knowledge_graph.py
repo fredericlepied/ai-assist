@@ -694,3 +694,32 @@ def test_non_batch_mode_commits_immediately(kg):
 
     # Verify _batch_mode is False by default
     assert kg._batch_mode is False
+
+
+def test_relationship_exists(kg):
+    """relationship_exists returns True for existing current relationships"""
+    job = kg.insert_entity(
+        entity_type="dci_job",
+        entity_id="job-re",
+        valid_from=datetime(2026, 2, 4, 10, 0),
+        data={"status": "failure"},
+    )
+    comp = kg.insert_entity(
+        entity_type="component",
+        entity_id="comp-re",
+        valid_from=datetime(2026, 2, 4, 0, 0),
+        data={"type": "ocp"},
+    )
+
+    assert kg.relationship_exists("job_uses_component", job.id, comp.id) is False
+
+    kg.insert_relationship(
+        rel_type="job_uses_component",
+        source_id=job.id,
+        target_id=comp.id,
+        valid_from=datetime(2026, 2, 4, 10, 0),
+    )
+
+    assert kg.relationship_exists("job_uses_component", job.id, comp.id) is True
+    assert kg.relationship_exists("other_type", job.id, comp.id) is False
+    assert kg.relationship_exists("job_uses_component", comp.id, job.id) is False

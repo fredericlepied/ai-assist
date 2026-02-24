@@ -83,7 +83,7 @@ async def test_no_missed_run_if_not_in_window(mock_agent, temp_schedule_file):
         monitor = scheduler.monitors[0]
         monitor.run = AsyncMock()
 
-        # Mock user tasks too (nightly-synthesis default task)
+        # Mock user tasks too (kg-synthesis default task)
         for task in scheduler.user_tasks:
             task.run = AsyncMock()
 

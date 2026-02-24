@@ -68,10 +68,10 @@ class ScheduleLoader:
     # Default tasks that are ensured to exist in schedules.json
     DEFAULT_TASKS = [
         {
-            "name": "nightly-synthesis",
-            "prompt": "__builtin__:nightly_synthesis",
+            "name": "kg-synthesis",
+            "prompt": "__builtin__:kg_synthesis",
             "interval": "night on weekdays",
-            "description": "Review day's conversations and extract knowledge",
+            "description": "Synthesize knowledge and discover connections between entities",
             "enabled": True,
         },
     ]

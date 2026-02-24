@@ -295,8 +295,10 @@ class TestSynthesisFromKG:
 
         # Should return a message indicating nothing to process
         assert result is not None
-        results = kg.search_knowledge()
-        assert len(results) == 0
+        # No knowledge insights should be saved (only synthesis_marker)
+        for etype in ["user_preference", "lesson_learned", "project_context", "decision_rationale"]:
+            results = kg.search_knowledge(entity_type=etype)
+            assert len(results) == 0
 
     @pytest.mark.asyncio
     async def test_synthesis_from_kg_skips_already_synthesized(self, agent, kg):

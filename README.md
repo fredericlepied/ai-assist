@@ -461,7 +461,7 @@ The knowledge graph automatically stores:
 - Temporal changes (when created vs. when discovered)
 - Conversation exchanges (user/assistant pairs)
 
-**Nightly Synthesis**: A built-in scheduled task (`nightly-synthesis`) runs at 22:00 on weekdays to review the day's conversations and extract structured knowledge (preferences, lessons, context, rationale). The schedule is configurable in `schedules.json`.
+**KG Synthesis**: A built-in scheduled task (`kg-synthesis`) runs at 22:00 on weekdays to review the day's conversations, extract structured knowledge (preferences, lessons, context, rationale), and discover connections between entities. The schedule is configurable in `schedules.json`.
 
 ## Available Tools
 

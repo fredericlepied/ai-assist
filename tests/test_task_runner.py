@@ -271,10 +271,10 @@ async def test_notification_truncates_at_500_chars(mock_agent, state_manager):
 
 @pytest.mark.asyncio
 async def test_builtin_prompt_routes_to_synthesis(mock_agent, state_manager):
-    """__builtin__:nightly_synthesis prompt should call _run_synthesis_from_kg"""
+    """__builtin__:kg_synthesis prompt should call _run_synthesis_from_kg"""
     task = TaskDefinition(
-        name="nightly-synthesis",
-        prompt="__builtin__:nightly_synthesis",
+        name="kg-synthesis",
+        prompt="__builtin__:kg_synthesis",
         interval="night on weekdays",
     )
 
