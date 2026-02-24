@@ -308,6 +308,70 @@ class KnowledgeGraph:
 
         return entity
 
+    def upsert_entity(
+        self,
+        entity_type: str,
+        data: dict[str, Any],
+        valid_from: datetime,
+        tx_from: datetime | None = None,
+        entity_id: str | None = None,
+        valid_to: datetime | None = None,
+        tx_to: datetime | None = None,
+    ) -> Entity:
+        """Insert or update an entity in the knowledge graph.
+
+        If an entity with the same id already exists, its data and timestamps
+        are replaced. This is useful for tool results where the same tool+args
+        should refresh the stored data rather than silently fail.
+
+        Args:
+            entity_type: Type of entity (e.g., 'tool_result')
+            data: Entity data as a dictionary
+            valid_from: When the fact became true in reality
+            tx_from: When ai-assist learned about it (defaults to now)
+            entity_id: Optional entity ID (generated if not provided)
+            valid_to: When the fact stopped being true (None if still valid)
+            tx_to: When ai-assist stopped believing it (None if current belief)
+
+        Returns:
+            The created or updated Entity
+        """
+        if tx_from is None:
+            tx_from = datetime.now()
+
+        if entity_id is None:
+            entity_id = f"{entity_type}-{uuid4().hex[:8]}"
+
+        entity = Entity(
+            id=entity_id,
+            entity_type=entity_type,
+            valid_from=valid_from,
+            valid_to=valid_to,
+            tx_from=tx_from,
+            tx_to=tx_to,
+            data=data,
+        )
+
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO entities (id, entity_type, valid_from, valid_to, tx_from, tx_to, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                entity.id,
+                entity.entity_type,
+                entity.valid_from.isoformat(),
+                entity.valid_to.isoformat() if entity.valid_to else None,
+                entity.tx_from.isoformat(),
+                entity.tx_to.isoformat() if entity.tx_to else None,
+                json.dumps(entity.data),
+            ),
+        )
+        self._maybe_commit()
+
+        return entity
+
     def update_entity(
         self, entity_id: str, valid_to: datetime | None = None, tx_to: datetime | None = None
     ) -> Entity | None:

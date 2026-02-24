@@ -782,6 +782,14 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                             # Add the exchange to conversation memory
                             conversation_memory.add_exchange(prompt_content, full_response)
 
+                            # Compact conversation memory if threshold reached
+                            if conversation_memory.needs_compaction():
+                                try:
+                                    if conversation_memory.compact(agent.anthropic, agent.config.model):
+                                        console.print("[dim]Compacted conversation history[/dim]")
+                                except Exception:
+                                    pass
+
                             # Track for state manager
                             conversation_context.append(
                                 {
@@ -889,6 +897,14 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
                     # Add to conversation memory for context
                     conversation_memory.add_exchange(user_input, response)
+
+                    # Compact conversation memory if threshold reached
+                    if conversation_memory.needs_compaction():
+                        try:
+                            if conversation_memory.compact(agent.anthropic, agent.config.model):
+                                console.print("[dim]Compacted conversation history[/dim]")
+                        except Exception:
+                            pass
 
                     # Track conversation in context list for state manager
                     conversation_context.append(

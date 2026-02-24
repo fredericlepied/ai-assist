@@ -825,6 +825,7 @@ class AiAssistAgent:
         self._tool_result_cache: dict[str, str] = {}  # Per-query dedup cache
         self._duplicate_tool_call_count = 0
         self._last_turn_count = 0
+        any_tools_called = False  # Track if any tools were called during the entire query
 
         if progress_callback:
             progress_callback("thinking", 0, max_turns, None)
@@ -933,9 +934,10 @@ class AiAssistAgent:
 
                 # Check if we got actual content
                 if final_text.strip():
-                    # Grounding nudge: if tools are available but none were called,
-                    # ask the model to verify its claims with tools (once only)
-                    if api_tools and not self._grounding_nudge_fired:
+                    # Grounding nudge: if tools are available but none were called
+                    # during the entire query, ask the model to verify (once only).
+                    # Skip if tools were already used — the answer is already grounded.
+                    if api_tools and not any_tools_called and not self._grounding_nudge_fired:
                         self._grounding_nudge_fired = True
                         messages.append(
                             {
@@ -965,6 +967,7 @@ class AiAssistAgent:
 
             # We have tool results - reset no-progress counter (agent is actively working)
             no_progress_count = 0
+            any_tools_called = True
 
             messages.append({"role": "user", "content": tool_results})
 
@@ -1033,6 +1036,7 @@ class AiAssistAgent:
         self._tool_result_cache = {}
         self._duplicate_tool_call_count = 0
         self._last_turn_count = 0
+        any_tools_called = False
 
         # Build tools with progressive disclosure (truncated descriptions)
         api_tools = self._build_api_tools()
@@ -1179,9 +1183,10 @@ class AiAssistAgent:
 
                 # If no tool calls, check for grounding nudge
                 if not tool_results:
-                    # Grounding nudge: if tools are available but none were called,
-                    # ask the model to verify its claims with tools (once only)
-                    if api_tools and not self._grounding_nudge_fired and current_text.strip():
+                    # Grounding nudge: if tools are available but none were called
+                    # during the entire query, ask the model to verify (once only).
+                    # Skip if tools were already used — the answer is already grounded.
+                    if api_tools and not any_tools_called and not self._grounding_nudge_fired and current_text.strip():
                         self._grounding_nudge_fired = True
                         messages.append(
                             {
@@ -1204,6 +1209,7 @@ class AiAssistAgent:
                     return
 
                 # Continue with tool results
+                any_tools_called = True
                 messages.append({"role": "user", "content": tool_results})
 
                 # Wrap-up nudge: when approaching the turn limit, ask the agent to synthesize
@@ -1539,165 +1545,55 @@ class AiAssistAgent:
             return error_msg
 
     async def _save_tool_result_to_kg(self, tool_name: str, original_tool_name: str, arguments: dict, result_text: str):
-        """Save tool result to knowledge graph if it contains entities
+        """Save tool result to knowledge graph as a generic tool_result entity.
 
-        Supports:
-        - search_dci_jobs -> dci_job entities
-        - search_jira_tickets -> jira_ticket entities
-        - get_jira_ticket -> jira_ticket entity
+        Stores the tool name (without MCP prefix), arguments, and parsed JSON result.
+        Large results (>10000 chars) are stored without the result blob to keep the KG manageable.
         """
-        # Double-check kg_save_enabled (defensive programming)
         if not self.kg_save_enabled or not self.knowledge_graph:
             return
 
-        if not result_text or "Error" in result_text:
+        if not result_text or result_text.startswith("Error:"):
             return
 
         try:
-            # Parse JSON result
-            try:
-                data = json.loads(result_text)
-            except json.JSONDecodeError:
-                # Not JSON, skip
-                return
+            data = json.loads(result_text)
+        except json.JSONDecodeError:
+            return
 
+        try:
+            import hashlib
+
+            entity_id = (
+                f"{original_tool_name}:"
+                f"{hashlib.md5(json.dumps(arguments, sort_keys=True).encode()).hexdigest()[:8]}"
+            )
+            stored_data = {
+                "tool_name": original_tool_name,
+                "arguments": arguments,
+                "result": data if len(result_text) <= 10000 else None,
+            }
             tx_time = datetime.now()
-
-            # Determine entity type from tool name
-            entity_type = None
-            entities = []
-
-            if "jira" in original_tool_name.lower():
-                entity_type = "jira_ticket"
-                # Handle different response formats
-                if isinstance(data, list):
-                    entities = data
-                elif isinstance(data, dict):
-                    if "issues" in data:
-                        entities = data["issues"]
-                    elif "key" in data:
-                        # Single ticket
-                        entities = [data]
-
-            elif "dci" in original_tool_name.lower() and "job" in original_tool_name.lower():
-                entity_type = "dci_job"
-                # Handle different response formats
-                if isinstance(data, list):
-                    entities = data
-                elif isinstance(data, dict):
-                    if "hits" in data:
-                        entities = data["hits"]
-                    elif "jobs" in data:
-                        entities = data["jobs"]
-                    elif "id" in data:
-                        # Single job
-                        entities = [data]
-
-            if not entity_type or not entities:
-                return
-
-            # Prepare all entity data (pure Python, fast)
-            prepared: list[tuple[str, dict, datetime, list]] = []
-            for entity_data in entities[:20]:  # Limit to 20 entities per call
-                entity_id = entity_data.get("id") or entity_data.get("key")
-                if not entity_id:
-                    continue
-
-                # Parse valid_from timestamp
-                created_str = entity_data.get("created_at") or entity_data.get("fields", {}).get("created", "")
-                try:
-                    valid_from = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
-                except (ValueError, AttributeError):
-                    valid_from = tx_time
-
-                # Prepare entity data based on type
-                if entity_type == "jira_ticket":
-                    stored_data = {
-                        "key": entity_data.get("key"),
-                        "project": entity_data.get("fields", {}).get("project", {}).get("key"),
-                        "summary": entity_data.get("fields", {}).get("summary"),
-                        "status": entity_data.get("fields", {}).get("status", {}).get("name"),
-                        "priority": entity_data.get("fields", {}).get("priority", {}).get("name"),
-                        "assignee": (
-                            entity_data.get("fields", {}).get("assignee", {}).get("displayName")
-                            if entity_data.get("fields", {}).get("assignee")
-                            else None
-                        ),
-                    }
-                    prepared.append((entity_id, stored_data, valid_from, []))
-                elif entity_type == "dci_job":
-                    stored_data = {
-                        "job_id": entity_id,
-                        "status": entity_data.get("status", "unknown"),
-                        "remoteci_id": entity_data.get("remoteci_id"),
-                        "topic_id": entity_data.get("topic_id"),
-                        "state": entity_data.get("state"),
-                    }
-                    components = [c for c in entity_data.get("components", []) if c.get("id")]
-                    prepared.append((entity_id, stored_data, valid_from, components))
-                else:
-                    prepared.append((entity_id, entity_data, valid_from, []))
-
-            if not prepared:
-                return
-
-            # Batch all KG writes into a single commit, offloaded to thread pool
             kg = self.knowledge_graph
 
-            def _do_kg_writes():
-                saved = 0
-                with kg.batch():
-                    for eid, sdata, vfrom, comps in prepared:
-                        # Insert components and relationships (DCI jobs)
-                        for component in comps:
-                            comp_id = component["id"]
-                            try:
-                                kg.insert_entity(
-                                    entity_type="dci_component",
-                                    entity_id=comp_id,
-                                    valid_from=vfrom,
-                                    tx_from=tx_time,
-                                    data={
-                                        "type": component.get("type"),
-                                        "version": component.get("version"),
-                                        "name": component.get("name"),
-                                    },
-                                )
-                            except Exception:
-                                pass  # Entity might already exist
+            def _do_write():
+                try:
+                    kg.upsert_entity(
+                        entity_type="tool_result",
+                        entity_id=entity_id,
+                        data=stored_data,
+                        valid_from=tx_time,
+                        tx_from=tx_time,
+                    )
+                    return 1
+                except Exception:
+                    return 0
 
-                            kg.insert_relationship(
-                                rel_type="job_uses_component",
-                                source_id=eid,
-                                target_id=comp_id,
-                                valid_from=vfrom,
-                                tx_from=tx_time,
-                                properties={},
-                            )
-
-                        # Insert main entity
-                        try:
-                            kg.insert_entity(
-                                entity_type=entity_type,
-                                entity_id=eid,
-                                valid_from=vfrom,
-                                tx_from=tx_time,
-                                data=sdata,
-                            )
-                            saved += 1
-                        except Exception:
-                            pass  # Entity might already exist
-                return saved
-
-            saved_count = await asyncio.to_thread(_do_kg_writes)
-
-            # Track how many we saved
-            if saved_count > 0:
-                self.last_tool_calls[-1]["kg_saved_count"] = saved_count
-
+            saved = await asyncio.to_thread(_do_write)
+            if saved and self.last_tool_calls:
+                self.last_tool_calls[-1]["kg_saved_count"] = self.last_tool_calls[-1].get("kg_saved_count", 0) + saved
         except Exception:
-            # Silently fail - KG storage is best-effort
-            pass
+            pass  # Best-effort
 
     def get_last_kg_saved_count(self) -> int:
         """Get the number of entities saved to KG in the last tool calls"""
