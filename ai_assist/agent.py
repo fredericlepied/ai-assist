@@ -62,6 +62,46 @@ Output valid JSON only (no markdown):
 If no learnings, return {{"insights": []}}
 """
 
+CONNECTION_DISCOVERY_PROMPT_TEMPLATE = """Analyze the following knowledge graph entities and reports to identify connections between them.
+
+## Existing Entities
+
+{entities_text}
+
+## Recent Reports
+
+{reports_text}
+
+## Instructions
+
+Identify meaningful relationships between the entities listed above. A relationship connects two entities that are related in a meaningful way. Focus on:
+- Entities that reference the same project, tool, component, or concept
+- Lessons learned that support or contradict each other
+- Decisions that were influenced by specific project contexts
+- Preferences that relate to specific project workflows
+- Tool results that corroborate or conflict with insights
+
+For each relationship, provide:
+- source_id: The ID of the source entity (must be from the entities listed above)
+- target_id: The ID of the target entity (must be from the entities listed above)
+- rel_type: One of: relates_to, caused_by, references, contradicts, supports, part_of
+- description: Brief explanation of why these entities are connected
+
+Output valid JSON only (no markdown):
+{{
+  "connections": [
+    {{
+      "source_id": "entity_id_1",
+      "target_id": "entity_id_2",
+      "rel_type": "relates_to",
+      "description": "Brief explanation"
+    }}
+  ]
+}}
+
+If no meaningful connections are found, return {{"connections": []}}
+"""
+
 
 class AiAssistAgent:
     """AI Agent with MCP capabilities"""
@@ -1678,7 +1718,8 @@ class AiAssistAgent:
             print(f"⚠️  Synthesis failed: {e}")
 
     async def _run_synthesis_from_kg(self, hours: int = 24) -> str:
-        """Review recent conversation entities from KG and extract knowledge
+        """Review recent conversation entities from KG and extract knowledge,
+        then discover connections between entities.
 
         Args:
             hours: How many hours back to look for conversations
@@ -1694,36 +1735,242 @@ class AiAssistAgent:
 
         # Check for synthesis marker to avoid re-processing
         markers = self.knowledge_graph.query_as_of(now, entity_type="synthesis_marker", limit=1)
+        previous_reports_processed: dict[str, str] = {}
         if markers:
             last_synthesis = markers[0].valid_from
             if last_synthesis > cutoff:
                 cutoff = last_synthesis
+            previous_reports_processed = markers[0].data.get("reports_processed", {})
 
         # Get conversation entities since cutoff
         conversations = self.knowledge_graph.query_as_of(now, entity_type="conversation", valid_from_after=cutoff)
 
+        synthesis_summary = ""
+
         if not conversations:
             print("💭 No new conversations to synthesize")
-            return "No new conversations to synthesize"
+            synthesis_summary = "No new conversations to synthesize"
+        else:
+            # Build conversation text
+            history_parts = []
+            for conv in conversations:
+                data = conv.data
+                history_parts.append(f"User: {data.get('user', '')}")
+                history_parts.append(f"Assistant: {data.get('assistant', '')}")
+            history_text = "\n\n".join(history_parts)
 
-        # Build conversation text
-        history_parts = []
-        for conv in conversations:
-            data = conv.data
-            history_parts.append(f"User: {data.get('user', '')}")
-            history_parts.append(f"Assistant: {data.get('assistant', '')}")
-        history_text = "\n\n".join(history_parts)
+            synthesis_prompt = SYNTHESIS_PROMPT_TEMPLATE.format(
+                focus="everything",
+                history_text=history_text,
+            )
 
-        synthesis_prompt = SYNTHESIS_PROMPT_TEMPLATE.format(
-            focus="everything",
-            history_text=history_text,
+            try:
+                response = self.anthropic.messages.create(
+                    model=self.config.model,
+                    max_tokens=2000,
+                    messages=[{"role": "user", "content": synthesis_prompt}],
+                )
+
+                first_block = response.content[0]
+                response_text = first_block.text.strip() if hasattr(first_block, "text") else ""
+
+                if response_text.startswith("```"):
+                    response_text = response_text.split("```")[1]
+                    if response_text.startswith("json"):
+                        response_text = response_text[4:]
+
+                insights_data = json.loads(response_text)
+                insights = insights_data.get("insights", [])
+
+                if not insights:
+                    print("💭 Synthesis complete - no new learnings to save")
+                    synthesis_summary = "Synthesis complete - no new learnings"
+                else:
+                    saved_count = 0
+                    for insight in insights:
+                        try:
+                            self.knowledge_graph.insert_knowledge(
+                                entity_type=insight["category"],
+                                key=insight["key"],
+                                content=insight["content"],
+                                metadata={
+                                    "tags": insight.get("tags", []),
+                                    "source": "auto_synthesis",
+                                    "synthesized_at": now.isoformat(),
+                                },
+                                confidence=insight.get("confidence", 1.0),
+                            )
+                            saved_count += 1
+                            print(f"💡 Learned: {insight['category']}:{insight['key']}")
+                        except Exception as e:
+                            print(f"⚠️  Failed to save insight {insight.get('key')}: {e}")
+
+                    synthesis_summary = f"Saved {saved_count} new learnings from {len(conversations)} conversations"
+                    print(f"✓ {synthesis_summary}")
+
+            except json.JSONDecodeError as e:
+                print(f"⚠️  Synthesis failed - invalid JSON: {e}")
+                synthesis_summary = f"Synthesis failed - invalid JSON: {e}"
+            except Exception as e:
+                print(f"⚠️  Synthesis failed: {e}")
+                synthesis_summary = f"Synthesis failed: {e}"
+
+        # Run connection discovery before recording marker
+        try:
+            connection_result = await self._run_connection_discovery(previous_reports_processed)
+        except Exception as e:
+            connection_result = f"Connection discovery error: {e}"
+            print(f"⚠️  {connection_result}")
+
+        # Record synthesis marker after connection discovery so it captures
+        # which reports were processed and won't re-process them next time
+        reports_processed = self._get_report_snapshots()
+        self.knowledge_graph.insert_entity(
+            entity_type="synthesis_marker",
+            data={
+                "synthesized_conversations": len(conversations),
+                "reports_processed": reports_processed,
+            },
+            valid_from=now,
+        )
+
+        return f"{synthesis_summary}; {connection_result}"
+
+    @staticmethod
+    def _summarize_entities_for_prompt(entities: list) -> str:
+        """Build compact entity summaries for the connection discovery prompt"""
+        lines = []
+        for entity in entities:
+            data = entity.data
+            if entity.entity_type == "tool_result":
+                tool_name = data.get("tool_name", "unknown")
+                args_summary = json.dumps(data.get("arguments", {}))[:100]
+                summary = f"Tool: {tool_name}, Args: {args_summary}"
+            else:
+                key = data.get("key", "")
+                content = data.get("content", "")[:200]
+                summary = f"Key: {key}, Content: {content}"
+            lines.append(f"- ID: {entity.id} | Type: {entity.entity_type} | {summary}")
+        return "\n".join(lines)
+
+    def _gather_recent_reports(self, already_processed: dict[str, str]) -> str:
+        """Read reports that are new or modified since last processing.
+
+        Args:
+            already_processed: Dict mapping report name to its modification time
+                when it was last processed. A report is skipped only if its current
+                modification time matches the recorded one.
+
+        Returns:
+            Concatenated report content for new/modified reports
+        """
+        try:
+            reports_json = self.report_tools._list_reports()
+            reports = json.loads(reports_json)
+        except Exception:
+            return ""
+
+        parts = []
+        for report in reports:
+            name = report.get("name", "")
+            modified = report.get("modified", "")
+
+            # Skip if same name AND same modification time (unchanged)
+            if name in already_processed and already_processed[name] == modified:
+                continue
+
+            content = self.report_tools._read_report(name)
+            if content and not content.startswith("Report '"):
+                if len(content) > 5000:
+                    content = content[:5000] + "\n... [truncated]"
+                parts.append(f"### Report: {name}\n{content}")
+
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _extract_connections_from_partial_json(text: str) -> dict:
+        """Extract connection objects from truncated JSON output.
+
+        When the LLM hits max_tokens, the JSON may be incomplete. This
+        extracts all complete connection objects using regex.
+        """
+        import re
+
+        pattern = re.compile(
+            r'\{\s*"source_id"\s*:\s*"([^"]+)"\s*,'
+            r'\s*"target_id"\s*:\s*"([^"]+)"\s*,'
+            r'\s*"rel_type"\s*:\s*"([^"]+)"\s*,'
+            r'\s*"description"\s*:\s*"([^"]*?)"\s*\}',
+        )
+        connections = [
+            {
+                "source_id": m.group(1),
+                "target_id": m.group(2),
+                "rel_type": m.group(3),
+                "description": m.group(4),
+            }
+            for m in pattern.finditer(text)
+        ]
+        return {"connections": connections}
+
+    def _get_report_snapshots(self) -> dict[str, str]:
+        """Get name->modified mapping for all current reports.
+
+        Used to record in the synthesis marker which reports (and at what
+        modification time) have been processed.
+        """
+        try:
+            reports_json = self.report_tools._list_reports()
+            reports = json.loads(reports_json)
+            return {r.get("name", ""): r.get("modified", "") for r in reports}
+        except Exception:
+            return {}
+
+    async def _run_connection_discovery(self, previous_reports_processed: dict[str, str] | None = None) -> str:
+        """Discover and create relationships between KG entities using reports as context
+
+        Args:
+            previous_reports_processed: Dict mapping report name to modification time
+                from the previous synthesis run. Reports unchanged since then are skipped.
+
+        Returns:
+            Summary of connections created
+        """
+        if not self.knowledge_graph:
+            return "Knowledge graph not available"
+
+        now = datetime.now()
+
+        last_reports_processed = previous_reports_processed or {}
+
+        entity_types_to_include = [
+            "user_preference",
+            "lesson_learned",
+            "project_context",
+            "decision_rationale",
+            "tool_result",
+        ]
+        entities = []
+        for etype in entity_types_to_include:
+            entities.extend(self.knowledge_graph.query_as_of(now, entity_type=etype, limit=50))
+
+        if not entities:
+            print("💭 No entities available for connection discovery")
+            return "No entities for connection discovery"
+
+        entities_text = self._summarize_entities_for_prompt(entities)
+        reports_text = self._gather_recent_reports(last_reports_processed)
+
+        prompt = CONNECTION_DISCOVERY_PROMPT_TEMPLATE.format(
+            entities_text=entities_text,
+            reports_text=reports_text if reports_text else "No new reports.",
         )
 
         try:
             response = self.anthropic.messages.create(
                 model=self.config.model,
-                max_tokens=2000,
-                messages=[{"role": "user", "content": synthesis_prompt}],
+                max_tokens=8000,
+                messages=[{"role": "user", "content": prompt}],
             )
 
             first_block = response.content[0]
@@ -1734,55 +1981,57 @@ class AiAssistAgent:
                 if response_text.startswith("json"):
                     response_text = response_text[4:]
 
-            insights_data = json.loads(response_text)
-            insights = insights_data.get("insights", [])
+            # Handle truncated JSON from hitting max_tokens: extract
+            # individual connection objects even if the array is incomplete
+            try:
+                connections_data = json.loads(response_text)
+            except json.JSONDecodeError:
+                connections_data = self._extract_connections_from_partial_json(response_text)
 
-            if not insights:
-                print("💭 Synthesis complete - no new learnings to save")
-                # Still record the marker so we don't re-process
-                self.knowledge_graph.insert_entity(
-                    entity_type="synthesis_marker",
-                    data={"synthesized_conversations": len(conversations)},
+            connections = connections_data.get("connections", [])
+
+            if not connections:
+                print("💭 No new connections discovered")
+                return "No new connections discovered"
+
+            created_count = 0
+            entity_ids = {e.id for e in entities}
+
+            for conn in connections:
+                source_id = conn.get("source_id", "")
+                target_id = conn.get("target_id", "")
+                rel_type = conn.get("rel_type", "relates_to")
+                description = conn.get("description", "")
+
+                if source_id not in entity_ids or target_id not in entity_ids:
+                    continue
+
+                if source_id == target_id:
+                    continue
+
+                if self.knowledge_graph.relationship_exists(rel_type, source_id, target_id):
+                    continue
+
+                self.knowledge_graph.insert_relationship(
+                    rel_type=rel_type,
+                    source_id=source_id,
+                    target_id=target_id,
                     valid_from=now,
+                    properties={"description": description, "source": "connection_discovery"},
                 )
-                return "Synthesis complete - no new learnings"
+                created_count += 1
+                print(f"🔗 Connected: {source_id} --[{rel_type}]--> {target_id}")
 
-            saved_count = 0
-            for insight in insights:
-                try:
-                    self.knowledge_graph.insert_knowledge(
-                        entity_type=insight["category"],
-                        key=insight["key"],
-                        content=insight["content"],
-                        metadata={
-                            "tags": insight.get("tags", []),
-                            "source": "auto_synthesis",
-                            "synthesized_at": now.isoformat(),
-                        },
-                        confidence=insight.get("confidence", 1.0),
-                    )
-                    saved_count += 1
-                    print(f"💡 Learned: {insight['category']}:{insight['key']}")
-                except Exception as e:
-                    print(f"⚠️  Failed to save insight {insight.get('key')}: {e}")
-
-            # Record synthesis marker
-            self.knowledge_graph.insert_entity(
-                entity_type="synthesis_marker",
-                data={"synthesized_conversations": len(conversations), "insights_saved": saved_count},
-                valid_from=now,
-            )
-
-            summary = f"Saved {saved_count} new learnings from {len(conversations)} conversations"
+            summary = f"Created {created_count} new connections"
             print(f"✓ {summary}")
             return summary
 
         except json.JSONDecodeError as e:
-            print(f"⚠️  Synthesis failed - invalid JSON: {e}")
-            return f"Synthesis failed - invalid JSON: {e}"
+            print(f"⚠️  Connection discovery failed - invalid JSON: {e}")
+            return f"Connection discovery failed - invalid JSON: {e}"
         except Exception as e:
-            print(f"⚠️  Synthesis failed: {e}")
-            return f"Synthesis failed: {e}"
+            print(f"⚠️  Connection discovery failed: {e}")
+            return f"Connection discovery failed: {e}"
 
     async def check_and_run_synthesis(self, conversation_memory: "ConversationMemory"):
         """Check if synthesis was triggered and run it

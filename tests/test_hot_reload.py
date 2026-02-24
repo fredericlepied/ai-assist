@@ -128,10 +128,10 @@ class TestHotReload:
         config = MagicMock()
         scheduler = MonitoringScheduler(mock_agent, config, state_manager, None, schedule_file=temp_schedules_file)
 
-        # Verify initial task loaded (+ built-in nightly-synthesis)
+        # Verify initial task loaded (+ built-in kg-synthesis)
         task_names = {t.task_def.name for t in scheduler.user_tasks}
         assert "Task 1" in task_names
-        assert "nightly-synthesis" in task_names
+        assert "kg-synthesis" in task_names
 
         # Simulate reload with new schedule
         temp_schedules_file.write_text(
@@ -147,8 +147,8 @@ class TestHotReload:
         # Reload should not crash
         await scheduler.reload_schedules()
 
-        # Verify new task loaded (+ built-in nightly-synthesis)
+        # Verify new task loaded (+ built-in kg-synthesis)
         task_names = {t.task_def.name for t in scheduler.user_tasks}
         assert "Task 2" in task_names
         assert "Task 1" not in task_names
-        assert "nightly-synthesis" in task_names
+        assert "kg-synthesis" in task_names

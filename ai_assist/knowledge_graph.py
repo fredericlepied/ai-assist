@@ -492,6 +492,28 @@ class KnowledgeGraph:
 
         return relationship
 
+    def relationship_exists(self, rel_type: str, source_id: str, target_id: str) -> bool:
+        """Check if a current relationship already exists between two entities
+
+        Args:
+            rel_type: Type of relationship
+            source_id: Source entity ID
+            target_id: Target entity ID
+
+        Returns:
+            True if such a relationship currently exists (tx_to IS NULL)
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM relationships
+            WHERE rel_type = ? AND source_id = ? AND target_id = ?
+            AND tx_to IS NULL
+        """,
+            (rel_type, source_id, target_id),
+        )
+        return cursor.fetchone()[0] > 0
+
     def query_as_of(
         self,
         tx_time: datetime,
