@@ -290,15 +290,75 @@ class TestSynthesisFromKG:
 
     @pytest.mark.asyncio
     async def test_synthesis_from_kg_no_conversations(self, agent, kg):
-        """Synthesis with no conversations should return without errors"""
+        """Synthesis with no conversations and no reports should return early"""
         result = await agent._run_synthesis_from_kg()
 
-        # Should return a message indicating nothing to process
-        assert result is not None
-        # No knowledge insights should be saved (only synthesis_marker)
+        assert "No new conversations or reports" in result
+
+        # No synthesis_marker should be created (nothing was processed)
+        now = datetime.now()
+        markers = kg.query_as_of(now, entity_type="synthesis_marker")
+        assert len(markers) == 0
+
+        # No knowledge insights should be saved
         for etype in ["user_preference", "lesson_learned", "project_context", "decision_rationale"]:
             results = kg.search_knowledge(entity_type=etype)
             assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_synthesis_from_kg_no_conversations_but_new_reports(self, agent, kg):
+        """When no conversations exist but reports changed, connection discovery should run"""
+        now = datetime.now()
+
+        # Insert an entity so connection discovery has something to work with
+        kg.insert_knowledge(
+            entity_type="lesson_learned",
+            key="test_lesson",
+            content="Test lesson content",
+            metadata={"source": "test"},
+            confidence=1.0,
+        )
+
+        # Mock _get_report_snapshots to simulate a new report
+        with patch.object(agent, "_get_report_snapshots", return_value={"my_report": "2026-02-25T10:00:00"}):
+            mock_response = MagicMock()
+            mock_response.content = [MagicMock(text=json.dumps({"connections": []}))]
+
+            with patch.object(agent.anthropic.messages, "create", return_value=mock_response) as mock_create:
+                with patch.object(agent, "_gather_recent_reports", return_value="Report content here"):
+                    await agent._run_synthesis_from_kg()
+
+            # LLM should have been called for connection discovery
+            assert mock_create.called
+
+        # A synthesis_marker should have been created
+        markers = kg.query_as_of(now + timedelta(seconds=10), entity_type="synthesis_marker")
+        assert len(markers) >= 1
+
+    @pytest.mark.asyncio
+    async def test_synthesis_from_kg_no_llm_calls_when_nothing_new(self, agent, kg):
+        """No LLM calls should be made when there are no new conversations or reports"""
+        now = datetime.now()
+
+        # Create a previous synthesis marker with report snapshots
+        kg.insert_entity(
+            entity_type="synthesis_marker",
+            data={
+                "synthesized_conversations": 0,
+                "reports_processed": {"existing_report": "2026-02-25T08:00:00"},
+            },
+            valid_from=now - timedelta(hours=1),
+        )
+
+        # Mock _get_report_snapshots to return same snapshots (no change)
+        with patch.object(agent, "_get_report_snapshots", return_value={"existing_report": "2026-02-25T08:00:00"}):
+            with patch.object(agent.anthropic.messages, "create") as mock_create:
+                result = await agent._run_synthesis_from_kg()
+
+            # No LLM calls should have been made
+            mock_create.assert_not_called()
+
+        assert "No new conversations or reports" in result
 
     @pytest.mark.asyncio
     async def test_synthesis_from_kg_skips_already_synthesized(self, agent, kg):

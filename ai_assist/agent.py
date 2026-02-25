@@ -1851,6 +1851,15 @@ class AiAssistAgent:
         # Get conversation entities since cutoff
         conversations = self.knowledge_graph.query_as_of(now, entity_type="conversation", valid_from_after=cutoff)
 
+        # Check for new/modified reports early to enable early exit
+        reports_processed = self._get_report_snapshots()
+        has_new_reports = reports_processed != previous_reports_processed
+
+        # Early exit if nothing new to process
+        if not conversations and not has_new_reports:
+            print("💭 No new conversations or reports to synthesize")
+            return "No new conversations or reports to synthesize"
+
         synthesis_summary = ""
 
         if not conversations:
@@ -1930,7 +1939,6 @@ class AiAssistAgent:
 
         # Record synthesis marker after connection discovery so it captures
         # which reports were processed and won't re-process them next time
-        reports_processed = self._get_report_snapshots()
         self.knowledge_graph.insert_entity(
             entity_type="synthesis_marker",
             data={
