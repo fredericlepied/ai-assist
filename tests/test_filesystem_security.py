@@ -12,6 +12,7 @@ from ai_assist.filesystem_tools import (
     ALLOWED_PATHS_FILE,
     SHELL_BUILTINS,
     FilesystemTools,
+    _extract_command_argument_paths,
     _is_safe_env_assignment,
     _split_shell_commands,
     _strip_shell_comments,
@@ -886,7 +887,7 @@ class TestExtractCommandNames:
 @pytest.mark.asyncio
 async def test_shell_builtins_auto_allowed():
     """Shell builtins run without prompt or allowlist"""
-    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
+    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"], allowed_paths=[])
     tools = FilesystemTools(config)
 
     callback_called = False
@@ -971,8 +972,314 @@ async def test_pipe_checks_all_commands():
 @pytest.mark.asyncio
 async def test_all_builtin_compound_allowed():
     """Compound commands with only builtins are auto-allowed"""
-    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=[])
+    config = AiAssistConfig(anthropic_api_key="test", allowed_commands=[], allowed_paths=[])
     tools = FilesystemTools(config)
 
     result = await tools.execute_tool("execute_command", {"command": "cd /tmp && echo hello && pwd"})
     assert "not allowed" not in result.lower()
+
+
+# --- Phase 11: Command argument path validation (cd, find, python) ---
+
+
+class TestExtractCommandArgumentPaths:
+    """Tests for _extract_command_argument_paths()"""
+
+    def test_cd_simple(self):
+        result = _extract_command_argument_paths("cd /etc")
+        assert ("cd", "/etc") in result
+
+    def test_cd_home(self):
+        result = _extract_command_argument_paths("cd ~")
+        assert ("cd", "~") in result
+
+    def test_cd_no_arg(self):
+        result = _extract_command_argument_paths("cd")
+        assert result == []
+
+    def test_cd_dash(self):
+        """cd - means previous directory, can't validate"""
+        result = _extract_command_argument_paths("cd -")
+        assert result == []
+
+    def test_cd_in_compound(self):
+        result = _extract_command_argument_paths("cd /etc && cat passwd")
+        assert ("cd", "/etc") in result
+
+    def test_find_with_path(self):
+        result = _extract_command_argument_paths("find /usr -name '*.log'")
+        assert ("find", "/usr") in result
+
+    def test_find_multiple_paths(self):
+        result = _extract_command_argument_paths("find /usr /var -name '*.log'")
+        assert ("find", "/usr") in result
+        assert ("find", "/var") in result
+
+    def test_find_no_path(self):
+        """find without explicit path, no paths to validate"""
+        result = _extract_command_argument_paths("find -name '*.txt'")
+        assert not any(r[0] == "find" for r in result)
+
+    def test_find_dot_path(self):
+        result = _extract_command_argument_paths("find . -name '*.txt'")
+        assert ("find", ".") in result
+
+    def test_python_script(self):
+        result = _extract_command_argument_paths("python3 /tmp/script.py")
+        assert ("python3", "/tmp/script.py") in result
+
+    def test_python_script_with_args(self):
+        result = _extract_command_argument_paths("python script.py --verbose")
+        assert ("python", "script.py") in result
+
+    def test_python_c_flag(self):
+        result = _extract_command_argument_paths("python3 -c 'print(1)'")
+        assert ("python3", "<inline-code>") in result
+
+    def test_python_m_flag(self):
+        """python -m module is safe, no path to validate"""
+        result = _extract_command_argument_paths("python3 -m pytest")
+        assert result == []
+
+    def test_python_no_args(self):
+        result = _extract_command_argument_paths("python3")
+        assert ("python3", "<interactive>") in result
+
+    def test_python_stdin(self):
+        result = _extract_command_argument_paths("python3 -")
+        assert ("python3", "<stdin>") in result
+
+    def test_no_special_commands(self):
+        result = _extract_command_argument_paths("grep pattern file.txt")
+        assert result == []
+
+    def test_mixed_commands(self):
+        result = _extract_command_argument_paths("cd /etc && find /var -name '*.log'")
+        assert ("cd", "/etc") in result
+        assert ("find", "/var") in result
+
+    def test_python_with_option_flags(self):
+        result = _extract_command_argument_paths("python3 -u script.py")
+        assert ("python3", "script.py") in result
+
+
+# --- Integration tests for command argument path validation ---
+
+
+@pytest.mark.asyncio
+async def test_cd_blocked_path(tmp_path):
+    """cd to a path outside allowed directories is blocked"""
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir()
+
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[str(allowed_dir)],
+    )
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": "cd /etc"})
+    assert "not allowed" in result.lower() or "outside allowed" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_cd_allowed_path(tmp_path):
+    """cd to an allowed path succeeds"""
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir()
+
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[str(allowed_dir)],
+    )
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": f"cd {allowed_dir}"})
+    assert "not allowed" not in result.lower()
+    assert "outside allowed" not in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_find_blocked_path(tmp_path):
+    """find in a path outside allowed directories is blocked"""
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir()
+
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[str(allowed_dir)],
+    )
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": "find /etc -name '*.conf'"})
+    assert "not allowed" in result.lower() or "outside allowed" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_find_allowed_path(tmp_path):
+    """find in an allowed path succeeds"""
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir()
+
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[str(allowed_dir)],
+    )
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": f"find {allowed_dir} -name '*.txt'"})
+    assert "not allowed" not in result.lower()
+    assert "outside allowed" not in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_python_script_blocked_path(tmp_path):
+    """python with script outside allowed paths is blocked (when python is in allowlist)"""
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir()
+
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_commands=["python3"],
+        allowed_paths=[str(allowed_dir)],
+    )
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": "python3 /etc/script.py"})
+    assert "not allowed" in result.lower() or "outside allowed" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_python_script_allowed_path(tmp_path):
+    """python with script in allowed paths succeeds"""
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir()
+    script = allowed_dir / "test.py"
+    script.write_text("print('ok')")
+
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_commands=["python3"],
+        allowed_paths=[str(allowed_dir)],
+    )
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": f"python3 {script}"})
+    assert "not allowed" not in result.lower()
+    assert "ok" in result
+
+
+@pytest.mark.asyncio
+async def test_python_c_blocked_in_non_interactive(tmp_path):
+    """python -c is blocked in non-interactive mode even if python is in allowlist"""
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_commands=["python3"],
+        allowed_paths=[str(tmp_path)],
+    )
+    tools = FilesystemTools(config)
+    # No confirmation_callback set = non-interactive
+
+    result = await tools.execute_tool("execute_command", {"command": "python3 -c 'print(1)'"})
+    assert "not allowed" in result.lower() or "inline" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_python_c_prompts_in_interactive(tmp_path):
+    """python -c requires confirmation in interactive mode when python is in allowlist"""
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_commands=["python3"],
+        allowed_paths=[str(tmp_path)],
+    )
+    tools = FilesystemTools(config)
+
+    callback_called = False
+
+    async def mock_callback(command: str) -> bool:
+        nonlocal callback_called
+        callback_called = True
+        return True
+
+    tools.confirmation_callback = mock_callback
+
+    await tools.execute_tool("execute_command", {"command": "python3 -c 'print(1)'"})
+    assert callback_called
+
+
+@pytest.mark.asyncio
+async def test_python_interactive_blocked_in_non_interactive(tmp_path):
+    """python without args (interactive mode) is blocked when python is in allowlist"""
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_commands=["python3"],
+        allowed_paths=[str(tmp_path)],
+    )
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": "python3"})
+    assert "not allowed" in result.lower() or "interactive" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_cd_no_path_restriction_allows_all(tmp_path):
+    """When allowed_paths is empty, cd to any path is allowed"""
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[],
+    )
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": "cd /etc"})
+    assert "not allowed" not in result.lower()
+    assert "outside allowed" not in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_find_no_path_restriction_allows_all(tmp_path):
+    """When allowed_paths is empty, find in any path is allowed"""
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[],
+    )
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": "find /etc -maxdepth 0 -name '*.conf'"})
+    assert "not allowed" not in result.lower()
+    assert "outside allowed" not in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_python_not_in_allowlist_skips_arg_check():
+    """When python is not in allowlist and user confirms, no double-prompting for -c"""
+    config = AiAssistConfig(anthropic_api_key="test")
+    tools = FilesystemTools(config)
+
+    confirm_count = 0
+
+    async def count_callback(command: str) -> bool:
+        nonlocal confirm_count
+        confirm_count += 1
+        return True
+
+    tools.confirmation_callback = count_callback
+
+    await tools.execute_tool("execute_command", {"command": "python3 -c 'print(1)'"})
+    # Should only prompt once (for the command allowlist), not twice
+    assert confirm_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cd_path_traversal_blocked(tmp_path):
+    """cd with path traversal is resolved and blocked"""
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir()
+
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_paths=[str(allowed_dir)],
+    )
+    tools = FilesystemTools(config)
+
+    result = await tools.execute_tool("execute_command", {"command": f"cd {allowed_dir}/../../etc"})
+    assert "not allowed" in result.lower() or "outside allowed" in result.lower()

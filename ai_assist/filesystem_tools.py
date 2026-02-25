@@ -71,6 +71,8 @@ SHELL_BUILTINS = frozenset(
     }
 )
 
+PYTHON_COMMANDS = frozenset({"python", "python3"})
+
 ENV_VAR_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
@@ -202,6 +204,88 @@ def extract_command_names(command: str) -> list[str]:
         commands.append(cmd_name)
 
     return commands
+
+
+def _extract_command_argument_paths(command: str) -> list[tuple[str, str]]:
+    """Extract paths from command arguments that need validation.
+
+    Returns list of (command_name, path_or_marker) tuples for commands whose
+    path arguments should be checked against allowed directories:
+    - cd <dir>: the target directory
+    - find <paths...>: the search paths (before option flags)
+    - python/python3 <script>: the script file path
+
+    Special markers for python:
+    - ("<inline-code>") for python -c
+    - ("<stdin>") for python -
+    - ("<interactive>") for python with no arguments
+    """
+    stripped = _strip_shell_comments(command)
+    if not stripped.strip():
+        return []
+
+    segments = _split_shell_commands(stripped)
+    results: list[tuple[str, str]] = []
+
+    for segment in segments:
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            tokens = segment.split()
+
+        if not tokens:
+            continue
+
+        # Skip env var prefixes
+        idx = 0
+        while idx < len(tokens) and ENV_VAR_PATTERN.match(tokens[idx]):
+            idx += 1
+
+        if idx >= len(tokens):
+            continue
+
+        cmd_name = Path(tokens[idx]).name
+        args = tokens[idx + 1 :]
+
+        if cmd_name == "cd" and args:
+            target = args[0]
+            if target != "-":
+                results.append(("cd", target))
+
+        elif cmd_name == "find":
+            for arg in args:
+                if arg.startswith("-") or arg.startswith("(") or arg == "!":
+                    break
+                results.append(("find", arg))
+
+        elif cmd_name in PYTHON_COMMANDS:
+            i = 0
+            found = False
+            while i < len(args):
+                arg = args[i]
+                if arg == "-c":
+                    results.append((cmd_name, "<inline-code>"))
+                    found = True
+                    break
+                elif arg == "-m":
+                    found = True
+                    break
+                elif arg == "-":
+                    results.append((cmd_name, "<stdin>"))
+                    found = True
+                    break
+                elif arg.startswith("-"):
+                    i += 1
+                    continue
+                else:
+                    results.append((cmd_name, arg))
+                    found = True
+                    break
+                i += 1
+            if not found and not args:
+                results.append((cmd_name, "<interactive>"))
+
+    return results
 
 
 class FilesystemTools:
@@ -702,6 +786,44 @@ class FilesystemTools:
         allowed_list = ", ".join(self.allowed_commands)
         return f"Error: Command '{', '.join(non_allowed)}' is not in the allowed commands list: {allowed_list}. Not allowed."
 
+    async def _validate_command_arguments(self, command: str, was_auto_allowed: bool) -> str | None:
+        """Validate path arguments and parameters for specific commands.
+
+        Checks:
+        - cd, find: paths must be within allowed directories
+        - python/python3: script paths must be within allowed directories;
+          -c (inline code), stdin, and interactive mode require confirmation
+          when the command was auto-allowed via allowlist
+
+        Args:
+            command: The full shell command string
+            was_auto_allowed: True if all commands passed the allowlist/builtin
+                check without user confirmation (skips python -c confirmation
+                to avoid double-prompting)
+
+        Returns:
+            Error message if blocked, None if allowed
+        """
+        pairs = _extract_command_argument_paths(command)
+
+        for cmd_name, path_or_marker in pairs:
+            if path_or_marker in ("<inline-code>", "<stdin>", "<interactive>"):
+                if not was_auto_allowed:
+                    continue
+                if self.confirmation_callback is not None:
+                    desc = f"{cmd_name} {path_or_marker.strip('<>')} execution: {command}"
+                    approved = await self.confirmation_callback(desc)
+                    if not approved:
+                        return f"Error: {cmd_name} {path_or_marker} execution rejected by user."
+                else:
+                    return f"Error: {cmd_name} {path_or_marker} execution is not allowed in non-interactive mode."
+            else:
+                path_error = await self._validate_path(path_or_marker)
+                if path_error:
+                    return f"Error: {cmd_name} target path is not allowed. {path_error}"
+
+        return None
+
     async def _execute_command(self, args: dict) -> str:
         """Execute a command with allowlist enforcement"""
         command = args.get("command")
@@ -721,9 +843,18 @@ class FilesystemTools:
 
         cmd_names = extract_command_names(command)
 
+        # Determine if all commands are auto-allowed (builtins or allowlist)
+        non_allowed = [name for name in cmd_names if name not in SHELL_BUILTINS and name not in self.allowed_commands]
+        was_auto_allowed = len(non_allowed) == 0
+
         error = await self._check_command_allowed(cmd_names, command)
         if error:
             return error
+
+        # Validate command arguments (paths for cd/find, parameters for python)
+        arg_error = await self._validate_command_arguments(command, was_auto_allowed)
+        if arg_error:
+            return arg_error
 
         try:
             cwd = None
