@@ -14,6 +14,7 @@ ai-assist implements defense-in-depth with multiple security layers:
 6. **Audit logging** — records all tool calls for forensic analysis
 7. **Secret redaction** — filters sensitive environment variables
 8. **Command/path allowlists** — restricts filesystem and command access
+9. **Command argument validation** — validates paths in `cd`/`find` and parameters in `python`/`python3`
 
 ## 1. Prompt Injection Detection
 
@@ -130,6 +131,39 @@ All tool calls are logged with:
 
 The system prompt requires every factual claim to cite the tool call that provided it. This prevents hallucination and makes it easy to verify data provenance.
 
+## 8. Command Argument Validation
+
+Even when a command passes the allowlist check, its arguments may target restricted paths or execute arbitrary code. ai-assist inspects arguments for specific commands before execution.
+
+**Module:** `ai_assist/filesystem_tools.py` — `_extract_command_argument_paths()`, `_validate_command_arguments()`
+
+### Path validation for `cd` and `find`
+
+When path restrictions are enabled (`allowed_paths` is non-empty), the path arguments of `cd` and `find` are validated against the same allowed directories used by filesystem tools.
+
+| Command | What is checked |
+|---------|-----------------|
+| `cd <dir>` | Target directory must be within allowed paths |
+| `find <paths...> [options]` | All search paths (before option flags) must be within allowed paths |
+
+Path traversal is blocked: `cd /allowed/../../etc` is resolved before validation.
+
+`cd -` (previous directory) and `cd` with no arguments are not checked since they cannot be resolved statically.
+
+### Parameter validation for `python` / `python3`
+
+Python commands receive additional scrutiny beyond the command allowlist:
+
+| Invocation | Behavior |
+|------------|----------|
+| `python3 script.py` | Script path validated against allowed directories |
+| `python3 -c "code"` | Blocked in non-interactive mode; requires confirmation in interactive mode |
+| `python3 -` (stdin) | Blocked in non-interactive mode; requires confirmation in interactive mode |
+| `python3` (no args) | Blocked in non-interactive mode; requires confirmation in interactive mode |
+| `python3 -m module` | Allowed (module execution, no path to validate) |
+
+**Double-prompting avoidance:** When `python` is not in the command allowlist, the user already confirms the full command (including `-c` details) during the allowlist check. The parameter validation only adds a second prompt when `python` was auto-allowed via the allowlist — preventing commands silently added to the allowlist from executing arbitrary inline code without review.
+
 ## Threat Model
 
 ### What We Protect Against
@@ -149,6 +183,9 @@ The system prompt requires every factual claim to cite the tool call that provid
 | Script memory exhaustion via output | 20KB output limit |
 | Shell injection in scripts | `shell=False` |
 | Hallucinated data | Grounding nudge + source citation |
+| `cd`/`find` to restricted directories | Command argument path validation |
+| `python -c` arbitrary code execution | Blocked or confirmation-gated |
+| `python` interactive/stdin execution | Blocked or confirmation-gated |
 
 ### Known Limitations
 
