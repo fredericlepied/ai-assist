@@ -290,9 +290,12 @@ class AiAssistAgent:
                 for _ in range(20):  # Wait up to 10 seconds
                     await asyncio.sleep(0.5)
                     if server_name in self.sessions:
-                        print(
-                            f"✓ Connected to {server_name} MCP server with {len([t for t in self.available_tools if t['_server'] == server_name])} tools"
-                        )
+                        tool_count = len([t for t in self.available_tools if t["_server"] == server_name])
+                        prompt_count = len(self.available_prompts.get(server_name, {}))
+                        parts = [f"✓ Connected to {server_name} MCP server with {tool_count} tools"]
+                        if prompt_count:
+                            parts.append(f"{prompt_count} prompts")
+                        print(", ".join(parts))
                         break
                 # No warning if not connected yet - it may still connect later
 
