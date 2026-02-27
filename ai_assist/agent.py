@@ -484,14 +484,21 @@ class AiAssistAgent:
         """Restart a single MCP server to pick up binary updates"""
         if name not in self.config.mcp_servers:
             raise ValueError(f"Unknown MCP server: {name}. Available: {', '.join(self.config.mcp_servers.keys())}")
+        # Capture old tool names for this server before disconnecting
+        old_server_tool_names = {t["name"] for t in self.available_tools if t.get("_server") == name}
         self._disconnect_server(name)
         connected = await self._connect_server(name, self.config.mcp_servers[name])
         if connected:
             tool_count = len([t for t in self.available_tools if t.get("_server") == name])
-            print(f"  ✓ Reconnected {name} with {tool_count} tools")
+            prompt_count = len(self.available_prompts.get(name, {}))
+            parts = [f"✓ Reconnected {name} with {tool_count} tools"]
+            if prompt_count:
+                parts.append(f"{prompt_count} prompts")
+            print(f"  {', '.join(parts)}")
             # Rug-pull detection: check for tool definition changes after reconnect
+            # Scope to this server's tools only to avoid false positives from other servers
             server_tools = [t for t in self.available_tools if t.get("_server") == name]
-            changes = self._tool_registry.check_for_changes(server_tools)
+            changes = self._tool_registry.check_for_changes(server_tools, scope=old_server_tool_names)
             if changes:
                 import logging
 
@@ -551,14 +558,19 @@ class AiAssistAgent:
 
             if old_config != new_config:
                 print(f"  Reconnecting {name} (config changed)...")
+                old_server_tool_names = {t["name"] for t in self.available_tools if t.get("_server") == name}
                 self._disconnect_server(name)
                 connected = await self._connect_server(name, new_servers[name])
                 if connected:
                     tool_count = len([t for t in self.available_tools if t.get("_server") == name])
-                    print(f"    ✓ Reconnected with {tool_count} tools")
-                    # Rug-pull detection after reconnect
+                    prompt_count = len(self.available_prompts.get(name, {}))
+                    parts = [f"✓ Reconnected with {tool_count} tools"]
+                    if prompt_count:
+                        parts.append(f"{prompt_count} prompts")
+                    print(f"    {', '.join(parts)}")
+                    # Rug-pull detection after reconnect (scoped to this server)
                     server_tools = [t for t in self.available_tools if t.get("_server") == name]
-                    changes = self._tool_registry.check_for_changes(server_tools)
+                    changes = self._tool_registry.check_for_changes(server_tools, scope=old_server_tool_names)
                     if changes:
                         import logging
 
