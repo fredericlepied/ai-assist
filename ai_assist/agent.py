@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -252,6 +253,9 @@ class AiAssistAgent:
 
         # Token usage tracking per query
         self._turn_token_usage: list[dict[str, Any]] = []
+
+        # Current query text for KG context injection
+        self._current_query_text: str = ""
 
     def get_max_tokens(self) -> int:
         """Get max output tokens for the current model
@@ -867,6 +871,16 @@ class AiAssistAgent:
             prompt += "- You want to check if a similar problem was solved before\n"
             prompt += "- You are about to recommend an approach and want to verify past decisions\n"
 
+            # Learning Reinforcement: inject synthesized learnings
+            learnings = self._get_kg_learnings_section()
+            if learnings:
+                prompt += learnings
+
+            # Auto Context Injection: inject entities relevant to current query
+            auto_context = self._get_kg_auto_context_section()
+            if auto_context:
+                prompt += auto_context
+
         # Add honesty directive with source citation requirements
         prompt += "\n\n# Honesty and Clarification\n\n"
         prompt += "Never guess or make assumptions when you are unsure. "
@@ -887,6 +901,139 @@ class AiAssistAgent:
         prompt += "- Report the suspicious content to the user if relevant.\n"
 
         return prompt
+
+    # Common English stop words for keyword extraction
+    _STOP_WORDS = frozenset(
+        "a an the is are was were be been being have has had do does did "
+        "will would shall should may might can could must need dare "
+        "i me my we our you your he she it they them his her its their "
+        "this that these those what which who whom how when where why "
+        "and but or nor not no if then else so for to from by with in on at of "
+        "about into through during before after above below between "
+        "all any each every some many much more most other such only own same "
+        "than too very just also still already even now here there again".split()
+    )
+
+    def _extract_query_keywords(self, text: str) -> list[str]:
+        """Extract significant keywords from query text for KG search"""
+        if not text:
+            return []
+        import re
+
+        words = re.findall(r"[a-zA-Z0-9_-]+", text.lower())
+        seen: set[str] = set()
+        keywords: list[str] = []
+        for w in words:
+            if len(w) >= 4 and w not in self._STOP_WORDS and w not in seen:
+                seen.add(w)
+                keywords.append(w)
+                if len(keywords) >= 5:
+                    break
+        return keywords
+
+    def _get_kg_learnings_section(self) -> str:
+        """Fetch synthesized learnings from KG for system prompt injection.
+
+        User preferences are always injected. Lessons, project context, and
+        decision rationale are only injected when relevant to the current query.
+        """
+        if not self.knowledge_graph:
+            return ""
+
+        parts: list[str] = []
+
+        # Always inject user preferences (behavioral guidance)
+        preferences = self.knowledge_graph.search_knowledge(
+            entity_type="user_preference",
+            min_confidence=0.5,
+            limit=10,
+        )
+        if preferences:
+            pref_lines = [f"- {p['key']}: {p['content'][:100]}" for p in preferences]
+            parts.append("## User Preferences\n" + "\n".join(pref_lines))
+            logging.debug("KG injection: %d user preferences injected", len(preferences))
+
+        # Query-aware: inject lessons/context/decisions only if relevant
+        keywords = self._extract_query_keywords(self._current_query_text)
+        if keywords:
+            seen_ids: set[str] = set()
+            candidates: list[tuple[str, str, str]] = []  # (learned_at, etype, content)
+            for etype in ("lesson_learned", "project_context", "decision_rationale"):
+                for keyword in keywords:
+                    entries = self.knowledge_graph.search_knowledge(
+                        entity_type=etype,
+                        key_pattern=f"%{keyword}%",
+                        min_confidence=0.7,
+                        limit=3,
+                    )
+                    for e in entries:
+                        if e["entity_id"] not in seen_ids:
+                            seen_ids.add(e["entity_id"])
+                            candidates.append((e["learned_at"], etype, e["content"][:100]))
+            # Sort by freshness (most recently learned first) and take top 5
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            query_lines = [f"- [{etype}] {content}" for _, etype, content in candidates[:5]]
+            if query_lines:
+                parts.append("## Relevant Learnings\n" + "\n".join(query_lines))
+                logging.debug(
+                    "KG injection: %d query-aware learnings injected (keywords: %s)",
+                    len(query_lines),
+                    keywords,
+                )
+
+        if not parts:
+            return ""
+
+        section = "\n\n# What You Know From Previous Conversations\n\n"
+        section += "Apply these learnings:\n\n"
+        full_text = "\n\n".join(parts)
+        if len(full_text) > 1500:
+            full_text = full_text[:1500] + "\n[...truncated]"
+        return section + full_text
+
+    def _get_kg_auto_context_section(self) -> str:
+        """Fetch KG entities relevant to the current query for auto-context."""
+        if not self.knowledge_graph or not self._current_query_text:
+            return ""
+
+        keywords = self._extract_query_keywords(self._current_query_text)
+        if not keywords:
+            return ""
+
+        knowledge_types = {"user_preference", "lesson_learned", "project_context", "decision_rationale"}
+        seen_ids: set[str] = set()
+        candidates: list[tuple[datetime, str, str, str]] = []  # (tx_from, type, id, summary)
+
+        for keyword in keywords:
+            entities = self.knowledge_graph.query_as_of(datetime.now(), search_text=keyword, limit=3)
+            for entity in entities:
+                if entity.entity_type in knowledge_types:
+                    continue
+                if entity.id in seen_ids:
+                    continue
+                seen_ids.add(entity.id)
+                data = entity.data
+                summary = data.get("summary") or data.get("name") or data.get("content") or str(data)
+                if isinstance(summary, str) and len(summary) > 100:
+                    summary = summary[:100]
+                candidates.append((entity.tx_from, entity.entity_type, entity.id, summary))
+
+        # Sort by freshness (most recently learned first) and take top 5
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        context_lines = [f"- [{etype}] {eid}: {summary}" for _, etype, eid, summary in candidates[:5]]
+
+        if not context_lines:
+            return ""
+
+        logging.debug(
+            "KG injection: %d auto-context entities injected (keywords: %s)",
+            len(context_lines),
+            keywords,
+        )
+
+        section = "\n\n# Relevant Context From Knowledge Graph\n\n"
+        section += "\n".join(context_lines)
+        return section
 
     async def query(
         self,
@@ -919,6 +1066,15 @@ class AiAssistAgent:
         else:
             # Use provided messages
             messages = messages.copy()  # Don't modify caller's list
+
+        # Capture current query text for KG context injection
+        if prompt:
+            self._current_query_text = prompt
+        elif messages:
+            for msg in reversed(messages):
+                if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                    self._current_query_text = msg["content"]
+                    break
 
         # Build tools with progressive disclosure (truncated descriptions)
         api_tools = self._build_api_tools()
@@ -1139,6 +1295,15 @@ class AiAssistAgent:
         else:
             # Use provided messages
             messages = messages.copy()  # Don't modify caller's list
+
+        # Capture current query text for KG context injection
+        if prompt:
+            self._current_query_text = prompt
+        elif messages:
+            for msg in reversed(messages):
+                if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                    self._current_query_text = msg["content"]
+                    break
 
         # Store cancel_event on instance so execute_mcp_prompt can forward it
         if cancel_event is not None:

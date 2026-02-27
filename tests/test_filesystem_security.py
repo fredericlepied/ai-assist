@@ -35,8 +35,9 @@ async def test_allowlisted_command_executes_directly():
 
 
 @pytest.mark.asyncio
-async def test_non_allowlisted_command_blocked_without_callback():
+async def test_non_allowlisted_command_blocked_without_callback(tmp_path, monkeypatch):
     """Non-allowlisted commands return error when no confirmation callback is set"""
+    monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test")
     tools = FilesystemTools(config)
     # No confirmation_callback set
@@ -47,8 +48,9 @@ async def test_non_allowlisted_command_blocked_without_callback():
 
 
 @pytest.mark.asyncio
-async def test_non_allowlisted_command_prompts_user():
+async def test_non_allowlisted_command_prompts_user(tmp_path, monkeypatch):
     """Non-allowlisted commands call the confirmation callback when set"""
+    monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test")
     tools = FilesystemTools(config)
 
@@ -67,8 +69,9 @@ async def test_non_allowlisted_command_prompts_user():
 
 
 @pytest.mark.asyncio
-async def test_user_rejects_command():
+async def test_user_rejects_command(tmp_path, monkeypatch):
     """When user rejects via callback, command is not executed"""
+    monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test")
     tools = FilesystemTools(config)
 
@@ -926,8 +929,9 @@ async def test_comment_command_allowed():
 
 
 @pytest.mark.asyncio
-async def test_env_var_prefix_checks_actual_command():
+async def test_env_var_prefix_checks_actual_command(tmp_path, monkeypatch):
     """Env var prefix is skipped, actual command is checked"""
+    monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
     tools = FilesystemTools(config)
 
@@ -948,8 +952,9 @@ async def test_env_var_injection_detected():
 
 
 @pytest.mark.asyncio
-async def test_compound_command_checks_all():
+async def test_compound_command_checks_all(tmp_path, monkeypatch):
     """Compound commands check all commands, not just the first"""
+    monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
     tools = FilesystemTools(config)
 
