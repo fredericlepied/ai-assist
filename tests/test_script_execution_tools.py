@@ -427,3 +427,100 @@ def test_system_prompt_without_script_instructions(skills_manager_with_skill):
     assert "internal__execute_skill_script" not in result
     # But should still include the skill
     assert "test-skill" in result
+
+
+# --- Skill environment variable allowlist tests ---
+
+
+def test_skill_env_save_and_load(tmp_path, monkeypatch):
+    """Test saving and loading skill env var config"""
+    monkeypatch.setattr("ai_assist.script_execution_tools.get_config_dir", lambda: tmp_path)
+
+    ScriptExecutionTools.save_skill_env("my-skill", "MY_API_KEY")
+    ScriptExecutionTools.save_skill_env("my-skill", "MY_SECRET")
+
+    config = ScriptExecutionTools.list_skill_env("my-skill")
+    assert "MY_API_KEY" in config["my-skill"]
+    assert "MY_SECRET" in config["my-skill"]
+
+
+def test_skill_env_no_duplicates(tmp_path, monkeypatch):
+    """Test that saving same var twice doesn't duplicate"""
+    monkeypatch.setattr("ai_assist.script_execution_tools.get_config_dir", lambda: tmp_path)
+
+    ScriptExecutionTools.save_skill_env("my-skill", "MY_KEY")
+    ScriptExecutionTools.save_skill_env("my-skill", "MY_KEY")
+
+    config = ScriptExecutionTools.list_skill_env("my-skill")
+    assert config["my-skill"].count("MY_KEY") == 1
+
+
+def test_skill_env_remove(tmp_path, monkeypatch):
+    """Test removing a skill env var"""
+    monkeypatch.setattr("ai_assist.script_execution_tools.get_config_dir", lambda: tmp_path)
+
+    ScriptExecutionTools.save_skill_env("my-skill", "MY_KEY")
+    assert ScriptExecutionTools.remove_skill_env("my-skill", "MY_KEY") is True
+
+    config = ScriptExecutionTools.list_skill_env("my-skill")
+    assert config["my-skill"] == []
+
+
+def test_skill_env_remove_nonexistent(tmp_path, monkeypatch):
+    """Test removing a var that doesn't exist returns False"""
+    monkeypatch.setattr("ai_assist.script_execution_tools.get_config_dir", lambda: tmp_path)
+
+    assert ScriptExecutionTools.remove_skill_env("no-skill", "NO_VAR") is False
+
+
+def test_skill_env_list_empty(tmp_path, monkeypatch):
+    """Test listing when no config exists"""
+    monkeypatch.setattr("ai_assist.script_execution_tools.get_config_dir", lambda: tmp_path)
+
+    config = ScriptExecutionTools.list_skill_env()
+    assert config == {}
+
+
+def test_skill_env_filtering_with_allowlist(skills_manager_with_skill, tmp_path, monkeypatch):
+    """Test that allowed env vars pass through to scripts"""
+    monkeypatch.setattr("ai_assist.script_execution_tools.get_config_dir", lambda: tmp_path)
+
+    # Save an allowed var for the skill
+    ScriptExecutionTools.save_skill_env("test-skill", "GOOGLE_APPLICATION_CREDENTIALS")
+
+    # Set the env var
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/path/to/creds.json"
+
+    try:
+        config = AiAssistConfig(anthropic_api_key="test", allow_skill_script_execution=True)
+        tools = ScriptExecutionTools(skills_manager_with_skill, config)
+
+        # Get the safe environment for this skill
+        safe_env = tools._get_safe_environment("test-skill")
+        assert "GOOGLE_APPLICATION_CREDENTIALS" in safe_env
+        assert safe_env["GOOGLE_APPLICATION_CREDENTIALS"] == "/path/to/creds.json"
+
+        # Without skill name, it should be filtered
+        safe_env_no_skill = tools._get_safe_environment()
+        assert "GOOGLE_APPLICATION_CREDENTIALS" not in safe_env_no_skill
+    finally:
+        del os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+
+
+def test_skill_env_filtering_other_skill_not_allowed(skills_manager_with_skill, tmp_path, monkeypatch):
+    """Test that env vars allowed for one skill don't leak to another"""
+    monkeypatch.setattr("ai_assist.script_execution_tools.get_config_dir", lambda: tmp_path)
+
+    ScriptExecutionTools.save_skill_env("other-skill", "GOOGLE_API_KEY")
+
+    os.environ["GOOGLE_API_KEY"] = "secret-key"
+
+    try:
+        config = AiAssistConfig(anthropic_api_key="test", allow_skill_script_execution=True)
+        tools = ScriptExecutionTools(skills_manager_with_skill, config)
+
+        # test-skill should NOT get other-skill's allowed vars
+        safe_env = tools._get_safe_environment("test-skill")
+        assert "GOOGLE_API_KEY" not in safe_env
+    finally:
+        del os.environ["GOOGLE_API_KEY"]

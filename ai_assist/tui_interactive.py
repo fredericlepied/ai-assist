@@ -310,9 +310,17 @@ async def handle_skill_management_command(command: str, agent: AiAssistAgent, co
         console.print(agent.skills_manager.list_installed())
     elif subcommand == "search":
         _handle_skill_search(parts, agent, console)
+    elif subcommand == "add_env":
+        _handle_skill_add_env(parts, agent, console)
+    elif subcommand == "remove_env":
+        _handle_skill_remove_env(parts, agent, console)
+    elif subcommand == "list_env":
+        _handle_skill_list_env(parts, agent, console)
     else:
         console.print(f"[yellow]Unknown skill command: {subcommand}[/yellow]")
-        console.print("Available: /skill/install, /skill/uninstall, /skill/list, /skill/search")
+        console.print(
+            "Available: /skill/install, /skill/uninstall, /skill/list, /skill/search, /skill/add_env, /skill/remove_env, /skill/list_env"
+        )
 
     return True
 
@@ -366,6 +374,59 @@ def _handle_skill_search(parts: list[str], agent: AiAssistAgent, console: Consol
     console.print(clawhub_result)
     console.print("")
     console.print(skills_sh_result)
+
+
+def _handle_skill_add_env(parts: list[str], agent: AiAssistAgent, console: Console):
+    if len(parts) < 2:
+        console.print("[yellow]Usage: /skill/add_env <skill-name> <ENV_VAR>[/yellow]")
+        console.print("Example: /skill/add_env gog GOOGLE_API_KEY")
+        return
+
+    args = parts[1].split()
+    if len(args) < 2:
+        console.print("[yellow]Usage: /skill/add_env <skill-name> <ENV_VAR>[/yellow]")
+        return
+
+    skill_name, env_var = args[0], args[1]
+    from ai_assist.script_execution_tools import ScriptExecutionTools
+
+    ScriptExecutionTools.save_skill_env(skill_name, env_var)
+    console.print(f"[green]Allowed {env_var} for skill '{skill_name}'[/green]")
+
+
+def _handle_skill_remove_env(parts: list[str], agent: AiAssistAgent, console: Console):
+    if len(parts) < 2:
+        console.print("[yellow]Usage: /skill/remove_env <skill-name> <ENV_VAR>[/yellow]")
+        return
+
+    args = parts[1].split()
+    if len(args) < 2:
+        console.print("[yellow]Usage: /skill/remove_env <skill-name> <ENV_VAR>[/yellow]")
+        return
+
+    skill_name, env_var = args[0], args[1]
+    from ai_assist.script_execution_tools import ScriptExecutionTools
+
+    if ScriptExecutionTools.remove_skill_env(skill_name, env_var):
+        console.print(f"[green]Removed {env_var} from skill '{skill_name}'[/green]")
+    else:
+        console.print(f"[yellow]{env_var} was not configured for skill '{skill_name}'[/yellow]")
+
+
+def _handle_skill_list_env(parts: list[str], agent: AiAssistAgent, console: Console):
+    from ai_assist.script_execution_tools import ScriptExecutionTools
+
+    skill_name = parts[1].strip() if len(parts) >= 2 and parts[1].strip() else None
+    config = ScriptExecutionTools.list_skill_env(skill_name)
+
+    if not config or all(not v for v in config.values()):
+        console.print("[dim]No environment variables configured for skills[/dim]")
+        console.print("[dim]Use /skill/add_env <skill-name> <ENV_VAR> to allow an env var[/dim]")
+        return
+
+    for name, env_vars in config.items():
+        if env_vars:
+            console.print(f"[bold]{name}[/bold]: {', '.join(env_vars)}")
 
 
 async def handle_prompt_command(
@@ -1147,6 +1208,9 @@ async def handle_help_command(console: Console):
 - `/skill/uninstall <name>` - Uninstall an Agent Skill
 - `/skill/list` - List installed Agent Skills
 - `/skill/search <query>` - Search ClawHub and skills.sh registries
+- `/skill/add_env <skill> <VAR>` - Allow an env var for a skill's scripts
+- `/skill/remove_env <skill> <VAR>` - Remove an allowed env var
+- `/skill/list_env [skill]` - Show allowed env vars for skills
 - `/eval-stats` - Show evaluation metrics from query traces
 - `/mcp/restart <server>` - Restart an MCP server (picks up binary updates)
 - `/exit` or `/quit` - Exit interactive mode

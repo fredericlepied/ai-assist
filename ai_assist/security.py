@@ -200,11 +200,14 @@ class ToolDefinitionRegistry:
             name = tool.get("name", "")
             self._fingerprints[name] = compute_tool_fingerprint(tool)
 
-    def check_for_changes(self, tools: list[dict]) -> list[dict]:
+    def check_for_changes(self, tools: list[dict], scope: set[str] | None = None) -> list[dict]:
         """Check tools against stored fingerprints.
 
         Args:
             tools: Current list of tool definition dicts
+            scope: If provided, only check for removals among these tool names.
+                   Use this when reconnecting a single server to avoid flagging
+                   tools from other servers as removed.
 
         Returns:
             List of change dicts: [{"tool_name": str, "change_type": "modified"|"added"|"removed"}]
@@ -222,8 +225,9 @@ class ToolDefinitionRegistry:
             elif self._fingerprints[name] != fingerprint:
                 changes.append({"tool_name": name, "change_type": "modified"})
 
-        for name in self._fingerprints:
-            if name not in current_names:
+        check_names = scope if scope is not None else set(self._fingerprints.keys())
+        for name in check_names:
+            if name in self._fingerprints and name not in current_names:
                 changes.append({"tool_name": name, "change_type": "removed"})
 
         return changes

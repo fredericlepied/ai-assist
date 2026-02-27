@@ -35,8 +35,9 @@ async def test_allowlisted_command_executes_directly():
 
 
 @pytest.mark.asyncio
-async def test_non_allowlisted_command_blocked_without_callback():
+async def test_non_allowlisted_command_blocked_without_callback(tmp_path, monkeypatch):
     """Non-allowlisted commands return error when no confirmation callback is set"""
+    monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test")
     tools = FilesystemTools(config)
     # No confirmation_callback set
@@ -47,8 +48,9 @@ async def test_non_allowlisted_command_blocked_without_callback():
 
 
 @pytest.mark.asyncio
-async def test_non_allowlisted_command_prompts_user():
+async def test_non_allowlisted_command_prompts_user(tmp_path, monkeypatch):
     """Non-allowlisted commands call the confirmation callback when set"""
+    monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test")
     tools = FilesystemTools(config)
 
@@ -67,8 +69,9 @@ async def test_non_allowlisted_command_prompts_user():
 
 
 @pytest.mark.asyncio
-async def test_user_rejects_command():
+async def test_user_rejects_command(tmp_path, monkeypatch):
     """When user rejects via callback, command is not executed"""
+    monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test")
     tools = FilesystemTools(config)
 
@@ -926,8 +929,9 @@ async def test_comment_command_allowed():
 
 
 @pytest.mark.asyncio
-async def test_env_var_prefix_checks_actual_command():
+async def test_env_var_prefix_checks_actual_command(tmp_path, monkeypatch):
     """Env var prefix is skipped, actual command is checked"""
+    monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
     tools = FilesystemTools(config)
 
@@ -948,8 +952,9 @@ async def test_env_var_injection_detected():
 
 
 @pytest.mark.asyncio
-async def test_compound_command_checks_all():
+async def test_compound_command_checks_all(tmp_path, monkeypatch):
     """Compound commands check all commands, not just the first"""
+    monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
     tools = FilesystemTools(config)
 
@@ -1170,8 +1175,8 @@ async def test_python_script_allowed_path(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_python_c_blocked_in_non_interactive(tmp_path):
-    """python -c is blocked in non-interactive mode even if python is in allowlist"""
+async def test_python_c_allowed_in_non_interactive_when_allowlisted(tmp_path):
+    """python -c is allowed in non-interactive mode when python is in allowlist"""
     config = AiAssistConfig(
         anthropic_api_key="test",
         allowed_commands=["python3"],
@@ -1181,7 +1186,24 @@ async def test_python_c_blocked_in_non_interactive(tmp_path):
     # No confirmation_callback set = non-interactive
 
     result = await tools.execute_tool("execute_command", {"command": "python3 -c 'print(1)'"})
-    assert "not allowed" in result.lower() or "inline" in result.lower()
+    assert "not allowed" not in result.lower()
+    assert "1" in result
+
+
+@pytest.mark.asyncio
+async def test_python_c_blocked_in_non_interactive_when_not_allowlisted(tmp_path, monkeypatch):
+    """python -c is blocked in non-interactive mode when python is NOT in allowlist"""
+    monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+    config = AiAssistConfig(
+        anthropic_api_key="test",
+        allowed_commands=["gog"],
+        allowed_paths=[str(tmp_path)],
+    )
+    tools = FilesystemTools(config)
+    # No confirmation_callback set = non-interactive
+
+    result = await tools.execute_tool("execute_command", {"command": "python3 -c 'print(1)'"})
+    assert "not allowed" in result.lower() or "not in the allowed" in result.lower()
 
 
 @pytest.mark.asyncio
