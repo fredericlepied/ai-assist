@@ -236,3 +236,228 @@ class TestDeleteReport:
         result = await report_tools.execute_tool("delete_report", {"name": "nonexistent"})
 
         assert "not found" in result
+
+
+class TestToolDefinitionsFormat:
+
+    def test_write_report_has_format_property(self, report_tools):
+        tools = report_tools.get_tool_definitions()
+        write_tool = next(t for t in tools if t["name"] == "internal__write_report")
+        fmt_prop = write_tool["input_schema"]["properties"]["format"]
+        assert fmt_prop["enum"] == ["csv", "jsonl", "md", "tsv"]
+
+    def test_append_report_has_format_property(self, report_tools):
+        tools = report_tools.get_tool_definitions()
+        append_tool = next(t for t in tools if t["name"] == "internal__append_to_report")
+        fmt_prop = append_tool["input_schema"]["properties"]["format"]
+        assert fmt_prop["enum"] == ["csv", "jsonl", "md", "tsv"]
+
+    def test_read_report_has_format_property(self, report_tools):
+        tools = report_tools.get_tool_definitions()
+        read_tool = next(t for t in tools if t["name"] == "internal__read_report")
+        fmt_prop = read_tool["input_schema"]["properties"]["format"]
+        assert fmt_prop["enum"] == ["csv", "jsonl", "md", "tsv"]
+
+    def test_delete_report_has_format_property(self, report_tools):
+        tools = report_tools.get_tool_definitions()
+        delete_tool = next(t for t in tools if t["name"] == "internal__delete_report")
+        fmt_prop = delete_tool["input_schema"]["properties"]["format"]
+        assert fmt_prop["enum"] == ["csv", "jsonl", "md", "tsv"]
+
+
+class TestWriteReportJsonl:
+
+    @pytest.mark.asyncio
+    async def test_write_jsonl(self, report_tools, temp_reports):
+        content = '{"event": "build", "status": "pass"}\n{"event": "test", "status": "fail"}'
+        result = await report_tools.execute_tool(
+            "write_report", {"name": "events", "content": content, "format": "jsonl"}
+        )
+        assert "events" in result
+        assert "jsonl" in result
+        report_file = temp_reports / "events.jsonl"
+        assert report_file.exists()
+        text = report_file.read_text()
+        assert "<!--" not in text
+        lines = text.strip().splitlines()
+        assert len(lines) == 2
+        json.loads(lines[0])
+
+    @pytest.mark.asyncio
+    async def test_write_jsonl_invalid_json(self, report_tools):
+        result = await report_tools.execute_tool(
+            "write_report", {"name": "bad", "content": "not json", "format": "jsonl"}
+        )
+        assert "Error" in result
+        assert "Invalid JSON" in result
+
+    @pytest.mark.asyncio
+    async def test_write_jsonl_no_header(self, report_tools, temp_reports):
+        content = '{"key": "value"}'
+        await report_tools.execute_tool("write_report", {"name": "headerless", "content": content, "format": "jsonl"})
+        text = (temp_reports / "headerless.jsonl").read_text()
+        assert not text.startswith("<!--")
+
+
+class TestWriteReportCsv:
+
+    @pytest.mark.asyncio
+    async def test_write_csv(self, report_tools, temp_reports):
+        content = "name,status,date\njob1,pass,2024-01-01\njob2,fail,2024-01-02"
+        result = await report_tools.execute_tool(
+            "write_report", {"name": "results", "content": content, "format": "csv"}
+        )
+        assert "results" in result
+        report_file = temp_reports / "results.csv"
+        assert report_file.exists()
+        lines = report_file.read_text().strip().splitlines()
+        assert lines[0] == "name,status,date"
+        assert len(lines) == 3
+
+
+class TestWriteReportTsv:
+
+    @pytest.mark.asyncio
+    async def test_write_tsv(self, report_tools, temp_reports):
+        content = "name\tstatus\njob1\tpass"
+        await report_tools.execute_tool("write_report", {"name": "tab-data", "content": content, "format": "tsv"})
+        report_file = temp_reports / "tab-data.tsv"
+        assert report_file.exists()
+        lines = report_file.read_text().strip().splitlines()
+        assert len(lines) == 2
+
+
+class TestAppendToReportJsonl:
+
+    @pytest.mark.asyncio
+    async def test_append_jsonl(self, report_tools, temp_reports):
+        await report_tools.execute_tool("write_report", {"name": "log", "content": '{"seq": 1}', "format": "jsonl"})
+        await report_tools.execute_tool("append_to_report", {"name": "log", "content": '{"seq": 2}', "format": "jsonl"})
+        text = (temp_reports / "log.jsonl").read_text()
+        lines = text.strip().splitlines()
+        assert len(lines) == 2
+        assert json.loads(lines[1])["seq"] == 2
+
+    @pytest.mark.asyncio
+    async def test_append_jsonl_validates(self, report_tools, temp_reports):
+        await report_tools.execute_tool("write_report", {"name": "log", "content": '{"seq": 1}', "format": "jsonl"})
+        result = await report_tools.execute_tool(
+            "append_to_report", {"name": "log", "content": "not-json", "format": "jsonl"}
+        )
+        assert "Error" in result
+
+    @pytest.mark.asyncio
+    async def test_append_jsonl_creates_file(self, report_tools, temp_reports):
+        result = await report_tools.execute_tool(
+            "append_to_report", {"name": "newlog", "content": '{"first": true}', "format": "jsonl"}
+        )
+        assert "appended" in result
+        assert (temp_reports / "newlog.jsonl").exists()
+
+
+class TestAppendCsvTsv:
+
+    @pytest.mark.asyncio
+    async def test_append_csv_rows(self, report_tools, temp_reports):
+        await report_tools.execute_tool("write_report", {"name": "data", "content": "a,b\n1,2", "format": "csv"})
+        await report_tools.execute_tool("append_to_report", {"name": "data", "content": "3,4", "format": "csv"})
+        lines = (temp_reports / "data.csv").read_text().strip().splitlines()
+        assert len(lines) == 3
+        assert lines[2] == "3,4"
+
+    @pytest.mark.asyncio
+    async def test_append_tsv_rows(self, report_tools, temp_reports):
+        await report_tools.execute_tool("write_report", {"name": "tab", "content": "a\tb\n1\t2", "format": "tsv"})
+        await report_tools.execute_tool("append_to_report", {"name": "tab", "content": "3\t4", "format": "tsv"})
+        lines = (temp_reports / "tab.tsv").read_text().strip().splitlines()
+        assert len(lines) == 3
+
+
+class TestReadReportAutoDetect:
+
+    @pytest.mark.asyncio
+    async def test_read_auto_detects_jsonl(self, report_tools):
+        await report_tools.execute_tool("write_report", {"name": "auto", "content": '{"x": 1}', "format": "jsonl"})
+        result = await report_tools.execute_tool("read_report", {"name": "auto"})
+        assert '"x": 1' in result
+
+    @pytest.mark.asyncio
+    async def test_read_with_explicit_format(self, report_tools):
+        await report_tools.execute_tool("write_report", {"name": "explicit", "content": '{"y": 2}', "format": "jsonl"})
+        result = await report_tools.execute_tool("read_report", {"name": "explicit", "format": "jsonl"})
+        assert '"y": 2' in result
+
+    @pytest.mark.asyncio
+    async def test_read_ambiguous_returns_error(self, report_tools):
+        await report_tools.execute_tool("write_report", {"name": "multi", "content": "# MD"})
+        await report_tools.execute_tool("write_report", {"name": "multi", "content": '{"a":1}', "format": "jsonl"})
+        result = await report_tools.execute_tool("read_report", {"name": "multi"})
+        assert "Ambiguous" in result
+
+    @pytest.mark.asyncio
+    async def test_read_unsupported_format(self, report_tools):
+        result = await report_tools.execute_tool("read_report", {"name": "x", "format": "xml"})
+        assert "Unsupported" in result
+
+
+class TestListReportsMultiFormat:
+
+    @pytest.mark.asyncio
+    async def test_list_includes_format_field(self, report_tools):
+        await report_tools.execute_tool("write_report", {"name": "r1", "content": "# MD"})
+        await report_tools.execute_tool("write_report", {"name": "r2", "content": '{"k":1}', "format": "jsonl"})
+        result = await report_tools.execute_tool("list_reports", {})
+        reports = json.loads(result)
+        assert len(reports) == 2
+        formats = {r["name"]: r["format"] for r in reports}
+        assert formats["r1"] == "md"
+        assert formats["r2"] == "jsonl"
+
+    @pytest.mark.asyncio
+    async def test_list_same_name_different_formats(self, report_tools):
+        await report_tools.execute_tool("write_report", {"name": "shared", "content": "# MD"})
+        await report_tools.execute_tool("write_report", {"name": "shared", "content": "a,b\n1,2", "format": "csv"})
+        result = await report_tools.execute_tool("list_reports", {})
+        reports = json.loads(result)
+        shared_reports = [r for r in reports if r["name"] == "shared"]
+        assert len(shared_reports) == 2
+
+
+class TestDeleteReportMultiFormat:
+
+    @pytest.mark.asyncio
+    async def test_delete_auto_detects_single(self, report_tools, temp_reports):
+        await report_tools.execute_tool("write_report", {"name": "del", "content": '{"x":1}', "format": "jsonl"})
+        result = await report_tools.execute_tool("delete_report", {"name": "del"})
+        assert "deleted" in result
+        assert not (temp_reports / "del.jsonl").exists()
+
+    @pytest.mark.asyncio
+    async def test_delete_ambiguous_returns_error(self, report_tools):
+        await report_tools.execute_tool("write_report", {"name": "dup", "content": "# MD"})
+        await report_tools.execute_tool("write_report", {"name": "dup", "content": '{"a":1}', "format": "jsonl"})
+        result = await report_tools.execute_tool("delete_report", {"name": "dup"})
+        assert "Ambiguous" in result
+
+    @pytest.mark.asyncio
+    async def test_delete_with_explicit_format(self, report_tools, temp_reports):
+        await report_tools.execute_tool("write_report", {"name": "dup", "content": "# MD"})
+        await report_tools.execute_tool("write_report", {"name": "dup", "content": '{"a":1}', "format": "jsonl"})
+        result = await report_tools.execute_tool("delete_report", {"name": "dup", "format": "jsonl"})
+        assert "deleted" in result
+        assert not (temp_reports / "dup.jsonl").exists()
+        assert (temp_reports / "dup.md").exists()
+
+
+class TestDefaultFormatBackwardCompat:
+
+    @pytest.mark.asyncio
+    async def test_write_default_is_md(self, report_tools, temp_reports):
+        await report_tools.execute_tool("write_report", {"name": "compat", "content": "# Test"})
+        assert (temp_reports / "compat.md").exists()
+        assert not (temp_reports / "compat.jsonl").exists()
+
+    @pytest.mark.asyncio
+    async def test_append_default_is_md(self, report_tools, temp_reports):
+        await report_tools.execute_tool("append_to_report", {"name": "compat2", "content": "text"})
+        assert (temp_reports / "compat2.md").exists()

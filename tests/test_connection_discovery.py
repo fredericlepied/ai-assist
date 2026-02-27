@@ -191,7 +191,7 @@ class TestConnectionDiscovery:
 
         # Pass the exact modification time so the report is considered unchanged
         with patch.object(agent.anthropic.messages, "create", return_value=mock_response) as mock_create:
-            await agent._run_connection_discovery(previous_reports_processed={"old_report": mod_time})
+            await agent._run_connection_discovery(previous_reports_processed={"old_report.md": mod_time})
 
         call_args = mock_create.call_args
         prompt_text = call_args[1]["messages"][0]["content"]
@@ -218,7 +218,7 @@ class TestConnectionDiscovery:
 
         # The file's current mod_time won't match old_mod_time, so it should be included
         with patch.object(agent.anthropic.messages, "create", return_value=mock_response) as mock_create:
-            await agent._run_connection_discovery(previous_reports_processed={"evolving_report": old_mod_time})
+            await agent._run_connection_discovery(previous_reports_processed={"evolving_report.md": old_mod_time})
 
         call_args = mock_create.call_args
         prompt_text = call_args[1]["messages"][0]["content"]
