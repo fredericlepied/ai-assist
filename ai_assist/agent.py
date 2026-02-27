@@ -28,6 +28,10 @@ if TYPE_CHECKING:
     from .context import ConversationMemory
     from .knowledge_graph import KnowledgeGraph
 
+# Suppress noisy Google auth warning about missing default project
+# (we pass project_id explicitly to AnthropicVertex)
+logging.getLogger("google.auth._default").setLevel(logging.ERROR)
+
 
 SYNTHESIS_PROMPT_TEMPLATE = """Review this conversation and identify learnings to save.
 
@@ -2021,8 +2025,7 @@ class AiAssistAgent:
         previous_reports_processed: dict[str, str] = {}
         if markers:
             last_synthesis = markers[0].valid_from
-            if last_synthesis > cutoff:
-                cutoff = last_synthesis
+            cutoff = max(cutoff, last_synthesis)
             previous_reports_processed = markers[0].data.get("reports_processed", {})
 
         # Get conversation entities since cutoff
