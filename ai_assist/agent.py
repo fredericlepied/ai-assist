@@ -2168,16 +2168,17 @@ class AiAssistAgent:
         for report in reports:
             name = report.get("name", "")
             modified = report.get("modified", "")
+            fmt = report.get("format", "md")
 
-            # Skip if same name AND same modification time (unchanged)
-            if name in already_processed and already_processed[name] == modified:
+            report_key = f"{name}.{fmt}"
+            if report_key in already_processed and already_processed[report_key] == modified:
                 continue
 
-            content = self.report_tools._read_report(name)
+            content = self.report_tools._read_report(name, fmt=fmt)
             if content and not content.startswith("Report '"):
                 if len(content) > 5000:
                     content = content[:5000] + "\n... [truncated]"
-                parts.append(f"### Report: {name}\n{content}")
+                parts.append(f"### Report: {name} ({fmt})\n{content}")
 
         return "\n\n".join(parts)
 
@@ -2216,7 +2217,7 @@ class AiAssistAgent:
         try:
             reports_json = self.report_tools._list_reports()
             reports = json.loads(reports_json)
-            return {r.get("name", ""): r.get("modified", "") for r in reports}
+            return {f"{r.get('name', '')}.{r.get('format', 'md')}": r.get("modified", "") for r in reports}
         except Exception:
             return {}
 

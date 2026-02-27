@@ -320,7 +320,7 @@ class TestSynthesisFromKG:
         )
 
         # Mock _get_report_snapshots to simulate a new report
-        with patch.object(agent, "_get_report_snapshots", return_value={"my_report": "2026-02-25T10:00:00"}):
+        with patch.object(agent, "_get_report_snapshots", return_value={"my_report.md": "2026-02-25T10:00:00"}):
             mock_response = MagicMock()
             mock_response.content = [MagicMock(text=json.dumps({"connections": []}))]
 
@@ -345,13 +345,13 @@ class TestSynthesisFromKG:
             entity_type="synthesis_marker",
             data={
                 "synthesized_conversations": 0,
-                "reports_processed": {"existing_report": "2026-02-25T08:00:00"},
+                "reports_processed": {"existing_report.md": "2026-02-25T08:00:00"},
             },
             valid_from=now - timedelta(hours=1),
         )
 
         # Mock _get_report_snapshots to return same snapshots (no change)
-        with patch.object(agent, "_get_report_snapshots", return_value={"existing_report": "2026-02-25T08:00:00"}):
+        with patch.object(agent, "_get_report_snapshots", return_value={"existing_report.md": "2026-02-25T08:00:00"}):
             with patch.object(agent.anthropic.messages, "create") as mock_create:
                 result = await agent._run_synthesis_from_kg()
 

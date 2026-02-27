@@ -5,20 +5,23 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+SUPPORTED_FORMATS: dict[str, str] = {
+    "md": ".md",
+    "jsonl": ".jsonl",
+    "csv": ".csv",
+    "tsv": ".tsv",
+}
+
+FORMAT_ENUM = sorted(SUPPORTED_FORMATS.keys())
+
 
 class ReportTools:
-    """Internal tools for managing markdown reports"""
+    """Internal tools for managing reports in multiple formats (md, jsonl, csv, tsv)"""
 
     def __init__(self, reports_dir: Path | None = None):
-        """Initialize report tools
-
-        Args:
-            reports_dir: Directory to store reports (defaults to ~/ai-assist/reports)
-        """
         if reports_dir is None:
             env_dir = os.getenv("AI_ASSIST_REPORTS_DIR")
             if env_dir:
-                # Expand ~ in the path from environment variable
                 reports_dir = Path(os.path.expanduser(env_dir))
             else:
                 reports_dir = Path.home() / "ai-assist" / "reports"
@@ -27,22 +30,34 @@ class ReportTools:
         self.reports_dir.mkdir(parents=True, exist_ok=True)
 
     def get_tool_definitions(self) -> list[dict]:
-        """Get tool definitions for the AI agent"""
+        format_property = {
+            "type": "string",
+            "enum": FORMAT_ENUM,
+            "description": "Report format (default: md)",
+        }
         return [
             {
                 "name": "internal__write_report",
-                "description": "Create or completely replace a report file with markdown content.",
+                "description": (
+                    "Create or completely replace a report file. "
+                    "Supports md (markdown), jsonl, csv, and tsv formats."
+                ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "name": {
                             "type": "string",
-                            "description": "Report name (without .md extension)",
+                            "description": "Report name (without file extension)",
                         },
                         "content": {
                             "type": "string",
-                            "description": "Complete markdown content to write to the file",
+                            "description": (
+                                "Content to write. For md: markdown text. "
+                                "For jsonl: one JSON object per line. "
+                                "For csv/tsv: header row + data rows."
+                            ),
                         },
+                        "format": format_property,
                     },
                     "required": ["name", "content"],
                 },
@@ -50,13 +65,17 @@ class ReportTools:
             },
             {
                 "name": "internal__append_to_report",
-                "description": "Add content to the end of a report (creates file if it doesn't exist).",
+                "description": (
+                    "Add content to the end of a report (creates file if needed). "
+                    "For jsonl: content must be valid JSON (one object per line). "
+                    "For csv/tsv: raw rows to append."
+                ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "name": {
                             "type": "string",
-                            "description": "Report name (without .md extension)",
+                            "description": "Report name (without file extension)",
                         },
                         "content": {
                             "type": "string",
@@ -64,8 +83,9 @@ class ReportTools:
                         },
                         "section": {
                             "type": "string",
-                            "description": "Optional section header (without ##)",
+                            "description": "Optional section header (md format only, without ##)",
                         },
+                        "format": format_property,
                     },
                     "required": ["name", "content"],
                 },
@@ -73,14 +93,15 @@ class ReportTools:
             },
             {
                 "name": "internal__read_report",
-                "description": "Read a report's current content",
+                "description": "Read a report's current content. Auto-detects format if not specified.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "name": {
                             "type": "string",
-                            "description": "Report name (without .md extension)",
-                        }
+                            "description": "Report name (without file extension)",
+                        },
+                        "format": format_property,
                     },
                     "required": ["name"],
                 },
@@ -94,14 +115,15 @@ class ReportTools:
             },
             {
                 "name": "internal__delete_report",
-                "description": "Delete a report file",
+                "description": "Delete a report file. Auto-detects format if not specified.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "name": {
                             "type": "string",
-                            "description": "Report name (without .md extension)",
-                        }
+                            "description": "Report name (without file extension)",
+                        },
+                        "format": format_property,
                     },
                     "required": ["name"],
                 },
@@ -110,92 +132,149 @@ class ReportTools:
         ]
 
     async def execute_tool(self, tool_name: str, arguments: dict) -> str:
-        """Execute a report tool
-
-        Args:
-            tool_name: Name of the tool (without internal__ prefix)
-            arguments: Tool arguments
-
-        Returns:
-            str: Tool result as text
-        """
         if tool_name == "write_report":
-            return self._write_report(arguments["name"], arguments["content"])
-
+            return self._write_report(
+                arguments["name"],
+                arguments["content"],
+                fmt=arguments.get("format", "md"),
+            )
         elif tool_name == "append_to_report":
-            return self._append_to_report(arguments["name"], arguments["content"], arguments.get("section"))
-
+            return self._append_to_report(
+                arguments["name"],
+                arguments["content"],
+                section=arguments.get("section"),
+                fmt=arguments.get("format", "md"),
+            )
         elif tool_name == "read_report":
-            return self._read_report(arguments["name"])
-
+            return self._read_report(arguments["name"], fmt=arguments.get("format"))
         elif tool_name == "list_reports":
             return self._list_reports()
-
         elif tool_name == "delete_report":
-            return self._delete_report(arguments["name"])
-
+            return self._delete_report(arguments["name"], fmt=arguments.get("format"))
         else:
             raise ValueError(f"Unknown report tool: {tool_name}")
 
-    def _write_report(self, name: str, content: str) -> str:
-        """Write or overwrite a report file"""
-        report_file = self.reports_dir / f"{name}.md"
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        header = f"<!-- Generated by AI Assistant on {timestamp} -->\n\n"
+    def _resolve_report_file(self, name: str, fmt: str | None = None) -> Path | str:
+        if fmt:
+            if fmt not in SUPPORTED_FORMATS:
+                return f"Unsupported format '{fmt}'. Supported: {', '.join(FORMAT_ENUM)}"
+            return self.reports_dir / f"{name}{SUPPORTED_FORMATS[fmt]}"
 
-        report_file.write_text(header + content)
+        matches = []
+        for fmt_key, ext in SUPPORTED_FORMATS.items():
+            candidate = self.reports_dir / f"{name}{ext}"
+            if candidate.exists():
+                matches.append((fmt_key, candidate))
 
-        return f"Report '{name}' written to {report_file}"
+        if len(matches) == 0:
+            return f"Report '{name}' not found"
+        elif len(matches) == 1:
+            return matches[0][1]
+        else:
+            formats = [m[0] for m in matches]
+            return (
+                f"Ambiguous: report '{name}' exists in multiple formats: "
+                f"{', '.join(formats)}. Specify the 'format' parameter."
+            )
 
-    def _append_to_report(self, name: str, content: str, section: str | None = None) -> str:
-        """Append content to a report (creates if doesn't exist)"""
-        report_file = self.reports_dir / f"{name}.md"
+    @staticmethod
+    def _validate_jsonl(content: str) -> str | None:
+        for i, raw_line in enumerate(content.strip().splitlines(), 1):
+            stripped = raw_line.strip()
+            if stripped:
+                try:
+                    json.loads(stripped)
+                except json.JSONDecodeError as e:
+                    return f"Error: Invalid JSON on line {i}: {e}"
+        return None
 
-        if not report_file.exists():
+    def _write_report(self, name: str, content: str, fmt: str = "md") -> str:
+        if fmt not in SUPPORTED_FORMATS:
+            return f"Error: Unsupported format '{fmt}'. Supported: {', '.join(FORMAT_ENUM)}"
+
+        ext = SUPPORTED_FORMATS[fmt]
+        report_file = self.reports_dir / f"{name}{ext}"
+
+        if fmt == "md":
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             header = f"<!-- Generated by AI Assistant on {timestamp} -->\n\n"
-            report_file.write_text(header)
+            report_file.write_text(header + content)
+        elif fmt == "jsonl":
+            error = self._validate_jsonl(content)
+            if error:
+                return error
+            report_file.write_text(content.rstrip("\n") + "\n")
+        elif fmt in ("csv", "tsv"):
+            report_file.write_text(content.rstrip("\n") + "\n")
 
-        if section:
-            content = f"\n## {section}\n\n{content}\n"
-        else:
-            content = f"\n{content}\n"
+        return f"Report '{name}' ({fmt}) written to {report_file}"
 
-        with open(report_file, "a") as f:
-            f.write(content)
+    def _append_to_report(self, name: str, content: str, section: str | None = None, fmt: str = "md") -> str:
+        if fmt not in SUPPORTED_FORMATS:
+            return f"Error: Unsupported format '{fmt}'. Supported: {', '.join(FORMAT_ENUM)}"
 
-        return f"Content appended to '{name}'"
+        ext = SUPPORTED_FORMATS[fmt]
+        report_file = self.reports_dir / f"{name}{ext}"
 
-    def _read_report(self, name: str) -> str:
-        """Read a report's content"""
-        report_file = self.reports_dir / f"{name}.md"
+        if fmt == "md":
+            if not report_file.exists():
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                header = f"<!-- Generated by AI Assistant on {timestamp} -->\n\n"
+                report_file.write_text(header)
 
-        if report_file.exists():
-            return report_file.read_text()
+            if section:
+                content = f"\n## {section}\n\n{content}\n"
+            else:
+                content = f"\n{content}\n"
+
+            with open(report_file, "a") as f:
+                f.write(content)
+        elif fmt == "jsonl":
+            error = self._validate_jsonl(content)
+            if error:
+                return error
+            with open(report_file, "a") as f:
+                f.write(content.rstrip("\n") + "\n")
+        elif fmt in ("csv", "tsv"):
+            with open(report_file, "a") as f:
+                f.write(content.rstrip("\n") + "\n")
+
+        return f"Content appended to '{name}' ({fmt})"
+
+    def _read_report(self, name: str, fmt: str | None = None) -> str:
+        resolved = self._resolve_report_file(name, fmt)
+        if isinstance(resolved, str):
+            return resolved
+
+        if resolved.exists():
+            return resolved.read_text()
         else:
             return f"Report '{name}' not found"
 
     def _list_reports(self) -> str:
-        """List all available reports with metadata"""
         reports = []
-        for report_file in sorted(self.reports_dir.glob("*.md")):
-            stat = report_file.stat()
-            reports.append(
-                {
-                    "name": report_file.stem,
-                    "size": stat.st_size,
-                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                }
-            )
+        for fmt_key, ext in SUPPORTED_FORMATS.items():
+            for report_file in sorted(self.reports_dir.glob(f"*{ext}")):
+                stat = report_file.stat()
+                reports.append(
+                    {
+                        "name": report_file.stem,
+                        "format": fmt_key,
+                        "size": stat.st_size,
+                        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    }
+                )
 
+        reports.sort(key=lambda r: (r["name"], r["format"]))
         return json.dumps(reports, indent=2)
 
-    def _delete_report(self, name: str) -> str:
-        """Delete a report file"""
-        report_file = self.reports_dir / f"{name}.md"
+    def _delete_report(self, name: str, fmt: str | None = None) -> str:
+        resolved = self._resolve_report_file(name, fmt)
+        if isinstance(resolved, str):
+            return resolved
 
-        if report_file.exists():
-            report_file.unlink()
+        if resolved.exists():
+            resolved.unlink()
             return f"Report '{name}' deleted"
         else:
             return f"Report '{name}' not found"
