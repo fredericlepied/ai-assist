@@ -815,7 +815,15 @@ class FilesystemTools:
                     approved = await self.confirmation_callback(desc)
                     if not approved:
                         return f"Error: {cmd_name} {path_or_marker} execution rejected by user."
-                else:
+                elif path_or_marker == "<interactive>":
+                    # Interactive REPL (no args) is never allowed in task mode
+                    # as it would hang waiting for input.
+                    return f"Error: {cmd_name} {path_or_marker} execution is not allowed in non-interactive mode."
+                elif cmd_name not in self.allowed_commands:
+                    # In non-interactive mode, only block inline-code/stdin if the
+                    # command is not in the user's explicit allowlist. If python3
+                    # is allowlisted, python3 -c should also be trusted (e.g.
+                    # for piped commands in scheduled tasks).
                     return f"Error: {cmd_name} {path_or_marker} execution is not allowed in non-interactive mode."
             else:
                 path_error = await self._validate_path(path_or_marker)

@@ -121,6 +121,9 @@ ai-assist
 - `/skill/uninstall <name>` - Uninstall an Agent Skill
 - `/skill/list` - List installed Agent Skills
 - `/skill/search <query>` - Search ClawHub and skills.sh registries
+- `/skill/add_env <skill> <VAR>` - Allow an environment variable for a skill's scripts
+- `/skill/remove_env <skill> <VAR>` - Remove an allowed env var from a skill
+- `/skill/list_env [skill]` - Show allowed env vars for skills
 - `/mcp/restart <server>` - Restart an MCP server (picks up binary updates)
 - `/help` - Show help
 - `/exit` or `/quit` - Exit
@@ -220,6 +223,7 @@ ai-assist
   ```
 - Scripts run in a sandboxed environment:
   - No access to API keys or secrets (environment filtered)
+  - Per-skill env var allowlist via `/skill/add_env` (persisted in `~/.ai-assist/skill_env.json`)
   - 30-second timeout limit
   - Output limited to 20KB
   - Directory traversal blocked
@@ -463,6 +467,12 @@ The knowledge graph automatically stores:
 
 **KG Synthesis**: A built-in scheduled task (`kg-synthesis`) runs at 22:00 on weekdays to review the day's conversations, extract structured knowledge (preferences, lessons, context, rationale), and discover connections between entities. The schedule is configurable in `schedules.json`.
 
+**Learning Reinforcement**: Synthesized knowledge from the KG is automatically injected into the system prompt:
+- **User preferences** are always present so the assistant remembers your communication style and choices
+- **Lessons learned, project context, and decision rationale** are injected when relevant to the current query (keyword-matched, sorted by freshness)
+
+**Auto Context Injection**: When you ask a question, relevant KG entities are automatically surfaced in the system prompt based on keyword matching, giving the assistant immediate context without needing to search.
+
 ## Available Tools
 
 ### Built-in Tools
@@ -521,6 +531,8 @@ Persistent state stored in `~/.ai-assist/`:
 ├── knowledge_graph.db       # Temporal database (SQLite)
 ├── schedules.json          # Monitor/task definitions
 ├── mcp_servers.yaml        # MCP server configuration
+├── allowed_commands.json   # Permanently allowed commands
+├── skill_env.json          # Per-skill env var allowlists
 └── interactive_history.txt # Command history
 ```
 
@@ -535,7 +547,7 @@ ai-assist/
 │   ├── state.py           # State management and caching
 │   ├── knowledge_graph.py # Temporal knowledge graph
 │   └── filesystem_tools.py # Filesystem operations
-├── tests/                  # Test suite (532 tests)
+├── tests/                  # Test suite (851 tests)
 ├── .env.example           # Example environment variables
 ├── VERTEX_AI_SETUP.md     # Vertex AI troubleshooting
 ├── SECURITY.md            # Security model

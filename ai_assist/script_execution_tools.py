@@ -1,8 +1,13 @@
 """Script execution tools for Agent Skills with security controls"""
 
+import json
 import os
 import subprocess
 from pathlib import Path
+
+from .config import get_config_dir
+
+SKILL_ENV_FILE = "skill_env.json"
 
 
 class ScriptExecutionTools:
@@ -92,7 +97,7 @@ class ScriptExecutionTools:
                 return f"Error: Skill '{skill_name}' not allowed to execute scripts (missing 'internal__execute_skill_script' in allowed-tools)"
 
             # 3. Execute with security controls
-            return await self._execute_script_safely(script_path, args)
+            return await self._execute_script_safely(script_path, args, skill_name)
 
         except ValueError as e:
             return f"Error: {e}"
@@ -157,12 +162,13 @@ class ScriptExecutionTools:
         # (since global script execution is already enabled if we got here)
         return bool(skill.scripts)
 
-    async def _execute_script_safely(self, script_path: Path, args: list[str]) -> str:
+    async def _execute_script_safely(self, script_path: Path, args: list[str], skill_name: str = "") -> str:
         """Execute script with security controls
 
         Args:
             script_path: Path to the script
             args: Command-line arguments
+            skill_name: Name of the skill (for env var allowlist lookup)
 
         Returns:
             Script output or error message
@@ -175,8 +181,8 @@ class ScriptExecutionTools:
             # For shell scripts and others, execute directly
             cmd = [str(script_path)] + args
 
-        # Filter environment
-        safe_env = self._get_safe_environment()
+        # Filter environment (with skill-specific allowlist)
+        safe_env = self._get_safe_environment(skill_name)
 
         try:
             # Execute with timeout
@@ -221,8 +227,102 @@ class ScriptExecutionTools:
                 f"  chmod +x {script_path}"
             )
 
-    def _get_safe_environment(self) -> dict:
+    @staticmethod
+    def _load_skill_env_config() -> dict[str, list[str]]:
+        """Load skill environment variable allowlist from persistent file.
+
+        Returns:
+            Dict mapping skill names to lists of allowed env var names
+        """
+        path = get_config_dir() / SKILL_ENV_FILE
+        if not path.exists():
+            return {}
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    @staticmethod
+    def save_skill_env(skill_name: str, env_var: str):
+        """Add an environment variable to a skill's allowlist.
+
+        Args:
+            skill_name: Name of the skill
+            env_var: Environment variable name to allow
+        """
+        path = get_config_dir() / SKILL_ENV_FILE
+        try:
+            config = {}
+            if path.exists():
+                with open(path) as f:
+                    config = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            config = {}
+
+        if skill_name not in config:
+            config[skill_name] = []
+        if env_var not in config[skill_name]:
+            config[skill_name].append(env_var)
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(config, f, indent=2)
+
+    @staticmethod
+    def remove_skill_env(skill_name: str, env_var: str) -> bool:
+        """Remove an environment variable from a skill's allowlist.
+
+        Args:
+            skill_name: Name of the skill
+            env_var: Environment variable name to remove
+
+        Returns:
+            True if the variable was found and removed, False otherwise
+        """
+        path = get_config_dir() / SKILL_ENV_FILE
+        try:
+            config = {}
+            if path.exists():
+                with open(path) as f:
+                    config = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            config = {}
+
+        if skill_name not in config or env_var not in config[skill_name]:
+            return False
+
+        config[skill_name].remove(env_var)
+        if not config[skill_name]:
+            del config[skill_name]
+
+        with open(path, "w") as f:
+            json.dump(config, f, indent=2)
+        return True
+
+    @staticmethod
+    def list_skill_env(skill_name: str | None = None) -> dict[str, list[str]]:
+        """List allowed environment variables for skills.
+
+        Args:
+            skill_name: If provided, only return config for this skill
+
+        Returns:
+            Dict mapping skill names to lists of allowed env var names
+        """
+        config = ScriptExecutionTools._load_skill_env_config()
+        if skill_name:
+            return {skill_name: config.get(skill_name, [])}
+        return config
+
+    def _get_safe_environment(self, skill_name: str = "") -> dict:
         """Filter environment variables to remove sensitive data
+
+        Sensitive env vars are stripped unless explicitly allowed for
+        this skill via /skill/add_env.
+
+        Args:
+            skill_name: Name of the skill (for env var allowlist lookup)
 
         Returns:
             Filtered environment dict
@@ -232,6 +332,7 @@ class ScriptExecutionTools:
             "TOKEN",
             "SECRET",
             "PASSWORD",
+            "CREDENTIALS",
             "ANTHROPIC_",
             "GOOGLE_",
             "AWS_",
@@ -240,10 +341,19 @@ class ScriptExecutionTools:
             "JIRA_",
         ]
 
+        # Load skill-specific env var allowlist
+        allowed_env_vars: set[str] = set()
+        if skill_name:
+            skill_env_config = self._load_skill_env_config()
+            allowed_env_vars = set(skill_env_config.get(skill_name, []))
+
         safe_env = {}
         for key, value in os.environ.items():
-            # Skip if key contains any sensitive pattern
-            if not any(pattern in key.upper() for pattern in SENSITIVE_PATTERNS):
+            # Allow if explicitly permitted for this skill
+            if key in allowed_env_vars:
+                safe_env[key] = value
+            # Otherwise skip if key contains any sensitive pattern
+            elif not any(pattern in key.upper() for pattern in SENSITIVE_PATTERNS):
                 safe_env[key] = value
 
         # Ensure PATH is available
