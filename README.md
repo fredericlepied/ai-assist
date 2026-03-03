@@ -114,6 +114,7 @@ ai-assist
 - `/clear` - Clear conversation memory
 - `/clear-cache` - Clear response cache
 - `/kg-save [on|off]` - Toggle knowledge graph auto-save
+- `@no-kg <query>` - Suppress KG context injection for a single query
 - `/kg-viz` - Visualize knowledge graph in browser
 - `/prompts` - List available MCP prompts with arguments
 - `/prompt-info <server/prompt>` - Show detailed prompt info
@@ -472,6 +473,8 @@ The knowledge graph automatically stores:
 - **Lessons learned, project context, and decision rationale** are injected when relevant to the current query (keyword-matched, sorted by freshness)
 
 **Auto Context Injection**: When you ask a question, relevant KG entities are automatically surfaced in the system prompt based on keyword matching, giving the assistant immediate context without needing to search.
+
+**Suppressing KG Context**: Prefix any query with `@no-kg` to suppress all KG injection (preferences, learnings, auto-context) for that single query. The model will answer without any prior KG knowledge. KG saving and synthesis remain active.
 
 ## Available Tools
 
