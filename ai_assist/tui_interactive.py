@@ -137,9 +137,12 @@ async def query_with_feedback(
     identity = get_identity()
     start_time = time.time()
 
+    # Detect @no-kg prefix: skip enrichment (agent handles flag and stripping)
+    no_kg = prompt.lstrip().startswith("@no-kg")
+
     # Enrich prompt with knowledge graph context if available
     context_summary: list[str] = []
-    if kg_context:
+    if kg_context and not no_kg:
         prompt, context_summary = kg_context.enrich_prompt(prompt)
     # State to track progress
     feedback_state = {"status": "Starting...", "turn": 0, "max_turns": 50, "tool": None, "streaming": False}
@@ -1250,6 +1253,7 @@ ai-assist automatically saves tool results to the knowledge graph:
 - Future queries can use cached data (faster!)
 - See feedback: "💾 Saved 5 entities to knowledge graph"
 - Toggle with `/kg-save on` or `/kg-save off`
+- Prefix a query with `@no-kg` to suppress all KG context for that query
 
 ## Keyboard Shortcuts
 - `Enter` - Submit your input

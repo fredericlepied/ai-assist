@@ -160,6 +160,8 @@ class AiAssistAgent:
         self.config = config
         self.knowledge_graph = knowledge_graph
         self.kg_save_enabled = True  # Can be toggled by user
+        self._no_kg = False  # Per-query flag: @no-kg prefix suppresses KG injection
+        self._query_depth = 0  # Track nesting depth for _no_kg reset
 
         # Load identity for personalized interactions
         self.identity = get_identity()
@@ -877,7 +879,7 @@ class AiAssistAgent:
             prompt += "For detailed tool documentation (query syntax, available fields, examples), call introspection__get_tool_help with the tool name.\n"
 
         # Add Knowledge Graph guidance
-        if self.knowledge_graph:
+        if self.knowledge_graph and not self._no_kg:
             prompt += "\n\n# Knowledge Graph\n\n"
             prompt += "You have a Knowledge Graph containing lessons learned, user preferences, project context, and decision rationale from previous conversations.\n"
             prompt += "Instead of guessing or making assumptions, search it with internal__search_knowledge.\n"
@@ -930,6 +932,25 @@ class AiAssistAgent:
         "than too very just also still already even now here there again".split()
     )
 
+    def _apply_no_kg_prefix(self, text: str) -> str:
+        """Detect @no-kg prefix, set flag, strip prefix, return clean text.
+
+        Resets _no_kg at the top-level call (_query_depth == 1) so periodic
+        tasks and scheduled actions start clean.  Nested calls preserve
+        the outer flag.
+        """
+        if self._query_depth <= 1:
+            self._no_kg = False
+        stripped = text.lstrip()
+        if stripped.startswith("@no-kg"):
+            self._no_kg = True
+            clean = stripped.removeprefix("@no-kg").lstrip()
+            self._current_query_text = clean
+            return clean
+        else:
+            self._current_query_text = text
+            return text
+
     def _extract_query_keywords(self, text: str) -> list[str]:
         """Extract significant keywords from query text for KG search"""
         if not text:
@@ -953,7 +974,7 @@ class AiAssistAgent:
         User preferences are always injected. Lessons, project context, and
         decision rationale are only injected when relevant to the current query.
         """
-        if not self.knowledge_graph:
+        if not self.knowledge_graph or self._no_kg:
             return ""
 
         parts: list[str] = []
@@ -1009,7 +1030,7 @@ class AiAssistAgent:
 
     def _get_kg_auto_context_section(self) -> str:
         """Fetch KG entities relevant to the current query for auto-context."""
-        if not self.knowledge_graph or not self._current_query_text:
+        if not self.knowledge_graph or not self._current_query_text or self._no_kg:
             return ""
 
         keywords = self._extract_query_keywords(self._current_query_text)
@@ -1072,8 +1093,6 @@ class AiAssistAgent:
         Returns:
             The assistant's response text
         """
-        import hashlib
-
         # Build messages list
         if messages is None:
             if prompt is None:
@@ -1083,6 +1102,22 @@ class AiAssistAgent:
             # Use provided messages
             messages = messages.copy()  # Don't modify caller's list
 
+        # Track nesting depth for _no_kg reset logic
+        self._query_depth += 1
+        try:
+            return await self._query_inner(prompt, messages, max_turns, progress_callback)
+        finally:
+            self._query_depth -= 1
+
+    async def _query_inner(
+        self,
+        prompt: str | None,
+        messages: list[dict],
+        max_turns: int,
+        progress_callback,
+    ) -> str:
+        import hashlib
+
         # Capture current query text for KG context injection
         if prompt:
             self._current_query_text = prompt
@@ -1091,6 +1126,13 @@ class AiAssistAgent:
                 if msg.get("role") == "user" and isinstance(msg.get("content"), str):
                     self._current_query_text = msg["content"]
                     break
+
+        # Detect @no-kg prefix and strip it from query/messages
+        if self._current_query_text:
+            clean = self._apply_no_kg_prefix(self._current_query_text)
+            if self._no_kg and prompt:
+                prompt = clean
+                messages = [{"role": "user", "content": prompt}]
 
         # Build tools with progressive disclosure (truncated descriptions)
         api_tools = self._build_api_tools()
@@ -1312,220 +1354,237 @@ class AiAssistAgent:
             # Use provided messages
             messages = messages.copy()  # Don't modify caller's list
 
-        # Capture current query text for KG context injection
-        if prompt:
-            self._current_query_text = prompt
-        elif messages:
-            for msg in reversed(messages):
-                if msg.get("role") == "user" and isinstance(msg.get("content"), str):
-                    self._current_query_text = msg["content"]
-                    break
+        # Track nesting depth for _no_kg reset logic
+        self._query_depth += 1
+        try:
+            # Capture current query text for KG context injection
+            if prompt:
+                self._current_query_text = prompt
+            elif messages:
+                for msg in reversed(messages):
+                    if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                        self._current_query_text = msg["content"]
+                        break
 
-        # Store cancel_event on instance so execute_mcp_prompt can forward it
-        if cancel_event is not None:
-            self._cancel_event = cancel_event
+            # Detect @no-kg prefix and strip it from query/messages
+            if self._current_query_text:
+                clean = self._apply_no_kg_prefix(self._current_query_text)
+                if self._no_kg and prompt:
+                    prompt = clean
+                    messages = [{"role": "user", "content": prompt}]
 
-        # Loop detection and dedup tracking (same as query())
-        recent_tool_calls = []
-        max_recent_calls = 5
-        loop_detection_threshold = 3
-        self._tool_result_cache = {}
-        self._duplicate_tool_call_count = 0
-        self._last_turn_count = 0
-        any_tools_called = False
+            # Store cancel_event on instance so execute_mcp_prompt can forward it
+            if cancel_event is not None:
+                self._cancel_event = cancel_event
 
-        # Build tools with progressive disclosure (truncated descriptions)
-        api_tools = self._build_api_tools()
+            # Loop detection and dedup tracking (same as query())
+            recent_tool_calls = []
+            max_recent_calls = 5
+            loop_detection_threshold = 3
+            self._tool_result_cache = {}
+            self._duplicate_tool_call_count = 0
+            self._last_turn_count = 0
+            any_tools_called = False
 
-        # Reset token tracking and extended context for this query
-        self._turn_token_usage = []
-        self._extended_context_active = False
-        self._grounding_nudge_fired = False
-        self._wrapup_nudge_fired = False
+            # Build tools with progressive disclosure (truncated descriptions)
+            api_tools = self._build_api_tools()
 
-        if progress_callback:
-            progress_callback("thinking", 0, max_turns, None)
-
-        for turn in range(max_turns):
-            # Check cancellation before each turn
-            if cancel_event and cancel_event.is_set():
-                self._last_turn_count = turn
-                yield {"type": "cancelled"}
-                return
+            # Reset token tracking and extended context for this query
+            self._turn_token_usage = []
+            self._extended_context_active = False
+            self._grounding_nudge_fired = False
+            self._wrapup_nudge_fired = False
 
             if progress_callback:
-                progress_callback("calling_claude", turn + 1, max_turns, None)
+                progress_callback("thinking", 0, max_turns, None)
 
-            # Only mask old tool results when context is getting large
-            if self._should_mask_observations():
-                self._mask_old_observations(messages)
+            for turn in range(max_turns):
+                # Check cancellation before each turn
+                if cancel_event and cancel_event.is_set():
+                    self._last_turn_count = turn
+                    yield {"type": "cancelled"}
+                    return
 
-            # Check if we need to activate extended context
-            if not self._extended_context_active and self._needs_extended_context():
-                self._extended_context_active = True
-                import logging
+                if progress_callback:
+                    progress_callback("calling_claude", turn + 1, max_turns, None)
 
-                last_input = self._turn_token_usage[-1]["input_tokens"]
-                logging.info("Activating 1M extended context (input tokens: %d/200000)", last_input)
+                # Only mask old tool results when context is getting large
+                if self._should_mask_observations():
+                    self._mask_old_observations(messages)
 
-            extra_headers = self._get_extra_headers()
+                # Check if we need to activate extended context
+                if not self._extended_context_active and self._needs_extended_context():
+                    self._extended_context_active = True
+                    import logging
 
-            # Use streaming API
-            with self.anthropic.messages.stream(
-                model=self.config.model,
-                max_tokens=self.get_max_tokens(),
-                system=self._build_system_prompt(),
-                tools=api_tools,  # type: ignore[arg-type]
-                messages=messages,  # type: ignore[arg-type]
-                extra_headers=extra_headers,
-            ) as stream:
-                # Track content blocks
-                current_text = ""
+                    last_input = self._turn_token_usage[-1]["input_tokens"]
+                    logging.info("Activating 1M extended context (input tokens: %d/200000)", last_input)
 
-                for event in stream:
-                    # Check cancellation during streaming
-                    if cancel_event and cancel_event.is_set():
-                        self._last_turn_count = turn + 1
-                        yield {"type": "cancelled"}
-                        return
+                extra_headers = self._get_extra_headers()
 
-                    # Content block delta - streaming text
-                    if event.type == "content_block_delta":
-                        if hasattr(event.delta, "text"):
-                            chunk = event.delta.text
-                            current_text += chunk
-                            yield chunk  # Stream text to user
+                # Use streaming API
+                with self.anthropic.messages.stream(
+                    model=self.config.model,
+                    max_tokens=self.get_max_tokens(),
+                    system=self._build_system_prompt(),
+                    tools=api_tools,  # type: ignore[arg-type]
+                    messages=messages,  # type: ignore[arg-type]
+                    extra_headers=extra_headers,
+                ) as stream:
+                    # Track content blocks
+                    current_text = ""
 
-                    # Content block start - tool use
-                    elif event.type == "content_block_start":
-                        if hasattr(event.content_block, "type") and event.content_block.type == "tool_use":
-                            # Just track that we're starting a tool use
-                            # We'll yield the notification with full input later
-                            pass
-
-                    # Input JSON delta for tool
-                    elif event.type == "content_block_delta":
-                        if hasattr(event.delta, "partial_json"):
-                            # Tool input is being streamed
-                            pass  # We'll get the full input later
-
-                # Get final message from stream
-                final_message = stream.get_final_message()
-
-                # Track token usage
-                self._track_token_usage(final_message, turn)
-
-                messages.append({"role": "assistant", "content": final_message.content})
-
-                # Yield tool use notifications with complete inputs
-                for block in final_message.content:
-                    if block.type == "tool_use":
-                        yield {"type": "tool_use", "name": block.name, "id": block.id, "input": block.input}
-
-                # Execute any tools
-                tool_results: list[dict[str, Any]] = []
-                for block in final_message.content:
-                    if block.type == "tool_use":
-                        # Check cancellation before each tool execution
+                    for event in stream:
+                        # Check cancellation during streaming
                         if cancel_event and cancel_event.is_set():
                             self._last_turn_count = turn + 1
                             yield {"type": "cancelled"}
                             return
 
-                        if progress_callback:
-                            progress_callback("executing_tool", turn + 1, max_turns, block.name)
+                        # Content block delta - streaming text
+                        if event.type == "content_block_delta":
+                            if hasattr(event.delta, "text"):
+                                chunk = event.delta.text
+                                current_text += chunk
+                                yield chunk  # Stream text to user
 
-                        # Compute signature for dedup and loop detection
-                        tool_signature = f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
+                        # Content block start - tool use
+                        elif event.type == "content_block_start":
+                            if hasattr(event.content_block, "type") and event.content_block.type == "tool_use":
+                                # Just track that we're starting a tool use
+                                # We'll yield the notification with full input later
+                                pass
 
-                        # Check per-query cache for duplicate tool call
-                        if tool_signature in self._tool_result_cache:
-                            result = self._tool_result_cache[tool_signature]
-                            self._duplicate_tool_call_count += 1
-                        else:
-                            result = await self._execute_tool(block.name, block.input)
-                            # Truncate large tool results to prevent context overflow
-                            result = self._truncate_tool_result(result)
-                            self._tool_result_cache[tool_signature] = result
+                        # Input JSON delta for tool
+                        elif event.type == "content_block_delta":
+                            if hasattr(event.delta, "partial_json"):
+                                # Tool input is being streamed
+                                pass  # We'll get the full input later
 
-                        # Check if result is an error
-                        is_error = isinstance(result, str) and result.startswith("Error:")
+                    # Get final message from stream
+                    final_message = stream.get_final_message()
 
-                        tool_result: dict[str, Any] = {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result,
-                        }
+                    # Track token usage
+                    self._track_token_usage(final_message, turn)
 
-                        # Mark as error if it's an error message
-                        if is_error:
-                            tool_result["is_error"] = True
+                    messages.append({"role": "assistant", "content": final_message.content})
 
-                        tool_results.append(tool_result)
+                    # Yield tool use notifications with complete inputs
+                    for block in final_message.content:
+                        if block.type == "tool_use":
+                            yield {"type": "tool_use", "name": block.name, "id": block.id, "input": block.input}
 
-                        # Track for loop detection
-                        recent_tool_calls.append(tool_signature)
-                        if len(recent_tool_calls) > max_recent_calls:
-                            recent_tool_calls.pop(0)
+                    # Execute any tools
+                    tool_results: list[dict[str, Any]] = []
+                    for block in final_message.content:
+                        if block.type == "tool_use":
+                            # Check cancellation before each tool execution
+                            if cancel_event and cancel_event.is_set():
+                                self._last_turn_count = turn + 1
+                                yield {"type": "cancelled"}
+                                return
 
-                        # Check for loops
-                        if recent_tool_calls.count(tool_signature) >= loop_detection_threshold:
-                            self._last_turn_count = turn + 1
-                            yield {
-                                "type": "error",
-                                "message": f"Loop detected: {block.name} called repeatedly with same arguments ({recent_tool_calls.count(tool_signature)} times)",
+                            if progress_callback:
+                                progress_callback("executing_tool", turn + 1, max_turns, block.name)
+
+                            # Compute signature for dedup and loop detection
+                            tool_signature = f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
+
+                            # Check per-query cache for duplicate tool call
+                            if tool_signature in self._tool_result_cache:
+                                result = self._tool_result_cache[tool_signature]
+                                self._duplicate_tool_call_count += 1
+                            else:
+                                result = await self._execute_tool(block.name, block.input)
+                                # Truncate large tool results to prevent context overflow
+                                result = self._truncate_tool_result(result)
+                                self._tool_result_cache[tool_signature] = result
+
+                            # Check if result is an error
+                            is_error = isinstance(result, str) and result.startswith("Error:")
+
+                            tool_result: dict[str, Any] = {
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": result,
                             }
-                            return
 
-                # If no tool calls, check for grounding nudge
-                if not tool_results:
-                    # Grounding nudge: if tools are available but none were called
-                    # during the entire query, ask the model to verify (once only).
-                    # Skip if tools were already used — the answer is already grounded.
-                    if api_tools and not any_tools_called and not self._grounding_nudge_fired and current_text.strip():
-                        self._grounding_nudge_fired = True
+                            # Mark as error if it's an error message
+                            if is_error:
+                                tool_result["is_error"] = True
+
+                            tool_results.append(tool_result)
+
+                            # Track for loop detection
+                            recent_tool_calls.append(tool_signature)
+                            if len(recent_tool_calls) > max_recent_calls:
+                                recent_tool_calls.pop(0)
+
+                            # Check for loops
+                            if recent_tool_calls.count(tool_signature) >= loop_detection_threshold:
+                                self._last_turn_count = turn + 1
+                                yield {
+                                    "type": "error",
+                                    "message": f"Loop detected: {block.name} called repeatedly with same arguments ({recent_tool_calls.count(tool_signature)} times)",
+                                }
+                                return
+
+                    # If no tool calls, check for grounding nudge
+                    if not tool_results:
+                        # Grounding nudge: if tools are available but none were called
+                        # during the entire query, ask the model to verify (once only).
+                        # Skip if tools were already used — the answer is already grounded.
+                        if (
+                            api_tools
+                            and not any_tools_called
+                            and not self._grounding_nudge_fired
+                            and current_text.strip()
+                        ):
+                            self._grounding_nudge_fired = True
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        "Before I accept this answer: you have tools available but did not call any. "
+                                        "Please verify any specific factual claims (dates, statuses, counts, versions) "
+                                        "by calling the appropriate tool. If your answer is based purely on general "
+                                        "knowledge and no tool is relevant, confirm that explicitly."
+                                    ),
+                                }
+                            )
+                            continue
+
+                        if progress_callback:
+                            progress_callback("complete", turn + 1, max_turns, None)
+
+                        self._last_turn_count = turn + 1
+                        yield {"type": "done", "turns": turn + 1}
+                        return
+
+                    # Continue with tool results
+                    any_tools_called = True
+                    messages.append({"role": "user", "content": tool_results})
+
+                    # Wrap-up nudge: when approaching the turn limit, ask the agent to synthesize
+                    if not self._wrapup_nudge_fired and turn >= int(max_turns * 0.8):
+                        self._wrapup_nudge_fired = True
                         messages.append(
                             {
                                 "role": "user",
                                 "content": (
-                                    "Before I accept this answer: you have tools available but did not call any. "
-                                    "Please verify any specific factual claims (dates, statuses, counts, versions) "
-                                    "by calling the appropriate tool. If your answer is based purely on general "
-                                    "knowledge and no tool is relevant, confirm that explicitly."
+                                    "You are approaching the maximum number of tool calls allowed. "
+                                    "Please synthesize the information you have gathered so far into "
+                                    "a final answer. Do not make additional tool calls unless absolutely "
+                                    "necessary to complete the answer."
                                 ),
                             }
                         )
-                        continue
 
-                    if progress_callback:
-                        progress_callback("complete", turn + 1, max_turns, None)
-
-                    self._last_turn_count = turn + 1
-                    yield {"type": "done", "turns": turn + 1}
-                    return
-
-                # Continue with tool results
-                any_tools_called = True
-                messages.append({"role": "user", "content": tool_results})
-
-                # Wrap-up nudge: when approaching the turn limit, ask the agent to synthesize
-                if not self._wrapup_nudge_fired and turn >= int(max_turns * 0.8):
-                    self._wrapup_nudge_fired = True
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": (
-                                "You are approaching the maximum number of tool calls allowed. "
-                                "Please synthesize the information you have gathered so far into "
-                                "a final answer. Do not make additional tool calls unless absolutely "
-                                "necessary to complete the answer."
-                            ),
-                        }
-                    )
-
-        # Max turns reached
-        self._last_turn_count = max_turns
-        yield {"type": "error", "message": "Maximum turns reached without final answer"}
+            # Max turns reached
+            self._last_turn_count = max_turns
+            yield {"type": "error", "message": "Maximum turns reached without final answer"}
+        finally:
+            self._query_depth -= 1
 
     async def execute_mcp_prompt(
         self, server_name: str, prompt_name: str, arguments: dict[str, Any] | None = None, max_turns: int = 100

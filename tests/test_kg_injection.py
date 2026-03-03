@@ -339,3 +339,86 @@ class TestGetKgAutoContextSection:
         agent._current_query_text = "What is the critical production issue?"
         prompt = agent._build_system_prompt()
         assert "Relevant Context" in prompt
+
+
+class TestNoKgPrefix:
+    def test_no_kg_prefix_strips_from_query_text(self):
+        """@no-kg prefix is removed from _current_query_text"""
+        agent = _make_agent()
+        agent._apply_no_kg_prefix("@no-kg what is X")
+        assert agent._current_query_text == "what is X"
+        assert agent._no_kg is True
+
+    def test_no_prefix_keeps_query_unchanged(self):
+        agent = _make_agent()
+        agent._apply_no_kg_prefix("what is X")
+        assert agent._current_query_text == "what is X"
+
+    def test_no_prefix_preserves_existing_no_kg_flag(self):
+        """Nested calls (depth > 1) without @no-kg should not reset an outer _no_kg=True"""
+        agent = _make_agent()
+        agent._no_kg = True
+        agent._query_depth = 2  # Simulate nested call
+        agent._apply_no_kg_prefix("inner prompt without prefix")
+        assert agent._no_kg is True
+
+    def test_top_level_call_resets_no_kg(self):
+        """Top-level calls (depth <= 1) reset _no_kg so periodic tasks start clean"""
+        agent = _make_agent()
+        agent._no_kg = True
+        agent._query_depth = 1  # Top-level call
+        agent._apply_no_kg_prefix("normal prompt")
+        assert agent._no_kg is False
+
+    def test_no_kg_suppresses_learnings_section(self):
+        kg = KnowledgeGraph(":memory:")
+        kg.insert_knowledge(
+            entity_type="user_preference",
+            key="style",
+            content="Prefers detailed explanations",
+            confidence=1.0,
+        )
+        agent = _make_agent(kg=kg)
+        agent._no_kg = True
+        assert agent._get_kg_learnings_section() == ""
+
+    def test_no_kg_suppresses_auto_context_section(self):
+        kg = KnowledgeGraph(":memory:")
+        kg.insert_entity(
+            entity_type="component",
+            entity_id="openshift-4.16",
+            valid_from=datetime.now(),
+            data={"name": "OpenShift", "version": "4.16"},
+        )
+        agent = _make_agent(kg=kg)
+        agent._current_query_text = "openshift"
+        agent._no_kg = True
+        assert agent._get_kg_auto_context_section() == ""
+
+    def test_no_kg_suppresses_kg_in_system_prompt(self):
+        kg = KnowledgeGraph(":memory:")
+        kg.insert_knowledge(
+            entity_type="user_preference",
+            key="style",
+            content="Prefers detailed explanations",
+            confidence=1.0,
+        )
+        agent = _make_agent(kg=kg)
+        agent._no_kg = True
+        prompt = agent._build_system_prompt()
+        assert "Knowledge Graph" not in prompt
+        assert "What You Know" not in prompt
+
+    def test_without_no_kg_prompt_still_has_kg(self):
+        """Sanity: without @no-kg, KG is present"""
+        kg = KnowledgeGraph(":memory:")
+        kg.insert_knowledge(
+            entity_type="user_preference",
+            key="style",
+            content="Prefers detailed explanations",
+            confidence=1.0,
+        )
+        agent = _make_agent(kg=kg)
+        agent._no_kg = False
+        prompt = agent._build_system_prompt()
+        assert "Knowledge Graph" in prompt
