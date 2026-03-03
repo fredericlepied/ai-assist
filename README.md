@@ -470,9 +470,9 @@ The knowledge graph automatically stores:
 
 **Learning Reinforcement**: Synthesized knowledge from the KG is automatically injected into the system prompt:
 - **User preferences** are always present so the assistant remembers your communication style and choices
-- **Lessons learned, project context, and decision rationale** are injected when relevant to the current query (keyword-matched, sorted by freshness)
+- **Lessons learned, project context, and decision rationale** are injected when semantically relevant to the current query (matched by meaning, not just keywords)
 
-**Auto Context Injection**: When you ask a question, relevant KG entities are automatically surfaced in the system prompt based on keyword matching, giving the assistant immediate context without needing to search.
+**Auto Context Injection**: When you ask a question, relevant KG entities are automatically surfaced in the system prompt using semantic similarity, giving the assistant immediate context without needing to search.
 
 **Suppressing KG Context**: Prefix any query with `@no-kg` to suppress all KG injection (preferences, learnings, auto-context) for that single query. The model will answer without any prior KG knowledge. KG saving and synthesis remain active.
 

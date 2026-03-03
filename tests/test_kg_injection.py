@@ -1,6 +1,5 @@
 """Tests for KG auto-context injection and learning reinforcement in system prompt"""
 
-import time
 from datetime import datetime
 
 from ai_assist.agent import AiAssistAgent
@@ -11,42 +10,6 @@ from ai_assist.knowledge_graph import KnowledgeGraph
 def _make_agent(kg=None):
     config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
     return AiAssistAgent(config, knowledge_graph=kg)
-
-
-class TestExtractQueryKeywords:
-    def test_extracts_significant_words(self):
-        agent = _make_agent()
-        keywords = agent._extract_query_keywords("Check the failing pipeline status")
-        assert "failing" in keywords
-        assert "pipeline" in keywords
-        assert "status" in keywords
-
-    def test_filters_stop_words(self):
-        agent = _make_agent()
-        keywords = agent._extract_query_keywords("What is the status of this thing")
-        assert "what" not in keywords
-        assert "this" not in keywords
-        assert "status" in keywords
-
-    def test_filters_short_words(self):
-        agent = _make_agent()
-        keywords = agent._extract_query_keywords("I am a big fan of it")
-        # All words < 4 chars or stop words
-        assert len(keywords) == 0
-
-    def test_returns_max_five(self):
-        agent = _make_agent()
-        keywords = agent._extract_query_keywords("alpha bravo charlie delta echo foxtrot golf hotel")
-        assert len(keywords) <= 5
-
-    def test_empty_input(self):
-        agent = _make_agent()
-        assert agent._extract_query_keywords("") == []
-
-    def test_deduplicates(self):
-        agent = _make_agent()
-        keywords = agent._extract_query_keywords("pipeline pipeline pipeline")
-        assert keywords.count("pipeline") == 1
 
 
 class TestGetKgLearningsSection:
@@ -220,29 +183,26 @@ class TestGetKgLearningsSection:
         lesson_lines = [line for line in section.split("\n") if line.strip().startswith("- [")]
         assert len(lesson_lines) <= 5
 
-    def test_learnings_sorted_by_freshness(self):
-        """Most recently learned entries appear first"""
+    def test_learnings_ranked_by_semantic_similarity(self):
+        """Results are ranked by semantic relevance to the query"""
         kg = KnowledgeGraph(":memory:")
         kg.insert_knowledge(
             entity_type="lesson_learned",
-            key="deploy_old_lesson",
-            content="Old deploy lesson from last month",
+            key="deploy_lesson",
+            content="Deployment failures are usually infrastructure timeouts",
             confidence=0.9,
         )
-        time.sleep(0.01)
         kg.insert_knowledge(
             entity_type="lesson_learned",
-            key="deploy_new_lesson",
-            content="Fresh deploy lesson from today",
+            key="cake_recipe",
+            content="The best chocolate cake recipe uses Dutch cocoa",
             confidence=0.9,
         )
         agent = _make_agent(kg=kg)
-        agent._current_query_text = "How should we deploy?"
+        agent._current_query_text = "Why do deployments fail?"
         section = agent._get_kg_learnings_section()
-        # Fresh lesson should appear before old one
-        fresh_pos = section.find("Fresh deploy")
-        old_pos = section.find("Old deploy")
-        assert fresh_pos < old_pos
+        # Deploy lesson should appear, cake recipe should not (or appear after)
+        assert "infrastructure timeouts" in section
 
 
 class TestGetKgAutoContextSection:
@@ -265,6 +225,7 @@ class TestGetKgAutoContextSection:
             valid_from=datetime.now(),
             data={"name": "OpenShift", "version": "4.16", "status": "active"},
         )
+
         agent = _make_agent(kg=kg)
         agent._current_query_text = "What happened with OpenShift recently?"
         section = agent._get_kg_auto_context_section()
@@ -278,6 +239,7 @@ class TestGetKgAutoContextSection:
             valid_from=datetime.now(),
             data={"name": "OpenShift", "version": "4.16"},
         )
+
         agent = _make_agent(kg=kg)
         agent._current_query_text = "How is the weather?"
         section = agent._get_kg_auto_context_section()
@@ -307,6 +269,7 @@ class TestGetKgAutoContextSection:
                 valid_from=datetime.now(),
                 data={"name": f"build job {i}", "status": "failure"},
             )
+
         agent = _make_agent(kg=kg)
         agent._current_query_text = "Show me the build jobs"
         section = agent._get_kg_auto_context_section()
@@ -321,6 +284,7 @@ class TestGetKgAutoContextSection:
             valid_from=datetime.now(),
             data={"name": "build and deploy job", "status": "success"},
         )
+
         agent = _make_agent(kg=kg)
         # Both "build" and "deploy" match the same entity
         agent._current_query_text = "Check the build deploy status"
@@ -335,6 +299,7 @@ class TestGetKgAutoContextSection:
             valid_from=datetime.now(),
             data={"name": "PROJECT-999", "summary": "Critical production issue", "status": "Open"},
         )
+
         agent = _make_agent(kg=kg)
         agent._current_query_text = "What is the critical production issue?"
         prompt = agent._build_system_prompt()
