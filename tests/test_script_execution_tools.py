@@ -235,9 +235,8 @@ This skill has scripts but no allowed-tools declaration.
         "execute_skill_script", {"skill_name": "no-permission-skill", "script_name": "test.sh"}
     )
 
-    # Should be blocked - skills must explicitly opt-in via allowed-tools
-    assert "Error" in result
-    assert "not allowed to execute scripts" in result
+    # Should be allowed - user already opted in globally via allow_skill_script_execution
+    assert "Error" not in result or "not allowed" not in result
 
 
 @pytest.mark.asyncio

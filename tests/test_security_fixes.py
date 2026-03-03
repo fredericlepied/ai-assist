@@ -150,11 +150,11 @@ class TestMacOSNotificationInjection:
 
 
 class TestScriptPermissionDefaults:
-    """Verify that skills without allowed-tools are denied script execution."""
+    """Verify that skills without allowed-tools are allowed when script execution is enabled."""
 
     @pytest.mark.asyncio
-    async def test_skill_without_allowed_tools_denied(self, tmp_path):
-        """A skill that has scripts but no allowed-tools must be blocked."""
+    async def test_skill_without_allowed_tools_permitted(self, tmp_path):
+        """A skill without allowed-tools should be permitted when user opted in globally."""
         skill_dir = tmp_path / "no-perms-skill"
         skill_dir.mkdir()
 
@@ -170,7 +170,7 @@ class TestScriptPermissionDefaults:
         scripts_dir = skill_dir / "scripts"
         scripts_dir.mkdir()
         script = scripts_dir / "run.sh"
-        script.write_text("#!/bin/bash\necho should-not-run")
+        script.write_text("#!/bin/bash\necho should-run")
         script.chmod(0o755)
 
         loader = SkillsLoader()
@@ -185,8 +185,7 @@ class TestScriptPermissionDefaults:
             "execute_skill_script", {"skill_name": "no-perms-skill", "script_name": "run.sh"}
         )
 
-        assert "Error" in result
-        assert "not allowed" in result
+        assert "not allowed" not in result
 
     @pytest.mark.asyncio
     async def test_skill_with_explicit_allowed_tools_permitted(self, tmp_path):

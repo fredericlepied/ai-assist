@@ -97,6 +97,10 @@ async def test_dci_monitor_reports_failures():
 2. **Green**: Write minimal code to make the test pass
 3. **Refactor**: Clean up code while keeping tests green
 
+#### Baseline Assumption
+
+All tests are green before any change. If tests fail, your change broke them — fix it.
+
 #### Testing Guidelines
 
 - **Unit Tests**: Test individual functions and classes in isolation

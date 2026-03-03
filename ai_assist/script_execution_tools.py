@@ -160,9 +160,10 @@ class ScriptExecutionTools:
         if allowed:
             return "internal__execute_skill_script" in allowed or "*" in allowed
 
-        # If no allowed-tools declared, deny by default — skills must
-        # explicitly opt-in to script execution via allowed-tools
-        return False
+        # If no allowed-tools declared, allow script execution — the user
+        # already opted in globally via allow_skill_script_execution config.
+        # External skills (e.g. from ClawHub) typically don't include this field.
+        return True
 
     async def _execute_script_safely(self, script_path: Path, args: list[str], skill_name: str = "") -> str:
         """Execute script with security controls
