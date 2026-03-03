@@ -261,6 +261,21 @@ def test_emoji_usage_preferences():
     assert "engaging" in identity.get_system_prompt().lower()
 
 
+def test_timezone_included_in_system_prompt():
+    """Test that timezone is included in system prompt for locale inference"""
+    identity = Identity(user=UserIdentity(name="Fred", timezone="Europe/Paris"))
+    prompt = identity.get_system_prompt()
+    assert "Europe/Paris" in prompt
+    assert "locale" in prompt.lower()
+
+
+def test_no_timezone_no_locale_in_prompt():
+    """Test that no timezone info is added when timezone is not set"""
+    identity = Identity(user=UserIdentity(name="Fred"))
+    prompt = identity.get_system_prompt()
+    assert "timezone" not in prompt.lower()
+
+
 def test_combined_enhanced_features():
     """Test all enhanced features together"""
     identity = Identity(
