@@ -380,7 +380,8 @@ async def query(self, prompt: str, max_turns: int = 10) -> str:
 4. **Iterate**: Enhance incrementally while keeping tests green
 5. **Refactor**: Apply DRY principle to eliminate duplication
 6. **Document**: Update README.md and AGENTS.md
-7. **Verify**: Run `pre-commit run -a` and ensure all checks pass before declaring the feature complete
+7. **Presentation**: Update `presentation/ai-assist-presentation.tex` to reflect the new feature and verify it builds with `make -C presentation`
+8. **Verify**: Run `pre-commit run -a` and ensure all checks pass before declaring the feature complete
 
 ### Adding a New MCP Server
 

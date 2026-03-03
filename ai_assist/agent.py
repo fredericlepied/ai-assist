@@ -33,6 +33,35 @@ if TYPE_CHECKING:
 logging.getLogger("google.auth._default").setLevel(logging.ERROR)
 
 
+_CONTENT_BLOCK_KEYS = {
+    "text": {"type", "text", "citations"},
+    "tool_use": {"type", "id", "name", "input"},
+    "tool_result": {"type", "tool_use_id", "content", "is_error"},
+}
+
+
+def _serialize_content(content: list[Any]) -> list[dict[str, Any]]:
+    """Serialize SDK content blocks to plain dicts for the messages API.
+
+    The SDK uses ``extra = "allow"`` so API-returned fields like ``caller``
+    are kept on the Pydantic objects.  Passing those extra fields back causes
+    validation errors on the next API call.  We strip them here.
+    """
+    result: list[dict[str, Any]] = []
+    for block in content:
+        if hasattr(block, "model_dump"):
+            d = block.model_dump(exclude_none=True)
+        elif isinstance(block, dict):
+            d = block
+        else:
+            d = {"type": "text", "text": str(block)}
+        allowed = _CONTENT_BLOCK_KEYS.get(d.get("type", ""), None)
+        if allowed:
+            d = {k: v for k, v in d.items() if k in allowed}
+        result.append(d)
+    return result
+
+
 SYNTHESIS_PROMPT_TEMPLATE = """Review this conversation and identify learnings to save.
 
 Extract:
@@ -247,12 +276,19 @@ class AiAssistAgent:
         self.knowledge_tools: Any = None
         self.kg_query_tools: Any = None
         if self.knowledge_graph:
+            from ai_assist.embedding import EmbeddingModel
             from ai_assist.kg_query_tools import KGQueryTools
             from ai_assist.knowledge_tools import KnowledgeTools
 
             self.knowledge_tools = KnowledgeTools(self.knowledge_graph)
             self.knowledge_tools.agent = self
             self.kg_query_tools = KGQueryTools(self.knowledge_graph)
+            EmbeddingModel.preload()
+            embed_count = self.knowledge_graph.conn.execute("SELECT COUNT(*) FROM vec_embeddings").fetchone()[0]
+            total_count = self.knowledge_graph.conn.execute(
+                "SELECT COUNT(*) FROM entities WHERE tx_to IS NULL AND entity_type != 'tool_result'"
+            ).fetchone()[0]
+            print(f"✓ Vector search enabled ({embed_count}/{total_count} entities embedded)")
 
         # Track synthesis flag
         self._pending_synthesis: Any = None
@@ -920,18 +956,6 @@ class AiAssistAgent:
 
         return prompt
 
-    # Common English stop words for keyword extraction
-    _STOP_WORDS = frozenset(
-        "a an the is are was were be been being have has had do does did "
-        "will would shall should may might can could must need dare "
-        "i me my we our you your he she it they them his her its their "
-        "this that these those what which who whom how when where why "
-        "and but or nor not no if then else so for to from by with in on at of "
-        "about into through during before after above below between "
-        "all any each every some many much more most other such only own same "
-        "than too very just also still already even now here there again".split()
-    )
-
     def _apply_no_kg_prefix(self, text: str) -> str:
         """Detect @no-kg prefix, set flag, strip prefix, return clean text.
 
@@ -951,28 +975,11 @@ class AiAssistAgent:
             self._current_query_text = text
             return text
 
-    def _extract_query_keywords(self, text: str) -> list[str]:
-        """Extract significant keywords from query text for KG search"""
-        if not text:
-            return []
-        import re
-
-        words = re.findall(r"[a-zA-Z0-9_-]+", text.lower())
-        seen: set[str] = set()
-        keywords: list[str] = []
-        for w in words:
-            if len(w) >= 4 and w not in self._STOP_WORDS and w not in seen:
-                seen.add(w)
-                keywords.append(w)
-                if len(keywords) >= 5:
-                    break
-        return keywords
-
     def _get_kg_learnings_section(self) -> str:
         """Fetch synthesized learnings from KG for system prompt injection.
 
         User preferences are always injected. Lessons, project context, and
-        decision rationale are only injected when relevant to the current query.
+        decision rationale are found via semantic search on the current query.
         """
         if not self.knowledge_graph or self._no_kg:
             return ""
@@ -990,32 +997,29 @@ class AiAssistAgent:
             parts.append("## User Preferences\n" + "\n".join(pref_lines))
             logging.debug("KG injection: %d user preferences injected", len(preferences))
 
-        # Query-aware: inject lessons/context/decisions only if relevant
-        keywords = self._extract_query_keywords(self._current_query_text)
-        if keywords:
-            seen_ids: set[str] = set()
-            candidates: list[tuple[str, str, str]] = []  # (learned_at, etype, content)
-            for etype in ("lesson_learned", "project_context", "decision_rationale"):
-                for keyword in keywords:
-                    entries = self.knowledge_graph.search_knowledge(
-                        entity_type=etype,
-                        key_pattern=f"%{keyword}%",
-                        min_confidence=0.7,
-                        limit=3,
-                    )
-                    for e in entries:
-                        if e["entity_id"] not in seen_ids:
-                            seen_ids.add(e["entity_id"])
-                            candidates.append((e["learned_at"], etype, e["content"][:100]))
-            # Sort by freshness (most recently learned first) and take top 5
-            candidates.sort(key=lambda x: x[0], reverse=True)
-            query_lines = [f"- [{etype}] {content}" for _, etype, content in candidates[:5]]
-            if query_lines:
+        # Semantic search for relevant learnings
+        if self._current_query_text:
+            results = self.knowledge_graph.semantic_search(
+                self._current_query_text,
+                limit=5,
+                entity_types=["lesson_learned", "project_context", "decision_rationale"],
+                min_confidence=0.7,
+                min_score=0.2,
+            )
+            if results:
+                query_lines = [f"- [{r['entity_type']}] {r['content'][:100]}" for r in results]
                 parts.append("## Relevant Learnings\n" + "\n".join(query_lines))
+                scores = [f"{r['entity_id']}={r['score']:.3f}" for r in results]
                 logging.debug(
-                    "KG injection: %d query-aware learnings injected (keywords: %s)",
-                    len(query_lines),
-                    keywords,
+                    "KG learnings: query=%r → %d results [%s]",
+                    self._current_query_text[:60],
+                    len(results),
+                    ", ".join(scores),
+                )
+            else:
+                logging.debug(
+                    "KG learnings: query=%r → 0 results",
+                    self._current_query_text[:60],
                 )
 
         if not parts:
@@ -1033,39 +1037,30 @@ class AiAssistAgent:
         if not self.knowledge_graph or not self._current_query_text or self._no_kg:
             return ""
 
-        keywords = self._extract_query_keywords(self._current_query_text)
-        if not keywords:
-            return ""
-
         knowledge_types = {"user_preference", "lesson_learned", "project_context", "decision_rationale"}
-        seen_ids: set[str] = set()
-        candidates: list[tuple[datetime, str, str, str]] = []  # (tx_from, type, id, summary)
+        results = self.knowledge_graph.semantic_search(
+            self._current_query_text,
+            limit=15,
+            min_score=0.15,
+        )
+        context_entries = [r for r in results if r["entity_type"] not in knowledge_types][:5]
 
-        for keyword in keywords:
-            entities = self.knowledge_graph.query_as_of(datetime.now(), search_text=keyword, limit=3)
-            for entity in entities:
-                if entity.entity_type in knowledge_types:
-                    continue
-                if entity.id in seen_ids:
-                    continue
-                seen_ids.add(entity.id)
-                data = entity.data
-                summary = data.get("summary") or data.get("name") or data.get("content") or str(data)
-                if isinstance(summary, str) and len(summary) > 100:
-                    summary = summary[:100]
-                candidates.append((entity.tx_from, entity.entity_type, entity.id, summary))
-
-        # Sort by freshness (most recently learned first) and take top 5
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        context_lines = [f"- [{etype}] {eid}: {summary}" for _, etype, eid, summary in candidates[:5]]
-
-        if not context_lines:
+        if not context_entries:
             return ""
 
+        context_lines = []
+        for r in context_entries:
+            summary = r.get("content") or r.get("key") or ""
+            if len(summary) > 100:
+                summary = summary[:100]
+            context_lines.append(f"- [{r['entity_type']}] {r['entity_id']}: {summary}")
+
+        scores = [f"{r['entity_id']}={r['score']:.3f}" for r in context_entries]
         logging.debug(
-            "KG injection: %d auto-context entities injected (keywords: %s)",
-            len(context_lines),
-            keywords,
+            "KG auto-context: query=%r → %d entities [%s]",
+            self._current_query_text[:60],
+            len(context_entries),
+            ", ".join(scores),
         )
 
         section = "\n\n# Relevant Context From Knowledge Graph\n\n"
@@ -1207,7 +1202,7 @@ class AiAssistAgent:
             # Track token usage
             self._track_token_usage(response, turn)
 
-            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "assistant", "content": _serialize_content(response.content)})
 
             tool_results: list[dict[str, Any]] = []
             for block in response.content:
@@ -1467,7 +1462,7 @@ class AiAssistAgent:
                     # Track token usage
                     self._track_token_usage(final_message, turn)
 
-                    messages.append({"role": "assistant", "content": final_message.content})
+                    messages.append({"role": "assistant", "content": _serialize_content(final_message.content)})
 
                     # Yield tool use notifications with complete inputs
                     for block in final_message.content:

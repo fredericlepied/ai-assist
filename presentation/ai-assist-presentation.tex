@@ -201,7 +201,7 @@
   \node[box=rhblue, minimum width=2.8cm, below=8mm of agent.south west, anchor=north west, xshift=5mm] (mcp1)
     {MCP: DCI / Jira /\\Errata / Cases};
   \node[box=rhpurple, minimum width=2.5cm, right=5mm of mcp1] (kg)
-    {Knowledge\\Graph (SQLite)};
+    {Knowledge Graph\\(SQLite + sqlite-vec)};
   \node[box=rhgreen, minimum width=2.5cm, right=5mm of kg] (tools)
     {Internal Tools\\Reports / FS};
   \node[box=rhorange, minimum width=2.5cm, right=5mm of tools] (skills)
@@ -333,7 +333,7 @@ ai-assist
   \item Python 3.12+
   \item Claude Opus / Sonnet (Vertex AI or direct)
   \item MCP (Model Context Protocol)
-  \item SQLite (Knowledge Graph)
+  \item SQLite + sqlite-vec (Knowledge Graph)
   \item prompt-toolkit + Rich (TUI)
 \end{itemize}
 \end{column}
@@ -682,12 +682,12 @@ Skills are \alert{untrusted code} --- defense in depth:
     \item ``What was actually \textbf{true} at time X?'' \quad (valid time)
   \end{itemize}
   \item Knowledge should \textbf{grow} with every interaction
-  \item \alert{Auto-context injection}: relevant KG entities injected into each query's system prompt
+  \item \alert{Auto-context injection}: relevant KG entities injected into each query's system prompt via \textbf{semantic search} (vector embeddings)
 \end{itemize}
 
 \vfill
 \centering
-\small\color{gray} Solution: a \textbf{bi-temporal knowledge graph} stored in SQLite
+\small\color{gray} Solution: a \textbf{bi-temporal knowledge graph} stored in SQLite + \textbf{sqlite-vec} for vector search
 \end{frame}
 
 % ── Slide 12: Bi-Temporal Data Model ─────────────────────────────
@@ -741,6 +741,7 @@ Skills are \alert{untrusted code} --- defense in depth:
 \begin{itemize}\scriptsize
   \item \texttt{query\_as\_of(tx\_time)} --- ``What did we know?''
   \item \texttt{query\_valid\_at(time)} --- ``What was true?''
+  \item \texttt{semantic\_search(text)} --- vector similarity
   \item \texttt{search\_knowledge(type, query)}
 \end{itemize}
 \end{column}
@@ -829,6 +830,68 @@ Skills are \alert{untrusted code} --- defense in depth:
 \end{tikzpicture}
 \end{column}
 \end{columns}
+\end{frame}
+
+% ── Slide 15: Query Context Assembly ─────────────────────────────
+\begin{frame}[fragile]{How Query Context Is Built}
+\centering
+\begin{tikzpicture}[
+  block/.style={draw=#1, fill=#1!12, rounded corners=3pt,
+    font=\scriptsize\sffamily, minimum width=4.5cm, minimum height=0.7cm,
+    align=center},
+  data/.style={draw=#1, fill=#1!12, rounded corners=3pt,
+    font=\tiny\sffamily, minimum width=3.8cm, minimum height=0.55cm,
+    align=left, text width=3.6cm},
+  arr/.style={-{Stealth}, thick, #1},
+  lbl/.style={font=\tiny\sffamily\color{gray}, align=right},
+  scale=0.82, transform shape
+]
+  % User query at the top
+  \node[block=rhblue] (query) at (0,5.2) {User Query};
+
+  % System prompt assembly box
+  \node[draw=rhdarkgray, fill=rhdarkgray!5, rounded corners=5pt,
+    minimum width=10.5cm, minimum height=4.5cm,
+    font=\scriptsize\sffamily] (prompt) at (0,2.2) {};
+  \node[font=\scriptsize\sffamily\bfseries, anchor=north] at (prompt.north) {System Prompt Assembly};
+
+  % Components inside the prompt box - left column
+  \node[data=rhpurple] (identity) at (-2.8,3.8)
+    {1.\ \textbf{Identity} prompt\\(name, role, personality)};
+  \node[data=rhorange] (skills) at (-2.8,2.8)
+    {2.\ \textbf{Agent Skills}\\(installed SKILL.md instructions)};
+  \node[data=rhblue] (mcp) at (-2.8,1.8)
+    {3.\ \textbf{MCP servers} guidance\\(available data sources)};
+  \node[data=rhteal] (honesty) at (-2.8,0.8)
+    {4.\ \textbf{Honesty} + source citation\\+ tool result security};
+
+  % Components inside the prompt box - right column (KG-powered)
+  \node[data=rhgreen] (prefs) at (2.8,3.8)
+    {5.\ \textbf{User Preferences}\\(always injected, min conf.\ 0.5)};
+  \node[data=rhred] (learnings) at (2.8,2.8)
+    {6.\ \textbf{Relevant Learnings}\\(semantic search, top 5)};
+  \node[data=rhred] (context) at (2.8,1.8)
+    {7.\ \textbf{Auto-Context Entities}\\(semantic search, top 5)};
+
+  % KG bracket
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror},
+    thick, rhred!70!black] (5.1,1.45) -- (5.1,4.15)
+    node[midway, right=5pt, font=\tiny\sffamily, text=rhred!70!black, align=left]
+    {from KG via\\vector embeddings\\(\texttt{sqlite-vec})};
+
+  % Arrow from query to prompt
+  \draw[arr=rhblue] (query) -- (prompt)
+    node[midway, right=3pt, font=\tiny\sffamily\color{gray}] {embed query};
+
+  % Claude API at the bottom
+  \node[block=rhdarkgray] (api) at (0,-0.5) {Claude API Call};
+  \draw[arr=rhdarkgray] (prompt) -- (api);
+\end{tikzpicture}
+
+\vfill
+{\scriptsize\color{gray}
+\texttt{@no-kg} prefix suppresses steps 5--7 \quad|\quad
+KG sections are capped at 1500 chars}
 \end{frame}
 
 % ══════════════════════════════════════════════════════════════════
@@ -1104,7 +1167,7 @@ def filter_env(env):
 \begin{itemize}\small
   \item Multiple event sources (file events, DBUS, ...)
   \item System daemon for monitoring (systemd under Linux...)
-  \item Vector database for searching Knowledge
+  \item \textcolor{green!60!black}{\checkmark} Vector-based semantic search for Knowledge Graph
 \end{itemize}
 \end{column}
 \begin{column}{0.48\textwidth}

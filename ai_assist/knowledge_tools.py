@@ -102,7 +102,8 @@ Use this to check:
 
 Args:
     entity_type: Filter by type or "all" (default: "all")
-    query: Search in keys (SQL LIKE pattern, e.g., "%test%")
+    semantic_query: Natural language search (finds related concepts, not just exact matches)
+    query: Search in keys (SQL LIKE pattern, e.g., "%test%"). Use semantic_query instead when possible.
     tags: Must have these tags
     limit: Max results (default: 10)
 
@@ -111,7 +112,7 @@ Returns:
 
 Example:
     # Before suggesting a test framework:
-    search_knowledge(entity_type="user_preference", query="%test%")
+    search_knowledge(entity_type="user_preference", semantic_query="testing framework preference")
 """,
                 "input_schema": {
                     "type": "object",
@@ -127,6 +128,10 @@ Example:
                             ],
                             "description": "Filter by entity type",
                             "default": "all",
+                        },
+                        "semantic_query": {
+                            "type": "string",
+                            "description": "Natural language search text (finds related concepts)",
                         },
                         "query": {
                             "type": "string",
@@ -206,6 +211,7 @@ Example:
         elif tool_name == "search_knowledge":
             return await self.search_knowledge(
                 entity_type=arguments.get("entity_type", "all"),
+                semantic_query=arguments.get("semantic_query"),
                 query=arguments.get("query"),
                 tags=arguments.get("tags"),
                 limit=arguments.get("limit", 10),
@@ -249,6 +255,7 @@ Example:
             "decision_rationale",
             "all",
         ] = "all",
+        semantic_query: str | None = None,
         query: str | None = None,
         tags: list[str] | None = None,
         limit: int = 10,
@@ -256,7 +263,11 @@ Example:
         """Search stored knowledge"""
         type_filter = None if entity_type == "all" else entity_type
 
-        results = self.kg.search_knowledge(entity_type=type_filter, key_pattern=query, tags=tags, limit=limit)
+        if semantic_query:
+            entity_types: list[str] | None = [type_filter] if type_filter else None
+            results = self.kg.semantic_search(semantic_query, limit=limit, entity_types=entity_types)
+        else:
+            results = self.kg.search_knowledge(entity_type=type_filter, key_pattern=query, tags=tags, limit=limit)
 
         if not results:
             return json.dumps({"results": [], "count": 0})

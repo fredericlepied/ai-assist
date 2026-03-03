@@ -1,6 +1,7 @@
 """Bi-temporal knowledge graph for tracking facts and discoveries over time"""
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -131,6 +132,12 @@ class KnowledgeGraph:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
         self._batch_mode = False
+        self._backfill_done = False
+        self.conn.enable_load_extension(True)
+        import sqlite_vec
+
+        sqlite_vec.load(self.conn)
+        logging.info("sqlite-vec extension loaded for vector search")
         try:
             self.conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.OperationalError:
@@ -227,6 +234,15 @@ class KnowledgeGraph:
         """
         )
 
+        cursor.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
+                entity_id TEXT PRIMARY KEY,
+                embedding float[384]
+            )
+        """
+        )
+
         self.conn.commit()
 
     def _maybe_commit(self):
@@ -304,6 +320,9 @@ class KnowledgeGraph:
                 json.dumps(entity.data),
             ),
         )
+        if entity.entity_type != "tool_result":
+            text = self._entity_text_repr(entity.entity_type, entity.data)
+            self._embed_and_store(entity.id, text)
         self._maybe_commit()
 
         return entity
@@ -368,6 +387,9 @@ class KnowledgeGraph:
                 json.dumps(entity.data),
             ),
         )
+        if entity.entity_type != "tool_result":
+            text = self._entity_text_repr(entity.entity_type, entity.data)
+            self._embed_and_store(entity.id, text)
         self._maybe_commit()
 
         return entity
@@ -725,8 +747,11 @@ class KnowledgeGraph:
             """,
                 (json.dumps(data), valid_from.isoformat(), now.isoformat(), entity_id),
             )
+            text = self._entity_text_repr(entity_type, data)
+            self._embed_and_store(entity_id, text)
             self._maybe_commit()
         else:
+            # insert_entity already handles embedding for non-tool_result types
             self.insert_entity(entity_id=entity_id, entity_type=entity_type, data=data, valid_from=valid_from)
 
         return entity_id
@@ -871,6 +896,174 @@ class KnowledgeGraph:
         cursor = self.conn.cursor()
         cursor.execute("SELECT * FROM relationships WHERE tx_to IS NULL")
         return [Relationship.from_row(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def _entity_text_repr(entity_type: str, data: dict[str, Any]) -> str:
+        """Build text representation of an entity for embedding."""
+        if "key" in data and "content" in data:
+            return f"{data['key']}: {data['content']}"
+        summary = data.get("summary") or data.get("name") or data.get("content")
+        if summary:
+            return f"{entity_type}: {summary}"
+        return f"{entity_type}: {json.dumps(data)[:200]}"
+
+    def _embed_and_store(self, entity_id: str, text: str) -> None:
+        """Embed text and store the vector alongside the entity.
+
+        Does not commit -- the caller is responsible for calling _maybe_commit().
+        Failures are logged and silently ignored so entity insertion is never
+        blocked by embedding issues (e.g. model not yet downloaded).
+        """
+        try:
+            from .embedding import EmbeddingModel
+
+            vec_bytes = EmbeddingModel.get().encode_one(text)
+            self.conn.execute("DELETE FROM vec_embeddings WHERE entity_id = ?", (entity_id,))
+            self.conn.execute(
+                "INSERT INTO vec_embeddings(entity_id, embedding) VALUES (?, ?)",
+                (entity_id, vec_bytes),
+            )
+        except Exception as e:
+            logging.debug("Embedding failed for %s, will be backfilled later: %s", entity_id, e)
+
+    def semantic_search(
+        self,
+        query_text: str,
+        limit: int = 5,
+        entity_types: list[str] | None = None,
+        min_confidence: float = 0.0,
+        min_score: float = 0.0,
+    ) -> list[dict]:
+        """Search entities by semantic similarity to query text."""
+        from .embedding import EmbeddingModel
+
+        if not self._backfill_done:
+            self._backfill_done = True
+            self.backfill_embeddings()
+
+        # Check if there are any embeddings
+        count = self.conn.execute("SELECT COUNT(*) FROM vec_embeddings").fetchone()[0]
+        if count == 0:
+            return []
+
+        try:
+            query_vec = EmbeddingModel.get().encode_one(query_text)
+        except Exception as e:
+            logging.debug("Embedding model unavailable for search: %s", e)
+            return []
+
+        over_fetch = limit * 3
+        rows = self.conn.execute(
+            """
+            SELECT v.entity_id, v.distance, e.entity_type, e.data, e.valid_from, e.tx_from
+            FROM vec_embeddings v
+            JOIN entities e ON v.entity_id = e.id
+            WHERE v.embedding MATCH ? AND k = ?
+            AND e.tx_to IS NULL
+            ORDER BY v.distance
+            """,
+            (query_vec, over_fetch),
+        ).fetchall()
+
+        results: list[dict] = []
+        skipped_type = 0
+        skipped_conf = 0
+        skipped_score = 0
+        for row in rows:
+            entity_id, distance, entity_type, data_json, valid_from, tx_from = row
+            # Convert L2 distance to similarity score (0-1) for normalized vectors
+            score = max(0.0, 1.0 - distance * distance / 2.0)
+            if entity_types and entity_type not in entity_types:
+                skipped_type += 1
+                continue
+            data = json.loads(data_json)
+            conf = data.get("metadata", {}).get("confidence", 1.0)
+            if isinstance(conf, str):
+                try:
+                    conf = float(conf)
+                except (ValueError, TypeError):
+                    conf = 1.0
+            if conf < min_confidence:
+                skipped_conf += 1
+                logging.debug(
+                    "semantic_search: skip %s (conf=%.2f < %.2f, score=%.3f)",
+                    entity_id,
+                    conf,
+                    min_confidence,
+                    score,
+                )
+                continue
+            if score < min_score:
+                skipped_score += 1
+                logging.debug(
+                    "semantic_search: skip %s (score=%.3f < %.2f)",
+                    entity_id,
+                    score,
+                    min_score,
+                )
+                continue
+            logging.debug(
+                "semantic_search: match %s [%s] score=%.3f conf=%.2f",
+                entity_id,
+                entity_type,
+                score,
+                conf,
+            )
+            results.append(
+                {
+                    "entity_id": entity_id,
+                    "entity_type": entity_type,
+                    "key": data.get("key"),
+                    "content": data.get("content"),
+                    "metadata": data.get("metadata", {}),
+                    "valid_from": valid_from,
+                    "learned_at": tx_from,
+                    "score": score,
+                }
+            )
+            if len(results) >= limit:
+                break
+        logging.debug(
+            "semantic_search: query=%r candidates=%d matched=%d " "skipped(type=%d conf=%d score=%d)",
+            query_text[:80],
+            len(rows),
+            len(results),
+            skipped_type,
+            skipped_conf,
+            skipped_score,
+        )
+        return results
+
+    def backfill_embeddings(self) -> int:
+        """Populate vector embeddings for entities that don't have them yet.
+
+        Skips tool_result entities (high-frequency JSON blobs not useful for
+        text embedding).  Called automatically at startup to migrate
+        pre-existing KG databases.
+
+        Returns:
+            Number of entities backfilled.
+        """
+        cursor = self.conn.execute(
+            """
+            SELECT e.id, e.entity_type, e.data
+            FROM entities e
+            LEFT JOIN vec_embeddings v ON e.id = v.entity_id
+            WHERE e.tx_to IS NULL AND v.entity_id IS NULL
+            AND e.entity_type != 'tool_result'
+            """
+        )
+        count = 0
+        for row in cursor.fetchall():
+            entity_id, entity_type, data_json = row
+            data = json.loads(data_json)
+            text = self._entity_text_repr(entity_type, data)
+            self._embed_and_store(entity_id, text)
+            count += 1
+        if count:
+            self.conn.commit()
+            logging.info("Backfilled embeddings for %d entities", count)
+        return count
 
     def close(self):
         """Close the database connection"""
