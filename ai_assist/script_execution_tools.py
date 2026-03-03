@@ -131,8 +131,10 @@ class ScriptExecutionTools:
         skill_dir = skill.metadata.skill_path.resolve()
         script_resolved = script_path.resolve()
 
-        if not str(script_resolved).startswith(str(skill_dir)):
-            raise ValueError("Path traversal attempt blocked")
+        try:
+            script_resolved.relative_to(skill_dir)
+        except ValueError:
+            raise ValueError("Path traversal attempt blocked") from None
 
         if not script_path.exists():
             raise ValueError(f"Script file not found: {script_path}")
@@ -158,9 +160,9 @@ class ScriptExecutionTools:
         if allowed:
             return "internal__execute_skill_script" in allowed or "*" in allowed
 
-        # If no allowed-tools declared but skill has scripts, allow execution
-        # (since global script execution is already enabled if we got here)
-        return bool(skill.scripts)
+        # If no allowed-tools declared, deny by default — skills must
+        # explicitly opt-in to script execution via allowed-tools
+        return False
 
     async def _execute_script_safely(self, script_path: Path, args: list[str], skill_name: str = "") -> str:
         """Execute script with security controls
