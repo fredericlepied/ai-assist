@@ -154,11 +154,33 @@ class ReportTools:
         else:
             raise ValueError(f"Unknown report tool: {tool_name}")
 
+    def _validate_report_path(self, report_file: Path) -> str | None:
+        """Validate that a report path is within the reports directory.
+
+        Returns:
+            Error message if path escapes reports_dir, None if valid.
+        """
+        try:
+            report_file.resolve().relative_to(self.reports_dir.resolve())
+            return None
+        except ValueError:
+            return "Error: Invalid report name (path traversal blocked)"
+
     def _resolve_report_file(self, name: str, fmt: str | None = None) -> Path | str:
         if fmt:
             if fmt not in SUPPORTED_FORMATS:
                 return f"Unsupported format '{fmt}'. Supported: {', '.join(FORMAT_ENUM)}"
-            return self.reports_dir / f"{name}{SUPPORTED_FORMATS[fmt]}"
+            path = self.reports_dir / f"{name}{SUPPORTED_FORMATS[fmt]}"
+            error = self._validate_report_path(path)
+            if error:
+                return error
+            return path
+
+        # Validate path before scanning (catches traversal in auto-detect mode)
+        sample_path = self.reports_dir / f"{name}.md"
+        error = self._validate_report_path(sample_path)
+        if error:
+            return error
 
         matches = []
         for fmt_key, ext in SUPPORTED_FORMATS.items():
@@ -194,6 +216,9 @@ class ReportTools:
 
         ext = SUPPORTED_FORMATS[fmt]
         report_file = self.reports_dir / f"{name}{ext}"
+        error = self._validate_report_path(report_file)
+        if error:
+            return error
 
         if fmt == "md":
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -215,6 +240,9 @@ class ReportTools:
 
         ext = SUPPORTED_FORMATS[fmt]
         report_file = self.reports_dir / f"{name}{ext}"
+        error = self._validate_report_path(report_file)
+        if error:
+            return error
 
         if fmt == "md":
             if not report_file.exists():

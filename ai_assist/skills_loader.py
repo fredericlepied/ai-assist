@@ -219,6 +219,11 @@ class SkillsLoader:
         skill_cache_dir.mkdir(parents=True, exist_ok=True)
 
         with zipfile.ZipFile(io.BytesIO(download_resp.content)) as zf:
+            # Validate all members to prevent zip slip (path traversal)
+            for member in zf.namelist():
+                target = (skill_cache_dir / member).resolve()
+                if not target.is_relative_to(skill_cache_dir.resolve()):
+                    raise ValueError(f"Zip slip detected in skill archive: {member}")
             zf.extractall(skill_cache_dir)
 
         return self.load_skill_from_local(skill_cache_dir, source_type="clawhub")

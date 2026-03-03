@@ -140,9 +140,12 @@ class DesktopNotificationChannel:
             if len(message) > max_length:
                 message = message[:max_length] + "..."
 
-            # Escape quotes in message for AppleScript
-            message = message.replace('"', '\\"')
-            title = notification.title.replace('"', '\\"')
+            # Escape for AppleScript string literals: backslashes first, then quotes
+            message = message.replace("\\", "\\\\").replace('"', '\\"')
+            title = notification.title.replace("\\", "\\\\").replace('"', '\\"')
+            # Strip control characters that could break AppleScript parsing
+            message = "".join(c for c in message if c >= " " or c in "\t")
+            title = "".join(c for c in title if c >= " " or c in "\t")
 
             subprocess.run(["osascript", "-e", f'display notification "{message}" with title "{title}"'], check=True)
             return True
