@@ -120,6 +120,10 @@ class Identity(BaseModel):
             elif self.preferences.formality == "friendly":
                 prompt += " You are warm and approachable in your communication."
 
+        # Add user timezone/locale context
+        if self.user.timezone:
+            prompt += f"\n\nThe user's timezone is {self.user.timezone}. Use this to infer their locale and language preferences (e.g. for web searches, date formats)."
+
         # Add user context (team structure, priorities, etc.)
         if self.user.context:
             prompt += f"\n\nContext: {self.user.context}"

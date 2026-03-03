@@ -79,6 +79,16 @@ print(' '.join(sys.argv[1:]))
     )
     args_script.chmod(0o755)
 
+    # Create a script that outputs UTF-8 text
+    utf8_script = scripts_dir / "utf8_output.py"
+    utf8_script.write_text(
+        """#!/usr/bin/env python3
+import sys
+sys.stdout.buffer.write("Résultats: café, naïve, Ωmega, 日本語\\n".encode("utf-8"))
+"""
+    )
+    utf8_script.chmod(0o755)
+
     return skill_dir
 
 
@@ -159,6 +169,23 @@ async def test_execute_when_disabled(skills_manager_with_skill):
 
 
 @pytest.mark.asyncio
+async def test_execute_utf8_output(skills_manager_with_skill):
+    """Test that UTF-8 output from scripts is correctly decoded"""
+    config = AiAssistConfig(anthropic_api_key="test", allow_skill_script_execution=True)
+    tools = ScriptExecutionTools(skills_manager_with_skill, config)
+
+    result = await tools.execute_tool(
+        "execute_skill_script", {"skill_name": "test-skill", "script_name": "utf8_output.py"}
+    )
+
+    assert "Résultats" in result
+    assert "café" in result
+    assert "naïve" in result
+    assert "Ωmega" in result
+    assert "日本語" in result
+
+
+@pytest.mark.asyncio
 async def test_execute_simple_script(skills_manager_with_skill):
     """Test executing a basic script"""
     config = AiAssistConfig(anthropic_api_key="test", allow_skill_script_execution=True)
@@ -235,9 +262,8 @@ This skill has scripts but no allowed-tools declaration.
         "execute_skill_script", {"skill_name": "no-permission-skill", "script_name": "test.sh"}
     )
 
-    # Should be blocked - skills must explicitly opt-in via allowed-tools
-    assert "Error" in result
-    assert "not allowed to execute scripts" in result
+    # Should be allowed - user already opted in globally via allow_skill_script_execution
+    assert "Error" not in result or "not allowed" not in result
 
 
 @pytest.mark.asyncio

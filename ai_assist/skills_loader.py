@@ -285,12 +285,13 @@ class SkillsLoader:
 
         lines = [f"skills.sh results for '{query}':\n"]
         for skill in results:
-            source = skill.get("source", skill.get("id", ""))
+            skill_id = skill.get("id", "")
+            source = skill.get("source", skill_id)
             installs = skill.get("installs", 0)
             installs_str = f"  ({installs} installs)" if installs else ""
             lines.append(f"  {skill['name']}{installs_str}")
             lines.append(f"    Source: {source}")
-            lines.append(f"    Install: /skill/install {source}")
+            lines.append(f"    Install: /skill/install {skill_id}")
             lines.append("")
 
         return "\n".join(lines)

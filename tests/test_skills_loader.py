@@ -321,7 +321,9 @@ def test_search_skills_sh():
     assert "weather" in result
     assert "steipete/clawdis" in result
     assert "117" in result
-    assert "/skill/install" in result
+    # Install command must use the full skill id (org/repo/skill), not just source (org/repo)
+    assert "/skill/install steipete/clawdis/weather" in result
+    assert "/skill/install vikiboss/60s-skills/weather-query" in result
 
 
 def test_search_skills_sh_no_results():
