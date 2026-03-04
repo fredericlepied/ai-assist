@@ -7,7 +7,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from ai_assist.file_watchdog import FileWatchdog
+from ai_assist.file_watchdog import FileWatchdog, _shared_observers
+
+
+@pytest.fixture(autouse=True)
+def _clean_shared_observers():
+    """Ensure shared observer state is clean between tests."""
+    _shared_observers.clear()
+    yield
+    _shared_observers.clear()
 
 
 @pytest.mark.asyncio
@@ -168,3 +176,47 @@ async def test_custom_debounce_time():
         await watchdog.stop()
 
         assert callback.call_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_multiple_watchers_same_directory():
+    """Test that multiple watchers on the same directory share one Observer."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        file_a = Path(tmpdir) / "a.json"
+        file_b = Path(tmpdir) / "b.json"
+        file_a.write_text("a1")
+        file_b.write_text("b1")
+
+        callback_a = AsyncMock()
+        callback_b = AsyncMock()
+        watcher_a = FileWatchdog(file_a, callback_a, debounce_seconds=0.1)
+        watcher_b = FileWatchdog(file_b, callback_b, debounce_seconds=0.1)
+
+        # Starting both must not raise (macOS FSEvents would error without sharing)
+        await watcher_a.start()
+        await watcher_b.start()
+        await asyncio.sleep(0.2)
+
+        # Shared observer: one entry for this directory
+        assert len(_shared_observers) == 1
+
+        # Modify only file_a
+        file_a.write_text("a2")
+        await asyncio.sleep(0.3)
+
+        assert callback_a.call_count >= 1
+        assert callback_b.call_count == 0
+
+        # Modify only file_b
+        file_b.write_text("b2")
+        await asyncio.sleep(0.3)
+
+        assert callback_b.call_count >= 1
+
+        await watcher_a.stop()
+        # Observer still alive for watcher_b
+        assert tmpdir in str(list(_shared_observers.keys()))
+
+        await watcher_b.stop()
+        # Observer released
+        assert len(_shared_observers) == 0
