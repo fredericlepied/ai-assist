@@ -2,6 +2,9 @@
 
 This module provides efficient file watching using OS-level events
 (inotify on Linux, FSEvents on macOS, ReadDirectoryChanges on Windows).
+
+A single Observer is shared per watched directory to avoid FSEvents
+errors on macOS where the same path cannot be scheduled twice.
 """
 
 import asyncio
@@ -15,6 +18,35 @@ from watchdog.observers import Observer
 
 logger = logging.getLogger(__name__)
 
+# Shared observers per directory to avoid macOS FSEvents "already scheduled" errors
+_shared_observers: dict[str, tuple[Any, int]] = {}  # path -> (observer, refcount)
+
+
+def _get_shared_observer(watch_path: str) -> Any:
+    """Get or create a shared Observer for a directory."""
+    if watch_path in _shared_observers:
+        observer, refcount = _shared_observers[watch_path]
+        _shared_observers[watch_path] = (observer, refcount + 1)
+        return observer
+
+    observer = Observer()
+    _shared_observers[watch_path] = (observer, 1)
+    return observer
+
+
+def _release_shared_observer(watch_path: str) -> None:
+    """Release a reference to a shared Observer, stopping it when no longer needed."""
+    if watch_path not in _shared_observers:
+        return
+
+    observer, refcount = _shared_observers[watch_path]
+    if refcount <= 1:
+        observer.stop()
+        observer.join(timeout=2.0)
+        del _shared_observers[watch_path]
+    else:
+        _shared_observers[watch_path] = (observer, refcount - 1)
+
 
 class FileWatchdog:
     """Watches a specific file for modifications using OS-level events.
@@ -22,6 +54,9 @@ class FileWatchdog:
     Uses the watchdog library for efficient, kernel-level file change
     detection. Includes debouncing to avoid triggering callbacks for
     rapid successive changes.
+
+    Multiple FileWatchdog instances watching files in the same directory
+    share a single Observer to avoid macOS FSEvents errors.
 
     Attributes:
         file_path: Path to the file to watch
@@ -47,7 +82,7 @@ class FileWatchdog:
         self.callback = callback
         self.debounce_seconds = debounce_seconds
 
-        self._observer: Any = None
+        self._watch_path: str | None = None
         self._handler: _DebounceHandler | None = None
         self._running = False
 
@@ -69,21 +104,23 @@ class FileWatchdog:
             loop=loop,
         )
 
-        # Create and start observer
-        self._observer = Observer()
-        watch_path = self.file_path.parent
-        self._observer.schedule(self._handler, str(watch_path), recursive=False)
-        try:
-            self._observer.start()
-        except OSError:
-            logger.warning(
-                "Failed to start file watcher for %s (inotify limit reached). "
-                "File change detection disabled for this path.",
-                self.file_path,
-            )
-            self._observer = None
-            self._handler = None
-            self._running = False
+        # Get or create shared observer for this directory
+        self._watch_path = str(self.file_path.parent)
+        observer = _get_shared_observer(self._watch_path)
+        observer.schedule(self._handler, self._watch_path, recursive=False)
+        if not observer.is_alive():
+            try:
+                observer.start()
+            except OSError:
+                logger.warning(
+                    "Failed to start file watcher for %s (inotify limit reached). "
+                    "File change detection disabled for this path.",
+                    self.file_path,
+                )
+                _release_shared_observer(self._watch_path)
+                self._watch_path = None
+                self._handler = None
+                self._running = False
 
     async def stop(self) -> None:
         """Stop watching the file."""
@@ -96,12 +133,10 @@ class FileWatchdog:
         if self._handler:
             await self._handler.cancel_pending()
 
-        # Stop observer
-        observer = self._observer
-        if observer:
-            observer.stop()
-            observer.join(timeout=2.0)
-            self._observer = None
+        # Release shared observer
+        if self._watch_path:
+            _release_shared_observer(self._watch_path)
+            self._watch_path = None
             self._handler = None
 
 

@@ -74,8 +74,8 @@ export ANTHROPIC_API_KEY='sk-ant-...'  # Get from console.anthropic.com
 Customize the assistant's personality and communication style:
 
 ```bash
-ai-assist /identity-init  # Create template
-ai-assist /identity-show  # View current settings
+uv run ai-assist /identity-init  # Create template
+uv run ai-assist /identity-show  # View current settings
 ```
 
 Edit `~/.ai-assist/identity.yaml` to configure:
@@ -93,9 +93,9 @@ Edit `~/.ai-assist/identity.yaml` to configure:
 Chat with the assistant using a rich terminal interface:
 
 ```bash
-ai-assist /interactive
+uv run ai-assist /interactive
 # or simply
-ai-assist
+uv run ai-assist
 ```
 
 **Features:**
@@ -201,7 +201,7 @@ description: My custom skill
 When the user asks for X, do Y...
 EOF
 
-ai-assist
+uv run ai-assist
 You> /skill/install /path/to/my-skill@main
 ```
 
@@ -214,7 +214,7 @@ Skills can include executable scripts in a `scripts/` directory. **Script execut
 **Enable script execution:**
 ```bash
 export AI_ASSIST_ALLOW_SCRIPT_EXECUTION=true
-ai-assist
+uv run ai-assist
 ```
 
 **Security requirements:**
@@ -252,7 +252,7 @@ For complex tasks that exceed the standard 200K token context, the agent can act
 
 ```bash
 export AI_ASSIST_ALLOW_EXTENDED_CONTEXT=true
-ai-assist
+uv run ai-assist
 ```
 
 When enabled, the agent monitors token usage and automatically activates the extended context only when approaching the 200K limit. Supported on Opus 4.6, Sonnet 4.6, Sonnet 4.5, and Sonnet 4.
@@ -262,7 +262,7 @@ When enabled, the agent monitors token usage and automatically activates the ext
 Run periodic monitoring with automated checks:
 
 ```bash
-ai-assist /monitor
+uv run ai-assist /monitor
 ```
 
 - Runs monitors and tasks from `~/.ai-assist/schedules.json`
@@ -274,7 +274,7 @@ ai-assist /monitor
 
 **Create monitors via interactive mode:**
 ```bash
-ai-assist
+uv run ai-assist
 You: Create a monitor to check for failed DCI jobs every 5 minutes
 ```
 
@@ -316,7 +316,7 @@ When `notify` is true, you'll receive notifications on task completion via:
 Schedule one-time future actions that execute automatically with notifications:
 
 ```bash
-ai-assist /interactive
+uv run ai-assist /interactive
 You: Remind me in 2 hours to check the DCI job status for job-456
 ```
 
@@ -358,7 +358,7 @@ Completed and failed actions older than 7 days are automatically archived to `~/
 
 ```bash
 # Manual cleanup
-ai-assist /cleanup-actions
+uv run ai-assist /cleanup-actions
 
 # View archive
 cat ~/.ai-assist/scheduled-actions-archive.jsonl | jq
@@ -370,7 +370,7 @@ cat ~/.ai-assist/scheduled-actions-archive.jsonl | jq
 
 **⚠️ Important:** The `/monitor` process must be running for scheduled actions to execute:
 ```bash
-ai-assist /monitor  # Keep running in background
+uv run ai-assist /monitor  # Keep running in background
 ```
 
 #### MCP Prompts in Tasks
@@ -417,7 +417,7 @@ Execute MCP prompts directly from periodic tasks for consistent, automated workf
 
 **Creating via Interactive Mode:**
 ```bash
-ai-assist /interactive
+uv run ai-assist /interactive
 
 # Natural language task
 You: Create a task to check for failures every hour
@@ -429,7 +429,7 @@ You: Create a task named "Weekly Report" that runs mcp://tpci/weekly_report
 
 **Discovery:**
 ```bash
-ai-assist /interactive
+uv run ai-assist /interactive
 
 # List all prompts with their arguments
 /prompts
@@ -443,7 +443,7 @@ See `.ai-assist/schedules.json.example` for complete examples.
 ### One-off Queries
 
 ```bash
-ai-assist /query "What are the top 5 failing DCI jobs today?"
+uv run ai-assist /query "What are the top 5 failing DCI jobs today?"
 ```
 
 ### Knowledge Graph
@@ -451,12 +451,12 @@ ai-assist /query "What are the top 5 failing DCI jobs today?"
 Query temporal data and track changes:
 
 ```bash
-ai-assist /kg-stats              # View statistics
-ai-assist /kg-changes 24         # Changes in last 24 hours
-ai-assist /kg-asof '2026-02-04'  # Historical state
-ai-assist /kg-show <id>          # Entity details
-ai-assist /kg-viz                # Visualize graph in browser
-ai-assist /kg-late 60            # Late discoveries (>60 min lag)
+uv run ai-assist /kg-stats              # View statistics
+uv run ai-assist /kg-changes 24         # Changes in last 24 hours
+uv run ai-assist /kg-asof '2026-02-04'  # Historical state
+uv run ai-assist /kg-show <id>          # Entity details
+uv run ai-assist /kg-viz                # Visualize graph in browser
+uv run ai-assist /kg-late 60            # Late discoveries (>60 min lag)
 ```
 
 The knowledge graph automatically stores:
@@ -587,10 +587,10 @@ Use the `--dev` flag to enable automatic process restart when Python code change
 
 ```bash
 # Monitor mode with code watching
-ai-assist --dev /monitor
+uv run ai-assist --dev /monitor
 
 # Interactive mode with code watching
-ai-assist --dev /interactive
+uv run ai-assist --dev /interactive
 ```
 
 This is useful during development to see code changes immediately.
