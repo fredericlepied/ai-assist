@@ -23,6 +23,7 @@ from .script_execution_tools import ScriptExecutionTools
 from .security import ToolDefinitionRegistry, sanitize_tool_result, validate_tool_description
 from .skills_loader import SkillsLoader
 from .skills_manager import SkillsManager
+from .think_tool import ThinkTool
 
 if TYPE_CHECKING:
     from .context import ConversationMemory
@@ -226,6 +227,9 @@ class AiAssistAgent:
         # Initialize script execution tools for Agent Skills
         self.script_execution_tools = ScriptExecutionTools(self.skills_manager, config)
 
+        # Initialize think tool (planning/reasoning scratchpad)
+        self.think_tool = ThinkTool()
+
         self.anthropic: Anthropic | AnthropicVertex
         if config.use_vertex:
             vertex_kwargs: dict[str, Any] = {"project_id": config.vertex_project_id}
@@ -410,6 +414,10 @@ class AiAssistAgent:
         if script_tool_defs:
             self.available_tools.extend(script_tool_defs)
             print(f"✓ Added {len(script_tool_defs)} script execution tools (SECURITY: enabled)")
+
+        # Add think tool (planning/reasoning scratchpad)
+        think_tool_defs = self.think_tool.get_tool_definitions()
+        self.available_tools.extend(think_tool_defs)
 
         # Load installed skills
         self.skills_manager.load_installed_skills()
@@ -915,6 +923,13 @@ class AiAssistAgent:
         prompt = identity_prompt
         if skills_section:
             prompt += f"\n\n{skills_section}"
+
+        # Add planning guidance
+        prompt += "\n\n# Planning\n\n"
+        prompt += (
+            "For complex tasks requiring multiple tool calls, use internal__think to plan your approach before acting. "
+        )
+        prompt += "Break the task into steps, then execute them. Use internal__think again to track progress or revise your plan based on intermediate results.\n"
 
         # Add MCP tools guidance
         mcp_servers = list(self.sessions.keys())
@@ -1822,6 +1837,7 @@ class AiAssistAgent:
                 ]
 
                 script_tools = ["execute_skill_script"]
+                think_tools = ["think"]
                 schedule_action_tools = ["schedule_action"]
                 knowledge_tools = ["save_knowledge", "search_knowledge", "trigger_synthesis"]
                 kg_query_tool_names = [
@@ -1849,6 +1865,8 @@ class AiAssistAgent:
                             tool_name,
                             ", ".join(injection_warnings),
                         )
+                elif original_tool_name in think_tools:
+                    result_text = await self.think_tool.execute_tool(original_tool_name, arguments)
                 elif original_tool_name in schedule_action_tools:
                     result_text = await self.schedule_action_tools.execute_tool(
                         f"internal__{original_tool_name}", arguments

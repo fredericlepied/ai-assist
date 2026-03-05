@@ -233,7 +233,13 @@ async def query_with_feedback(
 
                         # Display arguments if present
                         if chunk.get("input"):
-                            console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
+                            if chunk["name"] == "internal__think":
+                                # Show full thought without truncation
+                                thought = chunk["input"].get("thought", "")
+                                for line in thought.splitlines():
+                                    console.print(f"[dim]   {line}[/dim]")
+                            else:
+                                console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
                         if not response_started:
                             live.update(create_feedback_display())  # Keep spinner going
 
@@ -636,7 +642,12 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                 display_name = format_tool_display_name(chunk["name"])
                 console.print(f"\n[dim]  🔧 {display_name}[/dim]")
                 if chunk.get("input"):
-                    console.print(f"[dim]     {format_tool_args(chunk['input'])}[/dim]")
+                    if chunk["name"] == "internal__think":
+                        thought = chunk["input"].get("thought", "")
+                        for line in thought.splitlines():
+                            console.print(f"[dim]     {line}[/dim]")
+                    else:
+                        console.print(f"[dim]     {format_tool_args(chunk['input'])}[/dim]")
             elif chunk.get("type") == "error":
                 console.print(f"\n[red]  {chunk.get('message')}[/red]")
 
@@ -812,7 +823,12 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
                                             # Display arguments if present
                                             if chunk.get("input"):
-                                                console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
+                                                if chunk["name"] == "internal__think":
+                                                    thought = chunk["input"].get("thought", "")
+                                                    for line in thought.splitlines():
+                                                        console.print(f"[dim]   {line}[/dim]")
+                                                else:
+                                                    console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
                                         elif chunk.get("type") == "cancelled":
                                             if response_started:
                                                 console.print()
