@@ -148,7 +148,7 @@ async def query_with_feedback(
     feedback_state = {"status": "Starting...", "turn": 0, "max_turns": 50, "tool": None, "streaming": False}
 
     def progress_callback(status: str, turn: int, max_turns: int, tool_name: str | None):
-        """Update feedback state"""
+        """Update feedback state and refresh the spinner display"""
         feedback_state["turn"] = turn
         feedback_state["max_turns"] = max_turns
         feedback_state["tool"] = tool_name
@@ -166,6 +166,9 @@ async def query_with_feedback(
         elif status == "complete":
             feedback_state["status"] = "✨ Complete!"
             feedback_state["streaming"] = False
+
+        # Push updated spinner to the Live widget
+        live.update(create_feedback_display())
 
     def create_feedback_display():
         """Create the feedback display"""
@@ -225,8 +228,10 @@ async def query_with_feedback(
                 # Handle tool use notifications
                 elif isinstance(chunk, dict):
                     if chunk.get("type") == "tool_use":
-                        # Show tool call inline
-                        if response_started:
+                        # Stop spinner before printing to avoid display corruption
+                        if not response_started:
+                            live.stop()
+                        else:
                             console.print()  # New line before tool notification
                         display_name = format_tool_display_name(chunk["name"])
                         console.print(f"\n[dim]🔧 {display_name}[/dim]")
@@ -241,7 +246,8 @@ async def query_with_feedback(
                             else:
                                 console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
                         if not response_started:
-                            live.update(create_feedback_display())  # Keep spinner going
+                            live.update(create_feedback_display())
+                            live.start()
 
                     elif chunk.get("type") == "cancelled":
                         if response_started:
@@ -635,8 +641,14 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
     # Hook inner execution callback for MCP prompt visibility
     def on_inner_execution(chunk):
+        # Stop Live spinner before printing to avoid display corruption
+        live = agent._active_live
+        live_was_running = live and live._started
+        if live_was_running:
+            live.stop()
+
         if isinstance(chunk, str):
-            console.print(chunk, end="")
+            console.print(chunk, end="", markup=False)
         elif isinstance(chunk, dict):
             if chunk.get("type") == "tool_use":
                 display_name = format_tool_display_name(chunk["name"])
@@ -650,6 +662,10 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                         console.print(f"[dim]     {format_tool_args(chunk['input'])}[/dim]")
             elif chunk.get("type") == "error":
                 console.print(f"\n[red]  {chunk.get('message')}[/red]")
+
+        # Restart spinner
+        if live_was_running:
+            live.start()
 
     agent.on_inner_execution = on_inner_execution
 

@@ -12,13 +12,19 @@ def format_tool_display_name(tool_name: str) -> str:
 
 
 def format_tool_args(input_dict: dict, max_len: int = 100) -> str:
-    """Format tool arguments for display, truncating long values."""
+    """Format tool arguments for display, truncating long values.
+
+    Escapes Rich markup and collapses newlines so console.print
+    renders the text literally instead of interpreting markdown.
+    """
+    from rich.markup import escape
+
     args_display = []
     for key, value in input_dict.items():
-        value_str = str(value)
+        value_str = str(value).replace("\n", " ").replace("\r", "")
         if len(value_str) > max_len:
             value_str = value_str[:max_len] + "..."
-        args_display.append(f"{key}={value_str}")
+        args_display.append(f"{key}={escape(value_str)}")
     return ", ".join(args_display)
 
 
