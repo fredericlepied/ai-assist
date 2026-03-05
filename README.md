@@ -499,6 +499,9 @@ Reports are stored in `~/ai-reports/` (configurable via `AI_ASSIST_REPORTS_DIR`)
 
 Schedules stored in `~/.ai-assist/schedules.json` with hot-reload support.
 
+**Planning:**
+- `think` - Planning and reasoning scratchpad for complex multi-step tasks
+
 **Filesystem Tools:**
 - `read_file` - Read files with line-range support
 - `search_in_file` - Regex search in files
@@ -546,11 +549,12 @@ ai-assist/
 ├── ai_assist/              # Main package
 │   ├── main.py            # CLI entry point
 │   ├── agent.py           # MCP agent with tool execution
+│   ├── think_tool.py      # Planning/reasoning scratchpad tool
 │   ├── monitors.py        # Monitoring tasks
 │   ├── state.py           # State management and caching
 │   ├── knowledge_graph.py # Temporal knowledge graph
 │   └── filesystem_tools.py # Filesystem operations
-├── tests/                  # Test suite (851 tests)
+├── tests/                  # Test suite (926 tests)
 ├── .env.example           # Example environment variables
 ├── VERTEX_AI_SETUP.md     # Vertex AI troubleshooting
 ├── SECURITY.md            # Security model

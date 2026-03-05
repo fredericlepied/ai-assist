@@ -36,9 +36,10 @@ This document provides guidance for AI agents and developers working on the ai-a
 
 1. **ai_assist/main.py**: CLI entry point, handles user interaction modes
 2. **ai_assist/agent.py**: MCP agent implementation, manages Claude conversations and tool execution
-3. **ai_assist/config.py**: Configuration management using Pydantic models
-4. **ai_assist/monitors.py**: Periodic monitoring tasks for Jira and DCI
-5. **ai_assist/state.py**: State management, caching, and history tracking
+3. **ai_assist/think_tool.py**: Planning/reasoning scratchpad for multi-step tasks
+4. **ai_assist/config.py**: Configuration management using Pydantic models
+5. **ai_assist/monitors.py**: Periodic monitoring tasks for Jira and DCI
+6. **ai_assist/state.py**: State management, caching, and history tracking
 
 ## Documentation
 

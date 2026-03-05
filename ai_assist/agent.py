@@ -23,6 +23,7 @@ from .script_execution_tools import ScriptExecutionTools
 from .security import ToolDefinitionRegistry, sanitize_tool_result, validate_tool_description
 from .skills_loader import SkillsLoader
 from .skills_manager import SkillsManager
+from .think_tool import ThinkTool
 
 if TYPE_CHECKING:
     from .context import ConversationMemory
@@ -226,6 +227,9 @@ class AiAssistAgent:
         # Initialize script execution tools for Agent Skills
         self.script_execution_tools = ScriptExecutionTools(self.skills_manager, config)
 
+        # Initialize think tool (planning/reasoning scratchpad)
+        self.think_tool = ThinkTool()
+
         self.anthropic: Anthropic | AnthropicVertex
         if config.use_vertex:
             vertex_kwargs: dict[str, Any] = {"project_id": config.vertex_project_id}
@@ -410,6 +414,10 @@ class AiAssistAgent:
         if script_tool_defs:
             self.available_tools.extend(script_tool_defs)
             print(f"✓ Added {len(script_tool_defs)} script execution tools (SECURITY: enabled)")
+
+        # Add think tool (planning/reasoning scratchpad)
+        think_tool_defs = self.think_tool.get_tool_definitions()
+        self.available_tools.extend(think_tool_defs)
 
         # Load installed skills
         self.skills_manager.load_installed_skills()
@@ -916,6 +924,13 @@ class AiAssistAgent:
         if skills_section:
             prompt += f"\n\n{skills_section}"
 
+        # Add planning guidance
+        prompt += "\n\n# Planning\n\n"
+        prompt += (
+            "For complex tasks requiring multiple tool calls, use internal__think to plan your approach before acting. "
+        )
+        prompt += "Break the task into steps, then execute them. Use internal__think again to track progress or revise your plan based on intermediate results.\n"
+
         # Add MCP tools guidance
         mcp_servers = list(self.sessions.keys())
         if mcp_servers:
@@ -1121,8 +1136,6 @@ class AiAssistAgent:
         max_turns: int,
         progress_callback,
     ) -> str:
-        import hashlib
-
         # Capture current query text for KG context injection
         if prompt:
             self._current_query_text = prompt
@@ -1149,9 +1162,7 @@ class AiAssistAgent:
         # Loop detection and dedup tracking
         start_time = time.time()
         max_time_seconds = 600  # 10 minutes max
-        recent_tool_calls = []  # Track last 5 tool calls
-        max_recent_calls = 5
-        loop_detection_threshold = 3  # If same call appears 3 times in recent history, it's a loop
+        self._recent_tool_calls_for_loop: list[str] = []
         no_progress_count = 0  # Count turns with no text response
         max_no_progress = 10  # Allow 10 turns without text before declaring stuck
         self._grounding_nudge_fired = False
@@ -1214,51 +1225,19 @@ class AiAssistAgent:
 
             messages.append({"role": "assistant", "content": _serialize_content(response.content)})
 
-            tool_results: list[dict[str, Any]] = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    if progress_callback:
-                        progress_callback("executing_tool", turn + 1, max_turns, block.name)
+            tool_results, loop_detected = await self._execute_tools_concurrently(
+                response.content,
+                progress_callback=progress_callback,
+                turn=turn,
+                max_turns=max_turns,
+            )
 
-                    # Compute signature for dedup and loop detection
-                    tool_signature = (
-                        f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
-                    )
-
-                    # Check per-query cache for duplicate tool call
-                    if tool_signature in self._tool_result_cache:
-                        result = self._tool_result_cache[tool_signature]
-                        self._duplicate_tool_call_count += 1
-                    else:
-                        result = await self._execute_tool(block.name, block.input)
-                        # Truncate large tool results to prevent context overflow
-                        result = self._truncate_tool_result(result)
-                        self._tool_result_cache[tool_signature] = result
-
-                    # Check if result is an error (starts with "Error:")
-                    is_error = isinstance(result, str) and result.startswith("Error:")
-
-                    tool_result: dict[str, Any] = {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result,
-                    }
-
-                    # Mark as error if it's an error message
-                    if is_error:
-                        tool_result["is_error"] = True
-
-                    tool_results.append(tool_result)
-
-                    # Track for loop detection
-                    recent_tool_calls.append(tool_signature)
-                    if len(recent_tool_calls) > max_recent_calls:
-                        recent_tool_calls.pop(0)
-
-                    # Check for loops - same tool call repeated multiple times
-                    if recent_tool_calls.count(tool_signature) >= loop_detection_threshold:
-                        self._last_turn_count = turn + 1
-                        return f"Loop detected: {block.name} called repeatedly with same arguments ({recent_tool_calls.count(tool_signature)} times)"
+            if loop_detected:
+                self._last_turn_count = turn + 1
+                # Find the looping tool name for the error message
+                tool_blocks = [b for b in response.content if b.type == "tool_use"]
+                loop_name = tool_blocks[-1].name if tool_blocks else "unknown"
+                return f"Loop detected: {loop_name} called repeatedly with same arguments"
 
             if not tool_results:
                 final_text = ""
@@ -1347,8 +1326,6 @@ class AiAssistAgent:
             dict: Final result {"type": "done", "turns": int}
             dict: Cancellation signal {"type": "cancelled"}
         """
-        import hashlib
-        import json
 
         # Build messages list
         if messages is None:
@@ -1383,9 +1360,7 @@ class AiAssistAgent:
                 self._cancel_event = cancel_event
 
             # Loop detection and dedup tracking (same as query())
-            recent_tool_calls = []
-            max_recent_calls = 5
-            loop_detection_threshold = 3
+            self._recent_tool_calls_for_loop = []
             self._tool_result_cache = {}
             self._duplicate_tool_call_count = 0
             self._last_turn_count = 0
@@ -1479,60 +1454,30 @@ class AiAssistAgent:
                         if block.type == "tool_use":
                             yield {"type": "tool_use", "name": block.name, "id": block.id, "input": block.input}
 
-                    # Execute any tools
-                    tool_results: list[dict[str, Any]] = []
-                    for block in final_message.content:
-                        if block.type == "tool_use":
-                            # Check cancellation before each tool execution
-                            if cancel_event and cancel_event.is_set():
-                                self._last_turn_count = turn + 1
-                                yield {"type": "cancelled"}
-                                return
+                    # Execute any tools concurrently
+                    tool_results, loop_detected = await self._execute_tools_concurrently(
+                        final_message.content,
+                        cancel_event=cancel_event,
+                        progress_callback=progress_callback,
+                        turn=turn,
+                        max_turns=max_turns,
+                    )
 
-                            if progress_callback:
-                                progress_callback("executing_tool", turn + 1, max_turns, block.name)
+                    # Check cancellation (concurrent method returns empty on cancel)
+                    if cancel_event and cancel_event.is_set():
+                        self._last_turn_count = turn + 1
+                        yield {"type": "cancelled"}
+                        return
 
-                            # Compute signature for dedup and loop detection
-                            tool_signature = f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
-
-                            # Check per-query cache for duplicate tool call
-                            if tool_signature in self._tool_result_cache:
-                                result = self._tool_result_cache[tool_signature]
-                                self._duplicate_tool_call_count += 1
-                            else:
-                                result = await self._execute_tool(block.name, block.input)
-                                # Truncate large tool results to prevent context overflow
-                                result = self._truncate_tool_result(result)
-                                self._tool_result_cache[tool_signature] = result
-
-                            # Check if result is an error
-                            is_error = isinstance(result, str) and result.startswith("Error:")
-
-                            tool_result: dict[str, Any] = {
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": result,
-                            }
-
-                            # Mark as error if it's an error message
-                            if is_error:
-                                tool_result["is_error"] = True
-
-                            tool_results.append(tool_result)
-
-                            # Track for loop detection
-                            recent_tool_calls.append(tool_signature)
-                            if len(recent_tool_calls) > max_recent_calls:
-                                recent_tool_calls.pop(0)
-
-                            # Check for loops
-                            if recent_tool_calls.count(tool_signature) >= loop_detection_threshold:
-                                self._last_turn_count = turn + 1
-                                yield {
-                                    "type": "error",
-                                    "message": f"Loop detected: {block.name} called repeatedly with same arguments ({recent_tool_calls.count(tool_signature)} times)",
-                                }
-                                return
+                    if loop_detected:
+                        self._last_turn_count = turn + 1
+                        tool_blocks = [b for b in final_message.content if b.type == "tool_use"]
+                        loop_name = tool_blocks[-1].name if tool_blocks else "unknown"
+                        yield {
+                            "type": "error",
+                            "message": f"Loop detected: {loop_name} called repeatedly with same arguments",
+                        }
+                        return
 
                     # If no tool calls, check for grounding nudge
                     if not tool_results:
@@ -1757,6 +1702,77 @@ class AiAssistAgent:
 
         return None  # Validation passed
 
+    async def _execute_tools_concurrently(
+        self,
+        content_blocks: list,
+        cancel_event: Any = None,
+        progress_callback: Any = None,
+        turn: int = 0,
+        max_turns: int = 100,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Execute tool_use blocks concurrently with dedup, caching, and loop detection.
+
+        Returns:
+            Tuple of (tool_results list, loop_detected bool)
+        """
+        # Collect tool_use blocks
+        tool_blocks = [b for b in content_blocks if b.type == "tool_use"]
+        if not tool_blocks:
+            return [], False
+
+        # Check cancellation
+        if cancel_event and cancel_event.is_set():
+            return [], False
+
+        # Compute signatures and separate cached from uncached
+        import hashlib
+
+        signatures: list[str] = []
+        for block in tool_blocks:
+            sig = f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
+            signatures.append(sig)
+
+        # Execute uncached tools concurrently
+        async def _run_one(block, sig):
+            if sig in self._tool_result_cache:
+                self._duplicate_tool_call_count += 1
+                return self._tool_result_cache[sig]
+            result = await self._execute_tool(block.name, block.input)
+            result = self._truncate_tool_result(result)
+            self._tool_result_cache[sig] = result
+            return result
+
+        if progress_callback:
+            for block in tool_blocks:
+                progress_callback("executing_tool", turn + 1, max_turns, block.name)
+
+        results = await asyncio.gather(
+            *[_run_one(block, sig) for block, sig in zip(tool_blocks, signatures, strict=False)]
+        )
+
+        # Build tool_results in original order
+        tool_results: list[dict[str, Any]] = []
+        loop_detected = False
+        for block, sig, result in zip(tool_blocks, signatures, results, strict=False):
+            is_error = isinstance(result, str) and result.startswith("Error:")
+            tool_result: dict[str, Any] = {
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": result,
+            }
+            if is_error:
+                tool_result["is_error"] = True
+            tool_results.append(tool_result)
+
+            # Loop detection
+            self._recent_tool_calls_for_loop.append(sig)
+            if len(self._recent_tool_calls_for_loop) > 5:
+                self._recent_tool_calls_for_loop.pop(0)
+            if self._recent_tool_calls_for_loop.count(sig) >= 3:
+                loop_detected = True
+
+        return tool_results, loop_detected
+
     async def _execute_tool(self, tool_name: str, arguments: dict) -> str:
         """Execute a tool call on the appropriate MCP server, introspection, or internal tool"""
 
@@ -1822,6 +1838,7 @@ class AiAssistAgent:
                 ]
 
                 script_tools = ["execute_skill_script"]
+                think_tools = ["think"]
                 schedule_action_tools = ["schedule_action"]
                 knowledge_tools = ["save_knowledge", "search_knowledge", "trigger_synthesis"]
                 kg_query_tool_names = [
@@ -1849,6 +1866,8 @@ class AiAssistAgent:
                             tool_name,
                             ", ".join(injection_warnings),
                         )
+                elif original_tool_name in think_tools:
+                    result_text = await self.think_tool.execute_tool(original_tool_name, arguments)
                 elif original_tool_name in schedule_action_tools:
                     result_text = await self.schedule_action_tools.execute_tool(
                         f"internal__{original_tool_name}", arguments

@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-import signal
+import os
 import sys
 import threading
 import time
@@ -148,7 +148,7 @@ async def query_with_feedback(
     feedback_state = {"status": "Starting...", "turn": 0, "max_turns": 50, "tool": None, "streaming": False}
 
     def progress_callback(status: str, turn: int, max_turns: int, tool_name: str | None):
-        """Update feedback state"""
+        """Update feedback state and refresh the spinner display"""
         feedback_state["turn"] = turn
         feedback_state["max_turns"] = max_turns
         feedback_state["tool"] = tool_name
@@ -166,6 +166,9 @@ async def query_with_feedback(
         elif status == "complete":
             feedback_state["status"] = "✨ Complete!"
             feedback_state["streaming"] = False
+
+        # Push updated spinner to the Live widget
+        live.update(create_feedback_display())
 
     def create_feedback_display():
         """Create the feedback display"""
@@ -225,17 +228,26 @@ async def query_with_feedback(
                 # Handle tool use notifications
                 elif isinstance(chunk, dict):
                     if chunk.get("type") == "tool_use":
-                        # Show tool call inline
-                        if response_started:
+                        # Stop spinner before printing to avoid display corruption
+                        if not response_started:
+                            live.stop()
+                        else:
                             console.print()  # New line before tool notification
                         display_name = format_tool_display_name(chunk["name"])
                         console.print(f"\n[dim]🔧 {display_name}[/dim]")
 
                         # Display arguments if present
                         if chunk.get("input"):
-                            console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
+                            if chunk["name"] == "internal__think":
+                                # Show full thought without truncation
+                                thought = chunk["input"].get("thought", "")
+                                for line in thought.splitlines():
+                                    console.print(f"[dim]   {line}[/dim]")
+                            else:
+                                console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
                         if not response_started:
-                            live.update(create_feedback_display())  # Keep spinner going
+                            live.update(create_feedback_display())
+                            live.start()
 
                     elif chunk.get("type") == "cancelled":
                         if response_started:
@@ -629,22 +641,40 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
     # Hook inner execution callback for MCP prompt visibility
     def on_inner_execution(chunk):
+        # Stop Live spinner before printing to avoid display corruption
+        live = agent._active_live
+        live_was_running = live and live._started
+        if live_was_running:
+            live.stop()
+
         if isinstance(chunk, str):
-            console.print(chunk, end="")
+            console.print(chunk, end="", markup=False)
         elif isinstance(chunk, dict):
             if chunk.get("type") == "tool_use":
                 display_name = format_tool_display_name(chunk["name"])
                 console.print(f"\n[dim]  🔧 {display_name}[/dim]")
                 if chunk.get("input"):
-                    console.print(f"[dim]     {format_tool_args(chunk['input'])}[/dim]")
+                    if chunk["name"] == "internal__think":
+                        thought = chunk["input"].get("thought", "")
+                        for line in thought.splitlines():
+                            console.print(f"[dim]     {line}[/dim]")
+                    else:
+                        console.print(f"[dim]     {format_tool_args(chunk['input'])}[/dim]")
             elif chunk.get("type") == "error":
                 console.print(f"\n[red]  {chunk.get('message')}[/red]")
+
+        # Restart spinner
+        if live_was_running:
+            live.start()
 
     agent.on_inner_execution = on_inner_execution
 
     # Set up security confirmation callbacks for filesystem tools
     async def _prompt_user_approval(message: str, detail: str) -> str:
-        """Common approval prompt logic. Returns user's choice string."""
+        """Common approval prompt logic. Returns user's choice string.
+
+        Supports Escape and Ctrl-C to cancel the query.
+        """
         live = agent._active_live
         live_was_running = live and live._started
         if live_was_running:
@@ -655,37 +685,72 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         if watcher_was_running:
             watcher.stop()
 
-        # Restore cooked mode with echo so input() works normally
-        try:
-            import termios
-
-            stdin_fd = sys.stdin.fileno()
-            attrs = termios.tcgetattr(stdin_fd)
-            attrs[0] |= termios.ICRNL  # iflag: translate CR to NL
-            attrs[3] |= termios.ECHO | termios.ICANON  # lflag: echo + canonical
-            termios.tcsetattr(stdin_fd, termios.TCSANOW, attrs)
-        except (ImportError, termios.error, OSError):
-            pass
-
         console.print(f"\n[yellow]{message}[/yellow]")
         console.print(f"  [bold]{detail}[/bold]")
 
-        # asyncio replaces the default SIGINT handler with one that defers
-        # KeyboardInterrupt to the next event-loop iteration.  Because input()
-        # blocks the loop, that deferred raise never fires.  Temporarily
-        # restore the default handler so Ctrl-C interrupts input() immediately.
-        prev_sigint = signal.getsignal(signal.SIGINT)
-        signal.signal(signal.SIGINT, signal.default_int_handler)
+        def _raw_input(prompt_text: str) -> str:
+            """Read input with Escape/Ctrl-C support using cbreak mode."""
+            try:
+                import termios
+                import tty
+            except ImportError:
+                # Fallback to regular input on non-Unix
+                return input(prompt_text)
+
+            sys.stdout.write(prompt_text)
+            sys.stdout.flush()
+
+            stdin_fd = sys.stdin.fileno()
+            old_attrs = termios.tcgetattr(stdin_fd)
+            try:
+                tty.setcbreak(stdin_fd)
+                buf: list[str] = []
+                while True:
+                    ch = os.read(stdin_fd, 1)
+                    if ch == b"\x1b":
+                        # Check for escape sequence vs bare Escape
+                        import select
+
+                        ready, _, _ = select.select([stdin_fd], [], [], 0.05)
+                        if ready:
+                            os.read(stdin_fd, 16)  # Consume escape sequence
+                            continue
+                        # Bare Escape — cancel
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
+                        raise KeyboardInterrupt
+                    elif ch == b"\x03":  # Ctrl-C
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
+                        raise KeyboardInterrupt
+                    elif ch == b"\x04":  # Ctrl-D
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
+                        raise EOFError
+                    elif ch in (b"\r", b"\n"):  # Enter
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
+                        return "".join(buf)
+                    elif ch in (b"\x7f", b"\x08"):  # Backspace
+                        if buf:
+                            buf.pop()
+                            sys.stdout.write("\b \b")
+                            sys.stdout.flush()
+                    elif 32 <= ch[0] < 127:  # Printable
+                        buf.append(chr(ch[0]))
+                        sys.stdout.write(chr(ch[0]))
+                        sys.stdout.flush()
+            finally:
+                termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_attrs)
+
         try:
-            answer = await asyncio.to_thread(input, "Allow? [y/N/a(lways)] ")
+            answer = await asyncio.to_thread(_raw_input, "Allow? [y/N/a(lways)/Esc to cancel] ")
             choice = answer.strip().lower()
         except EOFError:
             choice = "n"
         except KeyboardInterrupt:
-            console.print()
-            raise
-        finally:
-            signal.signal(signal.SIGINT, prev_sigint)
+            console.print("[yellow]Cancelled[/yellow]")
+            choice = "c"
 
         if watcher_was_running:
             watcher.start()
@@ -697,6 +762,10 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     async def command_confirmation_callback(command: str) -> bool:
         """Prompt user to approve non-allowlisted commands or destructive actions"""
         choice = await _prompt_user_approval("Security: The agent wants to run:", command)
+        if choice in ("c", "cancel"):
+            if agent._cancel_event:
+                agent._cancel_event.set()
+            return False
         approved = choice in ("y", "yes", "a", "always")
         if choice in ("a", "always"):
             from .filesystem_tools import SHELL_BUILTINS, extract_command_names
@@ -715,6 +784,10 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     async def path_confirmation_callback(description: str) -> bool:
         """Prompt user to approve access to a path outside allowed directories"""
         choice = await _prompt_user_approval("Security: The agent wants to access:", description)
+        if choice in ("c", "cancel"):
+            if agent._cancel_event:
+                agent._cancel_event.set()
+            return False
         approved = choice in ("y", "yes", "a", "always")
         if choice in ("a", "always"):
             # Extract path from description ("Access path: /foo/bar/file.txt")
@@ -812,7 +885,12 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
                                             # Display arguments if present
                                             if chunk.get("input"):
-                                                console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
+                                                if chunk["name"] == "internal__think":
+                                                    thought = chunk["input"].get("thought", "")
+                                                    for line in thought.splitlines():
+                                                        console.print(f"[dim]   {line}[/dim]")
+                                                else:
+                                                    console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
                                         elif chunk.get("type") == "cancelled":
                                             if response_started:
                                                 console.print()
