@@ -162,7 +162,7 @@ def test_mid_sentence_mcp_prompt_completion():
 
 
 def test_mid_sentence_server_completion():
-    """Test server name completion works mid-sentence"""
+    """Test server name completion works mid-sentence and includes prompts"""
     agent = _make_agent_with_prompts()
     completer = AiAssistCompleter(agent=agent)
 
@@ -171,6 +171,8 @@ def test_mid_sentence_server_completion():
 
     texts = [c.text for c in completions]
     assert "/dci/" in texts
+    assert "/dci/rca" in texts
+    assert "/dci/report" in texts
 
 
 def test_mid_sentence_no_builtin_commands():
@@ -194,6 +196,48 @@ def test_mid_sentence_no_completion_without_slash():
     completions = list(completer.get_completions(document, None))
 
     assert len(completions) == 0
+
+
+def test_server_completion_also_yields_prompts():
+    """Test that server completion yields both server and prompt entries"""
+    agent = _make_agent_with_prompts()
+    completer = AiAssistCompleter(agent=agent)
+
+    document = Document("/dc", cursor_position=3)
+    completions = list(completer.get_completions(document, None))
+
+    texts = [c.text for c in completions]
+    assert "/dci/" in texts
+    assert "/dci/rca" in texts
+    assert "/dci/report" in texts
+
+
+def test_server_completion_prompt_entries_have_descriptions():
+    """Test that prompt entries yielded during server completion have correct display_meta"""
+    agent = _make_agent_with_prompts()
+    completer = AiAssistCompleter(agent=agent)
+
+    document = Document("/dc", cursor_position=3)
+    completions = list(completer.get_completions(document, None))
+
+    rca_completions = [c for c in completions if c.text == "/dci/rca"]
+    assert len(rca_completions) == 1
+    assert "Root cause analysis" in str(rca_completions[0].display_meta)
+
+
+def test_prompt_prefix_filtering_still_works():
+    """Regression test: typing /dci/r still filters to matching prompts only"""
+    agent = _make_agent_with_prompts()
+    completer = AiAssistCompleter(agent=agent)
+
+    document = Document("/dci/r", cursor_position=6)
+    completions = list(completer.get_completions(document, None))
+
+    texts = [c.text for c in completions]
+    assert "/dci/rca" in texts
+    assert "/dci/report" in texts
+    # The server entry /dci/ should NOT appear (we're in len(parts)==2 branch)
+    assert "/dci/" not in texts
 
 
 def test_format_tool_display_name():
