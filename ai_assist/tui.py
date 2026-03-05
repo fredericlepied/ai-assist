@@ -133,7 +133,7 @@ class AiAssistCompleter(Completer):
 
             # Completing server names: /server
             elif len(parts) == 1 and self.agent and self.agent.available_prompts:
-                # Suggest server names that have prompts
+                # Suggest server names that have prompts, plus all their prompts
                 for server_name in self.agent.available_prompts.keys():
                     server_cmd = f"/{server_name}/"
                     if server_cmd.startswith(word.lower()):
@@ -143,6 +143,15 @@ class AiAssistCompleter(Completer):
                             display=server_cmd,
                             display_meta=f"MCP server ({len(self.agent.available_prompts[server_name])} prompts)",
                         )
+                        # Also yield individual prompt completions for direct access
+                        for prompt_name, prompt in self.agent.available_prompts[server_name].items():
+                            full_command = f"/{server_name}/{prompt_name}"
+                            yield Completion(
+                                full_command,
+                                start_position=-len(word),
+                                display=full_command,
+                                display_meta=prompt.description[:60] if prompt.description else "MCP prompt",
+                            )
 
             # Standard command completion
             for cmd in self.commands:
@@ -187,6 +196,15 @@ class AiAssistCompleter(Completer):
                             display=server_cmd,
                             display_meta=f"MCP server ({len(self.agent.available_prompts[server_name])} prompts)",
                         )
+                        # Also yield individual prompt completions
+                        for prompt_name, prompt in self.agent.available_prompts[server_name].items():
+                            full_token = f"/{server_name}/{prompt_name}"
+                            yield Completion(
+                                full_token,
+                                start_position=-len(last_word),
+                                display=full_token,
+                                display_meta=prompt.description[:60] if prompt.description else "MCP prompt",
+                            )
 
     def _get_command_description(self, command: str) -> str:
         """Get description for a command"""
