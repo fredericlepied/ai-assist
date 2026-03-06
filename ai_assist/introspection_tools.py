@@ -261,34 +261,51 @@ Example: Search for previous mentions of "DCI failures" in conversation.
             }
         )
 
+        # Always add get_skill_help (works with any agent reference that has skills_manager)
+        tools.append(
+            {
+                "name": "introspection__get_skill_help",
+                "description": (
+                    "Get full instructions for an installed skill including its SKILL.md body "
+                    "and skill directory path."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "skill_name": {
+                            "type": "string",
+                            "description": "Name of the installed skill (e.g., 'redhat-directory')",
+                        },
+                    },
+                    "required": ["skill_name"],
+                },
+                "_server": "introspection",
+            }
+        )
+
         return tools
 
     async def execute_tool(self, tool_name: str, arguments: dict) -> str:
-        """Execute an introspection tool
+        """Execute an introspection tool"""
+        dispatch = {
+            "search_knowledge_graph": self._search_knowledge_graph,
+            "get_kg_entity": self._get_kg_entity,
+            "get_kg_stats": self._get_kg_stats,
+            "search_conversation_history": self._search_conversation_history,
+            "inspect_mcp_prompt": self._inspect_mcp_prompt,
+            "execute_mcp_prompt": self._execute_mcp_prompt,
+            "get_tool_help": self._get_tool_help,
+            "get_skill_help": self._get_skill_help,
+        }
 
-        Args:
-            tool_name: Name of the tool to execute
-            arguments: Tool arguments
-
-        Returns:
-            JSON string with results
-        """
-        if tool_name == "search_knowledge_graph":
-            return await self._search_knowledge_graph(arguments)
-        elif tool_name == "get_kg_entity":
-            return await self._get_kg_entity(arguments)
-        elif tool_name == "get_kg_stats":
-            return await self._get_kg_stats(arguments)
-        elif tool_name == "search_conversation_history":
-            return await self._search_conversation_history(arguments)
-        elif tool_name == "inspect_mcp_prompt":
-            return self._inspect_mcp_prompt(arguments)
-        elif tool_name == "execute_mcp_prompt":
-            return await self._execute_mcp_prompt(arguments)
-        elif tool_name == "get_tool_help":
-            return self._get_tool_help(arguments)
-        else:
+        handler = dispatch.get(tool_name)
+        if not handler:
             return json.dumps({"error": f"Unknown introspection tool: {tool_name}"})
+
+        result = handler(arguments)
+        if hasattr(result, "__await__"):
+            result = await result
+        return str(result)
 
     async def _search_knowledge_graph(self, arguments: dict) -> str:
         """Search knowledge graph for entities"""
@@ -581,3 +598,47 @@ Example: Search for previous mentions of "DCI failures" in conversation.
                 )
 
         return json.dumps({"error": f"Tool not found: {tool_name}"})
+
+    def _get_skill_help(self, arguments: dict) -> str:
+        """Return full instructions for an installed skill (progressive disclosure).
+
+        Args:
+            arguments: Dict with 'skill_name' key
+
+        Returns:
+            JSON string with full skill body, directory path, and scripts
+        """
+        skill_name = arguments.get("skill_name", "")
+        if not self.agent:
+            return json.dumps({"error": "Agent reference not available"})
+
+        content = self.agent.skills_manager.loaded_skills.get(skill_name)
+        if not content:
+            available = list(self.agent.skills_manager.loaded_skills.keys())
+            return json.dumps(
+                {
+                    "error": f"Skill not found: {skill_name}",
+                    "available_skills": available,
+                }
+            )
+
+        result = {
+            "skill_name": skill_name,
+            "description": content.metadata.description,
+            "skill_directory": str(content.metadata.skill_path),
+            "body": content.body,
+        }
+
+        script_execution_enabled = (
+            hasattr(self.agent, "script_execution_tools") and self.agent.script_execution_tools.enabled
+        )
+        if not script_execution_enabled:
+            result["warning"] = (
+                "Script execution is DISABLED. Do NOT execute any scripts from this skill's directory, "
+                "neither via internal__execute_skill_script nor via shell commands."
+            )
+
+        return json.dumps(
+            result,
+            indent=2,
+        )

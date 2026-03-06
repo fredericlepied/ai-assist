@@ -229,48 +229,18 @@ class SkillsManager:
 
         return "\n".join(lines)
 
-    def get_system_prompt_section(self, script_execution_enabled: bool = False) -> str:
-        """Generate system prompt with all installed skills' instructions
-
-        Args:
-            script_execution_enabled: Whether script execution is enabled
-
-        Returns:
-            Formatted system prompt section with all skills
-        """
+    def get_system_prompt_section(self) -> str:
+        """Generate system prompt with installed skills summary (progressive disclosure)."""
         if not self.loaded_skills:
             return ""
 
         sections = ["# Agent Skills\n"]
         sections.append("You have access to the following specialized skills:\n")
 
-        # Add script execution instructions if enabled
-        if script_execution_enabled:
-            skills_with_scripts = [(name, content) for name, content in self.loaded_skills.items() if content.scripts]
-            if skills_with_scripts:
-                sections.append("\n## Script Execution")
-                sections.append(
-                    "Some skills include executable scripts. When a skill mentions running a script "
-                    "(e.g., 'python scripts/script_name.py'), use the internal__execute_skill_script tool instead:\n"
-                )
-                for skill_name, content in skills_with_scripts:
-                    script_names = list(content.scripts.keys())
-                    sections.append(f"\n**{skill_name}** has {len(script_names)} script(s):")
-                    for script_name in script_names[:5]:  # Limit to first 5
-                        sections.append(f"  - {script_name}")
-                    if len(script_names) > 5:
-                        sections.append(f"  - ... and {len(script_names) - 5} more")
-                sections.append(
-                    "\nTo execute a script, use: internal__execute_skill_script(skill_name='skill-name', "
-                    "script_name='script.py', args=['arg1', 'arg2'])\n"
-                )
-
         for skill_name, content in self.loaded_skills.items():
-            sections.append(f"\n## Skill: {skill_name}")
-            sections.append(f"{content.metadata.description}\n")
-            # Skill body is validated at load time in skills_loader._parse_skill_file()
-            sections.append(content.body)
-            sections.append("")
+            sections.append(f"- **{skill_name}**: {content.metadata.description}")
+
+        sections.append("\nFor detailed skill instructions, call introspection__get_skill_help " "with the skill name.")
 
         return "\n".join(sections)
 

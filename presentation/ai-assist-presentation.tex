@@ -447,7 +447,7 @@ servers:
   \item Follow the \textbf{agentskills.io} specification
   \item Skills = specialized instructions in \texttt{SKILL.md}
   \item Install from Git repos, local paths, or registries
-  \item Auto-injected into the system prompt
+  \item Progressive disclosure (summary in prompt, details on demand)
   \item Optional sandboxed script execution
   \item Hot-reloaded on file change
 \end{itemize}
@@ -866,7 +866,7 @@ Skills are \alert{untrusted code} --- defense in depth:
   \node[data=rhpurple] (identity) at (-2.8,3.8)
     {1.\ \textbf{Identity} prompt\\(name, role, personality)};
   \node[data=rhorange] (skills) at (-2.8,2.8)
-    {2.\ \textbf{Agent Skills}\\(installed SKILL.md instructions)};
+    {2.\ \textbf{Agent Skills}\\(skill summaries, details on demand)};
   \node[data=rhblue] (mcp) at (-2.8,1.8)
     {3.\ \textbf{MCP servers} guidance\\(available data sources)};
   \node[data=rhteal] (honesty) at (-2.8,0.8)

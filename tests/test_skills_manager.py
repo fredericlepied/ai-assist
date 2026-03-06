@@ -81,34 +81,21 @@ def test_system_prompt_section(skills_manager):
     result = skills_manager.get_system_prompt_section()
     assert "Agent Skills" in result
     assert "hello" in result
-    assert "Hello Skill" in result
+    assert "greets users" in result
+    assert "introspection__get_skill_help" in result
+    # Body content should NOT be in the prompt (progressive disclosure)
+    assert "Hello Skill" not in result
 
 
-def test_system_prompt_with_script_execution_disabled(skills_manager):
-    """Test system prompt without script execution enabled"""
+def test_system_prompt_has_no_script_section(skills_manager):
+    """Test system prompt never includes script details (progressive disclosure)"""
     skills_manager.install_skill("/tmp/test-skills/hello@main")
 
-    # With script execution disabled
-    result = skills_manager.get_system_prompt_section(script_execution_enabled=False)
+    result = skills_manager.get_system_prompt_section()
     assert "Agent Skills" in result
+    # Script details are behind progressive disclosure, not in system prompt
     assert "Script Execution" not in result
     assert "internal__execute_skill_script" not in result
-
-
-def test_system_prompt_with_script_execution_enabled(skills_manager):
-    """Test system prompt includes script execution instructions when skill has scripts"""
-    # Install skill without scripts
-    skills_manager.install_skill("/tmp/test-skills/hello@main")
-
-    # With script execution enabled but no scripts
-    result = skills_manager.get_system_prompt_section(script_execution_enabled=True)
-    assert "Agent Skills" in result
-    # Should NOT have script section since hello has no scripts
-    assert "Script Execution" not in result
-
-    # Note: This test verifies that script execution section only appears
-    # when skills actually have scripts. See test_script_execution_tools.py
-    # for tests with actual scripts.
 
 
 def test_parse_source_spec(skills_manager):
