@@ -133,7 +133,17 @@ class KnowledgeGraph:
         self.conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
         self._batch_mode = False
         self._backfill_done = False
-        self.conn.enable_load_extension(True)
+        try:
+            self.conn.enable_load_extension(True)
+        except AttributeError:
+            raise RuntimeError(
+                "Your Python's sqlite3 module was compiled without extension loading support.\n"
+                "This is common with the official python.org macOS installer.\n"
+                "Please use a Python that includes it, for example:\n"
+                "  - uv python install 3.12\n"
+                "  - brew install python@3.12\n"
+                "  - pyenv install 3.12"
+            ) from None
         import sqlite_vec
 
         sqlite_vec.load(self.conn)
