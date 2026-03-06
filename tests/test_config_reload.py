@@ -57,6 +57,47 @@ async def test_identity_file_watching(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_skill_md_file_watching(tmp_path):
+    """Test that SKILL.md changes in skill directories are detected"""
+    from ai_assist.config_watcher import ConfigWatcher
+    from ai_assist.skills_manager import InstalledSkill
+
+    # Create a fake skill directory with SKILL.md
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text("---\nname: my-skill\n---\n# Original")
+
+    # Create a mock agent with the skill installed
+    skills_manager = MagicMock()
+    skills_manager.installed_skills = [
+        InstalledSkill(
+            name="my-skill",
+            source="/tmp/my-skill",
+            source_type="local",
+            branch="main",
+            installed_at="2026-01-01T00:00:00",
+            cache_path=str(skill_dir),
+        )
+    ]
+    agent = MagicMock()
+    agent.skills_manager = skills_manager
+
+    watcher = ConfigWatcher(agent)
+    await watcher._watch_skill_files()
+
+    assert len(watcher._skill_watchers) == 1
+
+    # Modify SKILL.md
+    skill_md.write_text("---\nname: my-skill\n---\n# Updated instructions")
+    await asyncio.sleep(1.5)
+
+    skills_manager.load_installed_skills.assert_called_once()
+
+    await watcher.stop()
+
+
+@pytest.mark.asyncio
 async def test_skills_file_watching(tmp_path):
     """Test that installed-skills.json changes are detected"""
     from ai_assist.file_watchdog import FileWatchdog
