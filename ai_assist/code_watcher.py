@@ -53,7 +53,8 @@ class CodeWatcher:
 
         # Use os.execv to replace current process with new one
         # This preserves the same PID and command line arguments
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        # Re-add --dev so the restarted process also watches for changes
+        os.execv(sys.executable, [sys.executable] + sys.argv + ["--dev"])
 
     def stop(self):
         """Stop watching code files"""
