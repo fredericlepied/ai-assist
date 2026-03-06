@@ -37,11 +37,13 @@ def test_skills_integration_with_agent():
     assert len(agent.skills_manager.installed_skills) == 1
     assert "hello" in agent.skills_manager.loaded_skills
 
-    # Verify system prompt includes skill
+    # Verify system prompt includes skill summary (progressive disclosure)
     system_prompt = agent._build_system_prompt()
     assert "Agent Skills" in system_prompt
     assert "hello" in system_prompt
-    assert "Hello Skill" in system_prompt
+    assert "introspection__get_skill_help" in system_prompt
+    # Body content should NOT be in the prompt (progressive disclosure)
+    assert "Hello Skill" not in system_prompt
 
     # Clean up
     agent.skills_manager.uninstall_skill("hello")

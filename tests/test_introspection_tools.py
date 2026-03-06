@@ -52,14 +52,15 @@ def test_get_tool_definitions_with_kg(introspection_tools_with_kg):
     """Test tool definitions with KG only"""
     tools_defs = introspection_tools_with_kg.get_tool_definitions()
 
-    # Should have 3 KG tools + 1 MCP prompt inspection tool + 1 get_tool_help
-    assert len(tools_defs) == 5
+    # Should have 3 KG tools + 1 MCP prompt inspection tool + 1 get_tool_help + 1 get_skill_help
+    assert len(tools_defs) == 6
 
     tool_names = [t["name"] for t in tools_defs]
     assert "introspection__search_knowledge_graph" in tool_names
     assert "introspection__get_kg_entity" in tool_names
     assert "introspection__get_kg_stats" in tool_names
     assert "introspection__inspect_mcp_prompt" in tool_names
+    assert "introspection__get_skill_help" in tool_names
 
     # All should be from introspection server
     for tool in tools_defs:
@@ -70,8 +71,8 @@ def test_get_tool_definitions_with_both(introspection_tools_full):
     """Test tool definitions with both KG and conversation"""
     tools_defs = introspection_tools_full.get_tool_definitions()
 
-    # Should have 3 KG + 1 MCP prompt inspection + 1 conversation + 1 get_tool_help
-    assert len(tools_defs) == 6
+    # Should have 3 KG + 1 MCP prompt inspection + 1 conversation + 1 get_tool_help + 1 get_skill_help
+    assert len(tools_defs) == 7
 
     tool_names = [t["name"] for t in tools_defs]
     assert "introspection__search_knowledge_graph" in tool_names
@@ -79,6 +80,7 @@ def test_get_tool_definitions_with_both(introspection_tools_full):
     assert "introspection__get_kg_stats" in tool_names
     assert "introspection__inspect_mcp_prompt" in tool_names
     assert "introspection__search_conversation_history" in tool_names
+    assert "introspection__get_skill_help" in tool_names
 
 
 def test_tool_definitions_have_schemas(introspection_tools_full):
@@ -322,5 +324,92 @@ async def test_unknown_tool(introspection_tools_full):
     """Test calling unknown tool returns error"""
     result = await introspection_tools_full.execute_tool("unknown_tool", {})
 
+    data = json.loads(result)
+    assert "error" in data
+
+
+# --- get_skill_help tests ---
+
+
+def test_get_skill_help_no_agent():
+    """get_skill_help returns error without agent reference"""
+    tools = IntrospectionTools(agent=None)
+    result = tools._get_skill_help({"skill_name": "hello"})
+    data = json.loads(result)
+    assert "error" in data
+    assert "Agent reference" in data["error"]
+
+
+def test_get_skill_help_unknown_skill():
+    """get_skill_help returns error and available skills list for unknown skill"""
+    from unittest.mock import MagicMock
+
+    agent = MagicMock()
+    agent.skills_manager.loaded_skills = {}
+
+    tools = IntrospectionTools(agent=agent)
+    result = tools._get_skill_help({"skill_name": "nonexistent"})
+    data = json.loads(result)
+    assert "error" in data
+    assert "available_skills" in data
+
+
+def test_get_skill_help_success():
+    """get_skill_help returns full skill body and directory"""
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    content = MagicMock()
+    content.metadata.description = "A test skill"
+    content.metadata.skill_path = Path("/tmp/test-skills/hello")
+    content.body = "# Hello Skill\n\nFull instructions here."
+
+    agent = MagicMock()
+    agent.skills_manager.loaded_skills = {"hello": content}
+    agent.script_execution_tools.enabled = True
+
+    tools = IntrospectionTools(agent=agent)
+    result = tools._get_skill_help({"skill_name": "hello"})
+    data = json.loads(result)
+
+    assert data["skill_name"] == "hello"
+    assert data["description"] == "A test skill"
+    assert data["skill_directory"] == "/tmp/test-skills/hello"
+    assert "Hello Skill" in data["body"]
+    assert "warning" not in data
+
+
+def test_get_skill_help_warns_when_scripts_disabled():
+    """get_skill_help includes warning when script execution is disabled"""
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    content = MagicMock()
+    content.metadata.description = "A test skill"
+    content.metadata.skill_path = Path("/tmp/test-skills/hello")
+    content.body = "# Hello Skill"
+
+    agent = MagicMock()
+    agent.skills_manager.loaded_skills = {"hello": content}
+    agent.script_execution_tools.enabled = False
+
+    tools = IntrospectionTools(agent=agent)
+    result = tools._get_skill_help({"skill_name": "hello"})
+    data = json.loads(result)
+
+    assert "warning" in data
+    assert "DISABLED" in data["warning"]
+
+
+@pytest.mark.asyncio
+async def test_get_skill_help_via_execute_tool():
+    """get_skill_help is routable via execute_tool"""
+    from unittest.mock import MagicMock
+
+    agent = MagicMock()
+    agent.skills_manager.loaded_skills = {}
+
+    tools = IntrospectionTools(agent=agent)
+    result = await tools.execute_tool("get_skill_help", {"skill_name": "nonexistent"})
     data = json.loads(result)
     assert "error" in data

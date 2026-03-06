@@ -916,9 +916,7 @@ class AiAssistAgent:
         identity_prompt = self.identity.get_system_prompt()
 
         # Add skills section
-        skills_section = self.skills_manager.get_system_prompt_section(
-            script_execution_enabled=self.script_execution_tools.enabled
-        )
+        skills_section = self.skills_manager.get_system_prompt_section()
 
         prompt = identity_prompt
         if skills_section:

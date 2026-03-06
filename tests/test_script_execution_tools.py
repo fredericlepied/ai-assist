@@ -430,29 +430,15 @@ exit 1
     assert "Error message" in result
 
 
-def test_system_prompt_includes_script_instructions(skills_manager_with_skill):
-    """Test that system prompt includes script execution instructions when enabled"""
-    # With script execution enabled
-    result = skills_manager_with_skill.get_system_prompt_section(script_execution_enabled=True)
+def test_system_prompt_lists_skill_without_script_details(skills_manager_with_skill):
+    """Test that system prompt lists skill but not script details (progressive disclosure)"""
+    result = skills_manager_with_skill.get_system_prompt_section()
 
-    # Should include script execution section
-    assert "Script Execution" in result
-    assert "internal__execute_skill_script" in result
+    # Should list the skill
     assert "test-skill" in result
-    # Should list available scripts
-    assert "hello.sh" in result or "print_env.sh" in result
-
-
-def test_system_prompt_without_script_instructions(skills_manager_with_skill):
-    """Test that system prompt excludes script instructions when disabled"""
-    # With script execution disabled
-    result = skills_manager_with_skill.get_system_prompt_section(script_execution_enabled=False)
-
-    # Should NOT include script execution section
+    # Script details are behind progressive disclosure
     assert "Script Execution" not in result
-    assert "internal__execute_skill_script" not in result
-    # But should still include the skill
-    assert "test-skill" in result
+    assert "hello.sh" not in result
 
 
 # --- Skill environment variable allowlist tests ---
