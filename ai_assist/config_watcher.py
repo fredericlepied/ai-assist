@@ -4,6 +4,8 @@ This module provides shared configuration file watching used by both
 monitor mode and interactive mode.
 """
 
+from pathlib import Path
+
 from .config import get_config_dir
 from .file_watchdog import FileWatchdog
 
@@ -26,7 +28,8 @@ class ConfigWatcher:
             agent: The AiAssistAgent instance to reload configs for
         """
         self.agent = agent
-        self.watchers = []
+        self.watchers: list[FileWatchdog] = []
+        self._skill_watchers: list[FileWatchdog] = []
 
     async def start(self):
         """Start watching all config files"""
@@ -56,6 +59,28 @@ class ConfigWatcher:
             self.watchers.append(watcher)
             print(f"Watching {skills_file} for changes")
 
+        # Watch individual SKILL.md files
+        await self._watch_skill_files()
+
+    async def _watch_skill_files(self):
+        """Watch SKILL.md files in installed skill directories."""
+        for watcher in self._skill_watchers:
+            await watcher.stop()
+        self._skill_watchers = []
+
+        if not hasattr(self.agent, "skills_manager"):
+            return
+
+        for skill in self.agent.skills_manager.installed_skills:
+            if skill.source_type != "local":
+                continue
+            skill_md = Path(skill.cache_path) / "SKILL.md"
+            if skill_md.exists():
+                callback = self._make_skill_file_callback(skill.name)
+                watcher = FileWatchdog(skill_md, callback, debounce_seconds=1.0)
+                await watcher.start()
+                self._skill_watchers.append(watcher)
+
     async def _on_mcp_change(self):
         """Callback when mcp_servers.yaml changes"""
         try:
@@ -77,11 +102,26 @@ class ConfigWatcher:
         """Callback when installed-skills.json changes"""
         try:
             self.agent.skills_manager.load_installed_skills()
+            await self._watch_skill_files()
             print("✅ Skills reloaded")
         except Exception as e:
             print(f"❌ Failed to reload skills: {e}")
 
+    def _make_skill_file_callback(self, skill_name: str):
+        """Create a callback for a specific skill's SKILL.md."""
+
+        async def on_change():
+            try:
+                self.agent.skills_manager.load_installed_skills()
+                print(f"✅ Skill '{skill_name}' reloaded")
+            except Exception as e:
+                print(f"❌ Failed to reload skill '{skill_name}': {e}")
+
+        return on_change
+
     async def stop(self):
         """Stop all watchers"""
+        for watcher in self._skill_watchers:
+            await watcher.stop()
         for watcher in self.watchers:
             await watcher.stop()
