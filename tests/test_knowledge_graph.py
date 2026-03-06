@@ -1,6 +1,7 @@
 """Tests for bi-temporal knowledge graph"""
 
 from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -723,3 +724,11 @@ def test_relationship_exists(kg):
     assert kg.relationship_exists("job_uses_component", job.id, comp.id) is True
     assert kg.relationship_exists("other_type", job.id, comp.id) is False
     assert kg.relationship_exists("job_uses_component", comp.id, job.id) is False
+
+
+def test_init_raises_on_missing_extension_support():
+    """KnowledgeGraph raises RuntimeError when sqlite3 lacks enable_load_extension."""
+    mock_conn = MagicMock(spec=["execute", "commit", "close"])
+    with patch("sqlite3.connect", return_value=mock_conn):
+        with pytest.raises(RuntimeError, match="extension loading support"):
+            KnowledgeGraph(db_path=":memory:")

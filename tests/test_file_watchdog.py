@@ -140,18 +140,19 @@ async def test_stop_prevents_further_callbacks():
         test_file.write_text('{"test": 2}')
         await asyncio.sleep(0.3)
 
-        initial_count = callback.call_count
-
         # Stop watchdog
         await watchdog.stop()
         await asyncio.sleep(0.1)
+
+        # Reset count after stop so we only measure post-stop calls
+        callback.reset_mock()
 
         # Modify file again
         test_file.write_text('{"test": 3}')
         await asyncio.sleep(0.3)
 
         # Should not have triggered additional callbacks
-        assert callback.call_count == initial_count
+        assert callback.call_count == 0
 
 
 @pytest.mark.asyncio
