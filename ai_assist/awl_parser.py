@@ -1,0 +1,241 @@
+"""AWL (Agent Workflow Language) parser - line-oriented recursive descent"""
+
+import re
+
+from .awl_ast import (
+    ASTNode,
+    IfNode,
+    LoopNode,
+    ReturnNode,
+    SetNode,
+    TaskNode,
+    WorkflowNode,
+)
+from .awl_expressions import AWLExpressionEvaluator
+
+
+class ParseError(Exception):
+    def __init__(self, line: int, message: str):
+        self.line = line
+        super().__init__(f"Line {line}: {message}")
+
+
+VALID_HINTS = {"no-history", "no-kg"}
+
+
+class AWLParser:
+    def __init__(self, source: str):
+        self._lines = source.splitlines()
+        self._pos = 0
+        self._task_ids: set[str] = set()
+        self._expr = AWLExpressionEvaluator()
+
+    def parse(self) -> WorkflowNode:
+        self._skip_blank()
+        self._expect("@start")
+        body = self._parse_body()
+        self._expect("@end")
+        trailing = self._current_line()
+        if trailing is not None:
+            raise ParseError(self._pos + 1, f"Unexpected content after final @end: '{trailing}'")
+        return WorkflowNode(body=body)
+
+    def _current_line(self) -> str | None:
+        while self._pos < len(self._lines):
+            line = self._lines[self._pos].strip()
+            if line == "" or line.startswith("#"):
+                self._pos += 1
+                continue
+            if " #" in line:
+                line = line[: line.index(" #")].strip()
+            return line
+        return None
+
+    def _require_line(self) -> str:
+        line = self._current_line()
+        if line is None:
+            raise ParseError(self._pos + 1, "Unexpected end of input")
+        return line
+
+    def _advance(self) -> None:
+        self._pos += 1
+
+    def _skip_blank(self) -> None:
+        while self._pos < len(self._lines) and self._lines[self._pos].strip() == "":
+            self._pos += 1
+
+    def _expect(self, prefix: str) -> None:
+        line = self._current_line()
+        if line is None:
+            raise ParseError(self._pos + 1, f"Expected '{prefix}', got end of input")
+        if line != prefix and not line.startswith(prefix + " "):
+            if line != prefix:
+                raise ParseError(self._pos + 1, f"Expected '{prefix}', got '{line}'")
+        self._advance()
+
+    def _parse_body(self) -> list[ASTNode]:
+        nodes: list[ASTNode] = []
+        while True:
+            line = self._current_line()
+            if line is None or line == "@end" or line == "@else":
+                break
+            if line.startswith("@task"):
+                nodes.append(self._parse_task())
+            elif line.startswith("@set "):
+                nodes.append(self._parse_set())
+            elif line.startswith("@if "):
+                nodes.append(self._parse_if())
+            elif line.startswith("@loop "):
+                nodes.append(self._parse_loop())
+            elif line.startswith("@return"):
+                nodes.append(self._parse_return())
+            else:
+                raise ParseError(self._pos + 1, f"Unexpected: '{line}'")
+        return nodes
+
+    def _parse_task(self) -> TaskNode:
+        line = self._require_line()
+        parts = line.split()
+
+        if len(parts) < 2:
+            raise ParseError(self._pos + 1, "Expected task ID after @task")
+
+        task_id = parts[1]
+        if task_id in self._task_ids:
+            raise ParseError(self._pos + 1, f"Duplicate task ID '{task_id}'")
+        self._task_ids.add(task_id)
+
+        hints = [p.removeprefix("@") for p in parts[2:] if p.startswith("@")]
+        for hint in hints:
+            if hint not in VALID_HINTS:
+                raise ParseError(
+                    self._pos + 1,
+                    f"Unknown hint '@{hint}'. Valid hints: {', '.join('@' + h for h in sorted(VALID_HINTS))}",
+                )
+
+        self._advance()
+
+        goal = None
+        context = None
+        constraints = None
+        success = None
+        expose: list[str] = []
+
+        task_fields = {"Goal:", "Context:", "Constraints:", "Success:", "Expose:"}
+
+        while True:
+            field_line = self._current_line()
+            if field_line is None or field_line == "@end":
+                break
+
+            if field_line.startswith("Goal:"):
+                goal = self._parse_field_value("Goal:", task_fields)
+            elif field_line.startswith("Context:"):
+                context = self._parse_field_value("Context:", task_fields)
+            elif field_line.startswith("Constraints:"):
+                constraints = self._parse_field_value("Constraints:", task_fields)
+            elif field_line.startswith("Success:"):
+                success = self._parse_field_value("Success:", task_fields)
+            elif field_line.startswith("Expose:"):
+                expose_str = field_line.removeprefix("Expose:").strip()
+                expose = [v.strip() for v in expose_str.split(",")]
+                self._advance()
+            else:
+                break
+
+        if goal is None:
+            raise ParseError(self._pos + 1, f"Task '{task_id}' missing required Goal field")
+
+        self._expect("@end")
+
+        return TaskNode(
+            task_id=task_id,
+            hints=hints,
+            goal=goal,
+            context=context,
+            constraints=constraints,
+            success=success,
+            expose=expose,
+        )
+
+    def _parse_field_value(self, prefix: str, all_fields: set[str]) -> str:
+        value = self._require_line().removeprefix(prefix).strip()
+        self._advance()
+
+        while True:
+            cont = self._current_line()
+            if cont is None or cont.startswith("@"):
+                break
+            if any(cont.startswith(f) for f in all_fields):
+                break
+            value += " " + cont
+            self._advance()
+
+        return value
+
+    def _parse_set(self) -> SetNode:
+        line = self._require_line()
+        match = re.match(r"@set\s+(\w+)\s*=\s*(.*)", line)
+        if not match:
+            raise ParseError(self._pos + 1, "Invalid @set syntax. Expected: @set <var> = <value>")
+        variable = match.group(1)
+        value = match.group(2).strip().strip('"').strip("'")
+        self._advance()
+        return SetNode(variable=variable, value=value)
+
+    def _parse_if(self) -> IfNode:
+        line = self._require_line()
+        expression = line.removeprefix("@if").strip()
+        self._validate_expr(expression, "after @if")
+        self._advance()
+
+        then_body = self._parse_body()
+        else_body: list[ASTNode] = []
+
+        if self._current_line() == "@else":
+            self._advance()
+            else_body = self._parse_body()
+
+        self._expect("@end")
+        return IfNode(expression=expression, then_body=then_body, else_body=else_body)
+
+    def _parse_loop(self) -> LoopNode:
+        line = self._require_line()
+        match = re.match(r"@loop\s+(\w+)\s+as\s+(\w+)(.*)", line)
+        if not match:
+            raise ParseError(self._pos + 1, "Invalid @loop syntax. Expected: @loop <collection> as <item> [limit=N]")
+        collection = match.group(1)
+        item_var = match.group(2)
+        opts = match.group(3)
+        limit_match = re.search(r"limit=(\d+)", opts)
+        limit = int(limit_match.group(1)) if limit_match else None
+        collect_match = re.search(r"collect=(\w+)(?:\(([^)]+)\))?", opts)
+        collect = collect_match.group(1) if collect_match else None
+        collect_fields: list[str] = []
+        if collect_match and collect_match.group(2):
+            collect_fields = [f.strip() for f in collect_match.group(2).split(",")]
+        self._advance()
+
+        body = self._parse_body()
+        self._expect("@end")
+        return LoopNode(
+            collection=collection,
+            item_var=item_var,
+            limit=limit,
+            collect=collect,
+            collect_fields=collect_fields,
+            body=body,
+        )
+
+    def _validate_expr(self, expression: str, context: str) -> None:
+        try:
+            self._expr.validate_expression(expression)
+        except ValueError as e:
+            raise ParseError(self._pos + 1, f"Invalid expression {context}: {e}") from None
+
+    def _parse_return(self) -> ReturnNode:
+        line = self._require_line()
+        expression = line.removeprefix("@return").strip()
+        self._validate_expr(expression, "after @return")
+        self._advance()
+        return ReturnNode(expression=expression)

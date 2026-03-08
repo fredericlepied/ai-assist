@@ -24,6 +24,7 @@ Works with skills like:
 - 📝 **Report Generation**: Create and manage markdown reports
 - ⚡ **Hot Reload**: Schedule changes take effect immediately
 - 🚀 **Agent Skills**: Install specialized skills following [agentskills.io](https://agentskills.io/) specification
+- 🔄 **AWL Workflows**: Script multi-step agent workflows with conditionals, loops, and variable propagation
 
 ## Quick Start
 
@@ -446,6 +447,44 @@ See `.ai-assist/schedules.json.example` for complete examples.
 uv run ai-assist /query "What are the top 5 failing DCI jobs today?"
 ```
 
+### AWL Workflows
+
+Run multi-step agent workflows using AWL (Agent Workflow Language) scripts:
+
+```bash
+uv run ai-assist /run workflow.awl
+```
+
+AWL scripts define intent-driven workflows where the agent autonomously selects tools:
+
+```
+@start
+
+@task find_handlers @no-kg
+Goal: Find HTTP handlers defined in the repository.
+Expose: handlers
+@end
+
+@if len(handlers) > 0
+
+@loop handlers as handler limit=5 collect=summaries(handler_summary)
+
+@task inspect_handler @no-history
+Goal: Understand what ${handler} does.
+Expose: handler_summary
+@end
+
+@end
+
+@end
+
+@end
+```
+
+Loops support `collect=<var>` to accumulate results across iterations (map-reduce pattern). Use `collect=<var>(<fields>)` to capture only specific fields.
+
+See [docs/AWL_SPECIFICATIONS.md](docs/AWL_SPECIFICATIONS.md) for the full language reference.
+
 ### Knowledge Graph
 
 Query temporal data and track changes:
@@ -553,8 +592,13 @@ ai-assist/
 │   ├── monitors.py        # Monitoring tasks
 │   ├── state.py           # State management and caching
 │   ├── knowledge_graph.py # Temporal knowledge graph
+│   ├── awl_ast.py         # AWL AST node definitions
+│   ├── awl_parser.py      # AWL workflow language parser
+│   ├── awl_expressions.py # AWL expression evaluator
+│   ├── awl_runtime.py     # AWL workflow execution engine
 │   └── filesystem_tools.py # Filesystem operations
-├── tests/                  # Test suite (926 tests)
+├── emacs/                  # Emacs major mode for AWL files
+├── tests/                  # Test suite
 ├── .env.example           # Example environment variables
 ├── VERTEX_AI_SETUP.md     # Vertex AI troubleshooting
 ├── SECURITY.md            # Security model
@@ -564,6 +608,7 @@ ai-assist/
 
 ## Documentation
 
+- **[docs/AWL_SPECIFICATIONS.md](docs/AWL_SPECIFICATIONS.md)** - AWL (Agent Workflow Language) specification
 - **[docs/PERSONAL_SKILLS.md](docs/PERSONAL_SKILLS.md)** - Creating and managing personal Agent Skills
 - **[docs/IDENTITY.md](docs/IDENTITY.md)** - Complete guide to identity.yaml configuration
 - **[docs/MULTI_INSTANCE.md](docs/MULTI_INSTANCE.md)** - Running multiple ai-assist instances
@@ -571,6 +616,7 @@ ai-assist/
 - **[SECURITY.md](SECURITY.md)** - Security model for skill script execution
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development setup with pre-commit hooks
 - **[AGENTS.md](AGENTS.md)** - Development philosophy (TDD/DRY/Tracer Bullet)
+- **[presentation/](presentation/)** - Project presentation slides (LaTeX/Beamer)
 
 ## Development
 
