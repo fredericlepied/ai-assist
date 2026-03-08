@@ -167,8 +167,9 @@ async def query_with_feedback(
             feedback_state["status"] = "✨ Complete!"
             feedback_state["streaming"] = False
 
-        # Push updated spinner to the Live widget
-        live.update(create_feedback_display())
+        # Push updated spinner to the Live widget (only before response streaming starts)
+        if not response_started:
+            live.update(create_feedback_display())
 
     def create_feedback_display():
         """Create the feedback display"""
@@ -215,24 +216,23 @@ async def query_with_feedback(
             ):
                 # Handle text chunks
                 if isinstance(chunk, str):
-                    # First text chunk - stop spinner and start showing response
+                    # First text chunk - switch Live from spinner to Markdown display
                     if not response_started:
-                        live.stop()
-                        console.print(f"\n[bold cyan]{identity.assistant.nickname}:[/bold cyan] ", end="")
+                        console.print()
+                        console.print(f"[bold cyan]{identity.assistant.nickname}:[/bold cyan]")
                         response_started = True
 
-                    # Print chunk immediately
-                    console.print(chunk, end="")
                     full_response += chunk
+                    live.update(Markdown(full_response))
 
                 # Handle tool use notifications
                 elif isinstance(chunk, dict):
                     if chunk.get("type") == "tool_use":
-                        # Stop spinner before printing to avoid display corruption
+                        # Stop Live before printing to avoid display corruption
                         if not response_started:
                             live.stop()
                         else:
-                            console.print()  # New line before tool notification
+                            live.stop()
                         display_name = format_tool_display_name(chunk["name"])
                         console.print(f"\n[dim]🔧 {display_name}[/dim]")
 
@@ -245,32 +245,37 @@ async def query_with_feedback(
                                     console.print(f"[dim]   {line}[/dim]")
                             else:
                                 console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
-                        if not response_started:
+                        if response_started:
+                            # Restart Live with current Markdown content
+                            live = Live(Markdown(full_response), console=console, refresh_per_second=10)
+                            agent._active_live = live
+                            live.start()
+                        else:
                             live.update(create_feedback_display())
                             live.start()
 
                     elif chunk.get("type") == "cancelled":
                         if response_started:
-                            console.print()
+                            live.stop()
                         console.print("\n[yellow]Query cancelled[/yellow]")
                         break
 
                     elif chunk.get("type") == "done":
                         # Query complete
                         if response_started:
-                            console.print()  # Final newline
+                            live.stop()
                         break
 
                     elif chunk.get("type") == "error":
                         if response_started:
-                            console.print()
+                            live.stop()
                         console.print(f"\n[red]{chunk.get('message')}[/red]")
                         break
 
     except Exception as e:
         # Handle any streaming errors
-        if response_started:
-            console.print()
+        if response_started and live._started:
+            live.stop()
         console.print(f"\n[red]Error: {e}[/red]")
 
     finally:
@@ -858,6 +863,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                             identity = get_identity()
 
                             cancel_event = threading.Event()
+                            prompt_live = Live(Markdown(""), console=console, refresh_per_second=10)
                             with EscapeWatcher(cancel_event):
                                 async for chunk in agent.query_streaming(
                                     messages=messages, progress_callback=None, cancel_event=cancel_event
@@ -866,18 +872,18 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                                     if isinstance(chunk, str):
                                         if not response_started:
                                             console.print()  # Blank line before agent message
-                                            console.print(
-                                                f"[bold cyan]{identity.assistant.nickname}:[/bold cyan] ", end=""
-                                            )
+                                            console.print(f"[bold cyan]{identity.assistant.nickname}:[/bold cyan]")
+                                            prompt_live = Live(Markdown(""), console=console, refresh_per_second=10)
+                                            prompt_live.start()
                                             response_started = True
-                                        console.print(chunk, end="")
                                         full_response += chunk
+                                        prompt_live.update(Markdown(full_response))
 
                                     # Handle tool use notifications
                                     elif isinstance(chunk, dict):
                                         if chunk.get("type") == "tool_use":
-                                            if response_started:
-                                                console.print()
+                                            if prompt_live._started:
+                                                prompt_live.stop()
                                             display_name = format_tool_display_name(chunk["name"])
 
                                             # Show tool call with arguments
@@ -891,18 +897,23 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                                                         console.print(f"[dim]   {line}[/dim]")
                                                 else:
                                                     console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
-                                        elif chunk.get("type") == "cancelled":
                                             if response_started:
-                                                console.print()
+                                                prompt_live = Live(
+                                                    Markdown(full_response), console=console, refresh_per_second=10
+                                                )
+                                                prompt_live.start()
+                                        elif chunk.get("type") == "cancelled":
+                                            if prompt_live._started:
+                                                prompt_live.stop()
                                             console.print("\n[yellow]Query cancelled[/yellow]")
                                             break
                                         elif chunk.get("type") == "done":
-                                            if response_started:
-                                                console.print()
+                                            if prompt_live._started:
+                                                prompt_live.stop()
                                             break
                                         elif chunk.get("type") == "error":
-                                            if response_started:
-                                                console.print()
+                                            if prompt_live._started:
+                                                prompt_live.stop()
                                             console.print(f"\n[red]{chunk.get('message')}[/red]")
                                             break
 
