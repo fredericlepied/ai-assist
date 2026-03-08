@@ -8,6 +8,8 @@ from datetime import datetime
 from typing import Any
 
 from .agent import AiAssistAgent
+from .awl_parser import AWLParser
+from .awl_runtime import AWLRuntime
 from .commands import get_command_suggestion, is_valid_cli_command, is_valid_interactive_command
 from .config import get_config, get_config_dir
 from .identity import AssistantIdentity, Identity, UserIdentity, get_identity
@@ -310,6 +312,32 @@ async def monitoring_mode(agent: AiAssistAgent, config, state_manager: StateMana
     except KeyboardInterrupt:
         print("\nStopping monitoring...")
         scheduler.stop()
+
+
+async def run_awl_script(agent: AiAssistAgent, script_path: str):
+    """Run an AWL workflow script"""
+    from pathlib import Path
+
+    path = Path(script_path)
+    if not path.exists():
+        print(f"Error: File not found: {script_path}")
+        sys.exit(1)
+
+    source = path.read_text()
+    workflow = AWLParser(source).parse()
+    runtime = AWLRuntime(agent)
+    print(f"Running AWL workflow: {path.name}")
+    result = await runtime.execute(workflow)
+
+    for outcome in result.task_outcomes:
+        status_icon = "+" if outcome.status == "success" else "-"
+        print(f"  [{status_icon}] {outcome.status}: {outcome.summary[:100]}")
+
+    if result.return_value is not None:
+        print(f"\nResult: {result.return_value}")
+
+    if not result.success:
+        sys.exit(1)
 
 
 async def run_query(agent: AiAssistAgent, query: str):
@@ -635,6 +663,7 @@ async def main_async():
                 print("\nAvailable commands:")
                 print("  /monitor           - Start monitoring DCI and Jira")
                 print("  /query '<text>'    - Run a one-time query")
+                print("  /run <script.awl>  - Run an AWL workflow script")
                 print("  /interactive       - Interactive mode")
                 print("  /status            - Show state statistics")
                 print("  /clear-cache       - Clear expired cache")
@@ -654,6 +683,12 @@ async def main_async():
             elif command == "monitor":
                 assert agent is not None
                 await monitoring_mode(agent, config, state_manager, knowledge_graph)
+            elif command == "run":
+                if len(sys.argv) < 3:
+                    print("Usage: ai-assist /run <script.awl>")
+                    sys.exit(1)
+                assert agent is not None
+                await run_awl_script(agent, sys.argv[2])
             elif command == "query":
                 if len(sys.argv) < 3:
                     print("Usage: ai-assist /query 'your question here'")

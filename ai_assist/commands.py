@@ -19,6 +19,7 @@ CLI_COMMANDS = [
     "/monitor",
     "/query",
     "/interactive",
+    "/run",
     "/status",
     "/clear-cache",
     "/identity-show",

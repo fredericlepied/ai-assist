@@ -222,9 +222,9 @@
 \end{frame}
 
 % ── Slide 5: Multi-Mode Operation ────────────────────────────────
-\begin{frame}{Three Modes, One Agent}
+\begin{frame}{Four Modes, One Agent}
 \begin{columns}[T]
-\begin{column}{0.32\textwidth}
+\begin{column}{0.24\textwidth}
 \textbf{\color{rhred}Interactive}
 \begin{itemize}\scriptsize
   \item Rich TUI with streaming
@@ -236,7 +236,7 @@
 \smallskip
 \texttt{\scriptsize ai-assist}
 \end{column}
-\begin{column}{0.32\textwidth}
+\begin{column}{0.24\textwidth}
 \textbf{\color{rhblue}Monitor}
 \begin{itemize}\scriptsize
   \item Periodic task execution
@@ -248,7 +248,7 @@
 \smallskip
 \texttt{\scriptsize ai-assist /monitor}
 \end{column}
-\begin{column}{0.32\textwidth}
+\begin{column}{0.24\textwidth}
 \textbf{\color{rhgreen}Query}
 \begin{itemize}\scriptsize
   \item One-off questions
@@ -260,11 +260,23 @@
 \smallskip
 \texttt{\scriptsize ai-assist /query "..."}
 \end{column}
+\begin{column}{0.24\textwidth}
+\textbf{\color{rhorange}AWL Workflow}
+\begin{itemize}\scriptsize
+  \item Multi-step orchestration
+  \item Conditionals and loops
+  \item Variable propagation
+  \item Intent-driven tasks
+  \item Map-reduce patterns
+\end{itemize}
+\smallskip
+\texttt{\scriptsize ai-assist /run x.awl}
+\end{column}
 \end{columns}
 
 \vfill
 \centering
-\small All three modes share the same \texttt{AiAssistAgent} core, MCP connections, and Knowledge Graph.
+\small All four modes share the same \texttt{AiAssistAgent} core, MCP connections, and Knowledge Graph.
 \end{frame}
 
 % ── Slide 6: Identity System ─────────────────────────────────────
@@ -1160,6 +1172,61 @@ def filter_env(env):
   \usebox{\edadiagram}\\[0.4cm]
   \normalsize Cross-reference information from various sources to find where the defect escaped\\
   Generate EDA report $\to$ Google Doc (Optional)
+\end{frame}
+
+% ══════════════════════════════════════════════════════════════════
+\section{AWL -- Agent Workflow Language}
+% ══════════════════════════════════════════════════════════════════
+
+% ── Slide: AWL Overview ──────────────────────────────────────────
+\begin{frame}[fragile]{Scripting Multi-Step Agent Workflows}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{Intent-Driven Orchestration}
+\begin{itemize}\small
+  \item Scripts describe \emph{what} to achieve, not \emph{how}
+  \item Agent autonomously selects tools and strategies
+  \item Deterministic workflow structure with dynamic reasoning
+  \item Variables propagate between tasks
+\end{itemize}
+
+\medskip
+\textbf{Directives}
+\begin{itemize}\small
+  \item \texttt{@task} -- agent objectives with goals and exposed variables
+  \item \texttt{@set} -- variable assignment
+  \item \texttt{@if/@else} -- conditional execution
+  \item \texttt{@loop} -- iterate over collections
+  \item \texttt{@return} -- workflow result
+\end{itemize}
+\end{column}
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=code,language={}]
+@start
+
+@task find_handlers @no-kg
+Goal: Find HTTP handlers.
+Expose: handlers
+@end
+
+@if len(handlers) > 0
+
+@loop handlers as h limit=5
+  @task inspect @no-history
+  Goal: What does ${h} do?
+  Expose: summary
+  @end
+@end
+
+@end
+
+@return handlers
+@end
+\end{lstlisting}
+\vspace{-2mm}
+{\scriptsize\texttt{uv run ai-assist /run workflow.awl}}
+\end{column}
+\end{columns}
 \end{frame}
 
 % ══════════════════════════════════════════════════════════════════
