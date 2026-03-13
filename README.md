@@ -459,7 +459,10 @@ Run multi-step agent workflows using AWL (Agent Workflow Language) scripts:
 
 ```bash
 uv run ai-assist /run workflow.awl
+uv run ai-assist /run workflow.awl project=CILAB days=7
 ```
+
+Initial variables can be passed as `key=value` arguments and are available as `${key}` in the script.
 
 AWL scripts define intent-driven workflows where the agent autonomously selects tools:
 

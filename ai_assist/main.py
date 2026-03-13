@@ -320,7 +320,7 @@ async def monitoring_mode(agent: AiAssistAgent, config, state_manager: StateMana
         scheduler.stop()
 
 
-async def run_awl_script(agent: AiAssistAgent, script_path: str):
+async def run_awl_script(agent: AiAssistAgent, script_path: str, variables: dict | None = None):
     """Run an AWL workflow script"""
     from pathlib import Path
 
@@ -333,7 +333,7 @@ async def run_awl_script(agent: AiAssistAgent, script_path: str):
     workflow = AWLParser(source).parse()
     runtime = AWLRuntime(agent)
     print(f"Running AWL workflow: {path.name}")
-    result = await runtime.execute(workflow)
+    result = await runtime.execute(workflow, variables=variables)
 
     for outcome in result.task_outcomes:
         status_icon = "+" if outcome.status == "success" else "-"
@@ -677,7 +677,7 @@ async def main_async():
                 print("\nAvailable commands:")
                 print("  /monitor           - Start monitoring DCI and Jira")
                 print("  /query '<text>'    - Run a one-time query")
-                print("  /run <script.awl>  - Run an AWL workflow script")
+                print("  /run <script.awl> [key=value ...]  - Run an AWL workflow script")
                 print("  /interactive       - Interactive mode")
                 print("  /status            - Show state statistics")
                 print("  /clear-cache       - Clear expired cache")
@@ -701,10 +701,15 @@ async def main_async():
                 await monitoring_mode(agent, config, state_manager, knowledge_graph)
             elif command == "run":
                 if len(sys.argv) < 3:
-                    print("Usage: ai-assist /run <script.awl>")
+                    print("Usage: ai-assist /run <script.awl> [key=value ...]")
                     sys.exit(1)
                 assert agent is not None
-                await run_awl_script(agent, sys.argv[2])
+                variables = {}
+                for arg in sys.argv[3:]:
+                    if "=" in arg:
+                        k, _, v = arg.partition("=")
+                        variables[k] = v
+                await run_awl_script(agent, sys.argv[2], variables=variables or None)
             elif command == "query":
                 if len(sys.argv) < 3:
                     print("Usage: ai-assist /query 'your question here'")

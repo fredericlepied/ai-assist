@@ -167,6 +167,44 @@ This ensures you use the correct argument names.
             }
         )
 
+        # AWL script execution tool (only if agent is available)
+        if self.agent is not None:
+            tools.append(
+                {
+                    "name": "introspection__execute_awl_script",
+                    "description": """Execute an AWL (Agent Workflow Language) script from the filesystem.
+
+Use this tool when:
+- User asks to run an AWL workflow or references a .awl file
+- A task requires structured multi-step orchestration with variables and conditionals
+- User mentions workflow files like "run the analysis script"
+
+Script search order for relative paths:
+1. Current working directory
+
+Variable injection: Pass {"key": "value"} to pre-populate workflow variables (${key} in scripts).
+
+Returns task outcomes, return value, and final variables.
+""",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "script_path": {
+                                "type": "string",
+                                "description": "Path to AWL script (.awl extension, relative or absolute)",
+                            },
+                            "variables": {
+                                "type": "object",
+                                "description": "Optional initial variables to inject into the workflow",
+                                "additionalProperties": True,
+                            },
+                        },
+                        "required": ["script_path"],
+                    },
+                    "_server": "introspection",
+                }
+            )
+
         # MCP prompt execution tool (only if agent is available)
         if self.agent is not None:
             tools.append(
@@ -294,6 +332,7 @@ Example: Search for previous mentions of "DCI failures" in conversation.
             "search_conversation_history": self._search_conversation_history,
             "inspect_mcp_prompt": self._inspect_mcp_prompt,
             "execute_mcp_prompt": self._execute_mcp_prompt,
+            "execute_awl_script": self._execute_awl_script,
             "get_tool_help": self._get_tool_help,
             "get_skill_help": self._get_skill_help,
         }
@@ -642,3 +681,50 @@ Example: Search for previous mentions of "DCI failures" in conversation.
             result,
             indent=2,
         )
+
+    async def _execute_awl_script(self, arguments: dict) -> str:
+        """Execute an AWL script with optional variable injection"""
+        from pathlib import Path
+
+        from .awl_parser import AWLParser, ParseError
+        from .awl_runtime import AWLRuntime, AWLRuntimeError
+
+        if self.agent is None:
+            return "Error: Agent not available for AWL execution"
+
+        script_path = arguments.get("script_path", "")
+        variables = arguments.get("variables") or {}
+
+        if not script_path.endswith(".awl"):
+            return f"Error: Script must have .awl extension, got: {script_path}"
+
+        path_obj = Path(script_path).expanduser()
+
+        if not path_obj.is_absolute():
+            candidate = Path.cwd() / script_path
+            if not candidate.exists() or not candidate.is_file():
+                return f"Error: AWL script not found: {script_path}\nSearched in: {Path.cwd()}"
+            path_obj = candidate
+        elif not path_obj.exists() or not path_obj.is_file():
+            return f"Error: AWL script not found: {script_path}"
+
+        try:
+            source = path_obj.read_text()
+            workflow = AWLParser(source).parse()
+        except ParseError as e:
+            return f"AWL Parse Error in {path_obj.name}:\n{e}"
+        except Exception as e:
+            return f"Error reading script: {e}"
+
+        try:
+            runtime = AWLRuntime(self.agent)
+            result = await runtime.execute(workflow, variables=variables or None)
+        except AWLRuntimeError as e:
+            return f"AWL Runtime Error:\n{e}"
+
+        lines = [f"AWL Workflow: {path_obj.name}", f"Success: {result.success}"]
+        if result.return_value is not None:
+            lines.append(f"Return: {json.dumps(result.return_value)}")
+        for outcome in result.task_outcomes:
+            lines.append(f"  [{outcome.status}] {outcome.summary[:100]}")
+        return "\n".join(lines)

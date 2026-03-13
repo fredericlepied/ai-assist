@@ -181,6 +181,21 @@ Example:
 
 Goal: Find where ${target} is initialized.
 
+## Initial Variables
+
+Variables can be injected before the script runs, without needing `@set`.
+
+**From the CLI:**
+
+```bash
+ai-assist /run workflow.awl target="HTTP server" days=7
+```
+
+**From an agent prompt:** ask the agent to run a `.awl` file and it will call the
+`introspection__execute_awl_script` tool with the variables you specify.
+
+Injected variables are available from the first node, just like `@set` variables.
+
 ---
 
 # Conditional Execution
