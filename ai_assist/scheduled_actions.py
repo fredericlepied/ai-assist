@@ -2,10 +2,13 @@
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
 
 
 class ScheduledAction(BaseModel):
@@ -68,7 +71,7 @@ class ScheduledActionManager:
             return self.actions
 
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"Error loading scheduled actions: {e}")
+            logger.error("Error loading scheduled actions: %s", e)
             return []
 
     async def save_action(self, action: ScheduledAction):
@@ -276,7 +279,7 @@ class ScheduledActionManager:
             print("Waking up executor...")
             self._executor_event.set()
         else:
-            print("Warning: Executor event not initialized yet")
+            logger.warning("Executor event not initialized yet")
 
     async def start_executor(self):
         """Start event-driven executor (no polling)"""
@@ -317,5 +320,5 @@ class ScheduledActionManager:
                 print("Scheduled action executor stopped")
                 break
             except Exception as e:
-                print(f"Error in scheduled action executor: {e}")
+                logger.exception("Error in scheduled action executor: %s", e)
                 await asyncio.sleep(60)  # Wait a minute before retrying

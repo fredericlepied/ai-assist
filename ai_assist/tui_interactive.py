@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import threading
@@ -32,6 +33,8 @@ from .knowledge_graph import KnowledgeGraph
 from .prompt_utils import extract_prompt_messages
 from .state import StateManager
 from .tui import AiAssistCompleter, format_tool_args, format_tool_display_name
+
+logger = logging.getLogger(__name__)
 
 
 async def display_notification(console: Console, notification: dict):
@@ -102,7 +105,7 @@ class NotificationWatcher:
                     except json.JSONDecodeError:
                         pass  # Skip malformed lines
         except Exception as e:
-            print(f"Error reading notification log: {e}")
+            logger.warning("Error reading notification log: %s", e)
 
     async def start(self):
         """Start watching notification log"""

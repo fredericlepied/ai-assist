@@ -22,6 +22,7 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-cov>=4.0.0",
     "pytest-mock>=3.14.0",
     "pytest-xdist>=3.5.0",
     "pre-commit>=3.6.0",
@@ -31,6 +32,7 @@ dev = [
     "mypy>=1.14.0",
     "types-PyYAML>=6.0.0",
     "pylint>=3.0.0",
+    "bandit[toml]>=1.7.0",
 ]
 
 [project.scripts]
@@ -157,6 +159,22 @@ min-similarity-lines = 5
 ignore-comments = true
 ignore-docstrings = true
 ignore-imports = true
+
+[tool.coverage.report]
+fail_under = 71
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "build", "dist", "examples"]
+skips = [
+    "B101",  # assert_used check (common in tests)
+    "B110",  # try_except_pass - intentional best-effort error handling
+    "B404",  # subprocess import - needed for shell tools
+    "B603",  # subprocess without shell - we sanitize inputs
+    "B606",  # start_process_with_no_shell - intentional for code reloading
+    "B607",  # partial_path - using standard system tools (git, notify-send, etc.)
+    "B108",  # hardcoded_tmp_directory - acceptable for temp files
+    "B113",  # request_without_timeout - false positive, we do specify timeouts
+]
 
 [dependency-groups]
 dev = [

@@ -10,10 +10,11 @@ pip install -e ".[dev]"
 
 This installs:
 - pytest (testing framework)
+- pytest-cov (coverage; run `make test-cov` or `pytest --cov=ai_assist --cov-report=term`)
 - pre-commit (git hooks)
 - black (code formatting)
 - isort (import sorting)
-- ruff (fast linting)
+- ruff (linting and import sorting)
 
 ### 2. Set Up Pre-commit Hooks
 
@@ -23,8 +24,7 @@ pre-commit install
 
 This installs git hooks that will automatically:
 - Format code with black
-- Sort imports with isort
-- Lint code with ruff
+- Lint and sort imports with ruff (ruff handles both; see `.pre-commit-config.yaml`)
 - Fix trailing whitespace and line endings
 - Run tests with pytest
 
@@ -76,10 +76,10 @@ The pre-commit hooks will run automatically when you commit. They include:
 
 ### Formatting
 - **black**: Formats Python code to a consistent style (120 char line length)
-- **isort**: Sorts and organizes imports
+- **ruff**: Linting and import sorting (replaces isort in hooks; see `.pre-commit-config.yaml`)
 
 ### Linting
-- **ruff**: Fast Python linter (checks for errors, style issues, bugs)
+- **ruff**: Fast Python linter (checks for errors, style issues, bugs; also sorts imports)
 
 ### Basic Checks
 - Remove trailing whitespace
@@ -164,8 +164,9 @@ pytest tests/test_filesystem_tools.py
 # Run only agent tests
 pytest tests/test_agent*.py
 
-# Run with coverage
-pytest --cov=ai_assist --cov-report=html
+# Run with coverage (target: ≥71%; build fails below 71%)
+make test-cov
+# or: pytest --cov=ai_assist --cov-report=html --cov-report=term
 
 # Run tests in parallel (requires pytest-xdist)
 pytest -n auto

@@ -99,7 +99,7 @@ class TestScheduleLoader:
         assert len(monitors) == 0
         assert len(tasks) == 0
 
-    def test_load_with_invalid_monitor(self, temp_json_file, capsys):
+    def test_load_with_invalid_monitor(self, temp_json_file, caplog):
         """Test that invalid monitors are skipped with warning"""
         data = {
             "version": "1.0",
@@ -111,18 +111,18 @@ class TestScheduleLoader:
         }
         temp_json_file.write_text(json.dumps(data))
 
-        loader = ScheduleLoader(temp_json_file)
-        monitors = loader.load_monitors()
+        with caplog.at_level("WARNING"):
+            loader = ScheduleLoader(temp_json_file)
+            monitors = loader.load_monitors()
 
         # Should load only the valid monitor
         assert len(monitors) == 1
         assert monitors[0].name == "Valid Monitor"
 
-        # Should print warning about invalid monitor
-        captured = capsys.readouterr()
-        assert "Invalid Monitor" in captured.out or "Skipping invalid monitor" in captured.out
+        # Should log warning about invalid monitor
+        assert "Invalid Monitor" in caplog.text or "Skipping invalid monitor" in caplog.text
 
-    def test_load_with_missing_required_fields(self, temp_json_file, capsys):
+    def test_load_with_missing_required_fields(self, temp_json_file, caplog):
         """Test that monitors with missing required fields are skipped"""
         data = {
             "version": "1.0",
@@ -136,26 +136,25 @@ class TestScheduleLoader:
         }
         temp_json_file.write_text(json.dumps(data))
 
-        loader = ScheduleLoader(temp_json_file)
-        monitors = loader.load_monitors()
+        with caplog.at_level("WARNING"):
+            loader = ScheduleLoader(temp_json_file)
+            monitors = loader.load_monitors()
 
         assert len(monitors) == 0
-        captured = capsys.readouterr()
-        assert "Incomplete Monitor" in captured.out or "Skipping invalid monitor" in captured.out
+        assert "Incomplete Monitor" in caplog.text or "Skipping invalid monitor" in caplog.text
 
-    def test_load_with_corrupted_json(self, temp_json_file, capsys):
+    def test_load_with_corrupted_json(self, temp_json_file, caplog):
         """Test handling of corrupted JSON file"""
         temp_json_file.write_text("{invalid json")
 
-        loader = ScheduleLoader(temp_json_file)
-        monitors = loader.load_monitors()
-        tasks = loader.load_tasks()
+        with caplog.at_level("ERROR"):
+            loader = ScheduleLoader(temp_json_file)
+            monitors = loader.load_monitors()
+            tasks = loader.load_tasks()
 
         assert len(monitors) == 0
         assert len(tasks) == 0
-
-        captured = capsys.readouterr()
-        assert "Failed to parse" in captured.out or "Error" in captured.out
+        assert "Failed to parse" in caplog.text or "returning empty schedules" in caplog.text
 
     def test_enabled_and_disabled_schedules(self, temp_json_file):
         """Test loading both enabled and disabled schedules"""

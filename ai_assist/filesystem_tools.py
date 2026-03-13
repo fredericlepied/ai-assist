@@ -871,7 +871,9 @@ class FilesystemTools:
                 if not cwd.exists() or not cwd.is_dir():
                     return f"Error: Invalid working directory: {working_dir}"
 
-            result = subprocess.run(
+            # shell=True is required for shell command execution with pipes, redirects, etc.
+            # Commands are validated through allowlists and confirmation callbacks above
+            result = subprocess.run(  # nosec B602
                 command, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False
             )
 

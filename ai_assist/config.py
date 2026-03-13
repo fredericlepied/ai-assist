@@ -1,5 +1,6 @@
 """Configuration management for ai-assist"""
 
+import logging
 import os
 from pathlib import Path
 
@@ -8,6 +9,8 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 def get_config_dir(override: str | None = None) -> Path:
@@ -162,13 +165,13 @@ def load_mcp_servers_from_yaml(path: Path) -> dict[str, MCPServerConfig]:
         return servers
 
     except yaml.YAMLError as e:
-        print(f"Error parsing MCP servers YAML: {e}")
+        logger.error("Error parsing MCP servers YAML: %s", e)
         return {}
     except KeyError as e:
-        print(f"Missing required field in MCP server config: {e}")
+        logger.error("Missing required field in MCP server config: %s", e)
         return {}
     except Exception as e:
-        print(f"Error loading MCP servers: {e}")
+        logger.error("Error loading MCP servers: %s", e)
         return {}
 
 

@@ -1,5 +1,6 @@
 """Notification dispatcher for multi-channel delivery"""
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from ai_assist.config import get_config_dir
+
+logger = logging.getLogger(__name__)
 
 
 class Notification(BaseModel):
@@ -59,7 +62,7 @@ class NotificationDispatcher:
                 results[channel_name] = success
                 notification.delivered[channel_name] = success
             except Exception as e:
-                print(f"Error delivering to {channel_name}: {e}")
+                logger.error("Error delivering to %s: %s", channel_name, e)
                 results[channel_name] = False
 
         return results

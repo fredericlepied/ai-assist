@@ -1,6 +1,7 @@
 """Monitoring scheduler"""
 
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,8 @@ from .state import StateManager
 from .suspend_detector import SuspendDetector
 from .task_runner import TaskRunner
 from .tasks import TaskLoader
+
+logger = logging.getLogger(__name__)
 
 
 class MonitoringScheduler:
@@ -82,7 +85,7 @@ class MonitoringScheduler:
 
             return runners
         except Exception as e:
-            print(f"Error loading monitors from {self.schedule_file}: {e}")
+            logger.error("Error loading monitors from %s: %s", self.schedule_file, e)
             return []
 
     def _load_user_tasks(self) -> list[TaskRunner]:
@@ -107,7 +110,7 @@ class MonitoringScheduler:
 
             return runners
         except Exception as e:
-            print(f"Error loading tasks from {self.schedule_file}: {e}")
+            logger.error("Error loading tasks from %s: %s", self.schedule_file, e)
             return []
 
     async def reload_schedules(self):
@@ -167,8 +170,7 @@ class MonitoringScheduler:
             print("=" * 60 + "\n")
 
         except Exception as e:
-            print(f"✗ Failed to reload schedules: {e}")
-            print("Keeping existing schedules")
+            logger.error("Failed to reload schedules: %s; keeping existing schedules", e)
             print("=" * 60 + "\n")
 
     async def start(self):
@@ -298,7 +300,7 @@ class MonitoringScheduler:
                 # Task was cancelled (e.g., during reload) - exit gracefully
                 break
             except Exception as e:
-                print(f"Error in {name}: {e}")
+                logger.exception("Error in %s: %s", name, e)
 
             if not (task_def and (task_def.is_time_based or task_def.is_interval_with_range)):
                 try:
