@@ -1,11 +1,14 @@
 """Identity management for ai-assist"""
 
+import logging
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, Field
 
 from .config import get_config_dir
+
+logger = logging.getLogger(__name__)
 
 
 class UserIdentity(BaseModel):
@@ -68,8 +71,7 @@ class Identity(BaseModel):
             return cls(**data)
 
         except (yaml.YAMLError, TypeError, ValueError) as e:
-            print(f"Warning: Error loading identity from {path}: {e}")
-            print("Using default identity")
+            logger.warning("Error loading identity from %s: %s; using default identity", path, e)
             return cls()
 
     def save_to_file(self, path: Path | None = None):

@@ -39,6 +39,14 @@ repos:
       - id: ruff
         args: ['--fix', '--line-length=120']
 
+  # Security linting with bandit
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.10
+    hooks:
+      - id: bandit
+        args: ['-c', 'pyproject.toml']
+        additional_dependencies: ['bandit[toml]']
+
   # Type checking with mypy
   - repo: local
     hooks:
@@ -61,12 +69,12 @@ repos:
         always_run: true
         verbose: true
 
-  # Run tests with pytest
+  # Run tests with pytest (parallel) and coverage report (warning only; gate via make test-cov or CI).
   - repo: local
     hooks:
       - id: pytest
         name: pytest
-        entry: uv run pytest
+        entry: bash -c 'uv run pytest --cov=ai_assist --cov-report=term --cov-fail-under=0 && uv run python -m coverage report --fail-under=71'
         language: system
         pass_filenames: false
         always_run: true

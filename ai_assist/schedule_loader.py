@@ -1,9 +1,12 @@
 """Load schedules from JSON file"""
 
 import json
+import logging
 from pathlib import Path
 
 from .tasks import TaskDefinition
+
+logger = logging.getLogger(__name__)
 
 
 class ScheduleLoader:
@@ -42,7 +45,7 @@ class ScheduleLoader:
                 task.validate()
                 tasks.append(task)
             except (KeyError, ValueError) as e:
-                print(f"Warning: Skipping invalid monitor '{monitor_data.get('name', 'unknown')}': {e}")
+                logger.warning("Skipping invalid monitor '%s': %s", monitor_data.get("name", "unknown"), e)
 
         return tasks
 
@@ -61,7 +64,7 @@ class ScheduleLoader:
                 task.validate()
                 tasks.append(task)
             except (KeyError, ValueError) as e:
-                print(f"Warning: Skipping invalid task '{task_data.get('name', 'unknown')}': {e}")
+                logger.warning("Skipping invalid task '%s': %s", task_data.get("name", "unknown"), e)
 
         return tasks
 
@@ -124,6 +127,5 @@ class ScheduleLoader:
             return data
 
         except json.JSONDecodeError as e:
-            print(f"Error: Failed to parse {self.json_file}: {e}")
-            print("Returning empty schedules")
+            logger.error("Failed to parse %s: %s; returning empty schedules", self.json_file, e)
             return {"version": "1.0", "monitors": [], "tasks": []}

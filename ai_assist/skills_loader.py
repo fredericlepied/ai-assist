@@ -105,14 +105,14 @@ class SkillsLoader:
         if not skill_file.exists():
             raise FileNotFoundError(f"SKILL.md not found in {skill_path}")
 
-        # Parse SKILL.md
         metadata, body = self._parse_skill_file(skill_file, skill_path, source_type, None)
+        return self._build_skill_content(skill_path, metadata, body)
 
-        # Discover file references
+    def _build_skill_content(self, skill_path: Path, metadata: SkillMetadata, body: str) -> SkillContent:
+        """Build SkillContent from parsed metadata and body by discovering scripts, references, assets."""
         scripts = self._discover_files(skill_path / "scripts")
         references = self._discover_files(skill_path / "references")
         assets = self._discover_files(skill_path / "assets")
-
         return SkillContent(metadata=metadata, body=body, scripts=scripts, references=references, assets=assets)
 
     def load_skill_from_git(self, repo_url: str, skill_subpath: str, branch: str = "main") -> SkillContent:
@@ -145,15 +145,8 @@ class SkillsLoader:
         if not skill_file.exists():
             raise FileNotFoundError(f"SKILL.md not found in {skill_path}")
 
-        # Parse SKILL.md
         metadata, body = self._parse_skill_file(skill_file, skill_path, "git", repo_url)
-
-        # Discover file references
-        scripts = self._discover_files(skill_path / "scripts")
-        references = self._discover_files(skill_path / "references")
-        assets = self._discover_files(skill_path / "assets")
-
-        return SkillContent(metadata=metadata, body=body, scripts=scripts, references=references, assets=assets)
+        return self._build_skill_content(skill_path, metadata, body)
 
     def load_skill_from_clawhub(self, slug: str, version: str | None = None) -> SkillContent:
         """Load a skill from the ClawHub registry.

@@ -1,6 +1,7 @@
 """Manage Agent Skills installation and availability"""
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -8,6 +9,8 @@ from pydantic import BaseModel, ConfigDict
 
 from .config import get_config_dir
 from .skills_loader import SkillContent, SkillsLoader
+
+logger = logging.getLogger(__name__)
 
 
 class InstalledSkill(BaseModel):
@@ -65,13 +68,13 @@ class SkillsManager:
                         )
                         self.loaded_skills[installed_skill.name] = content
                     else:
-                        print(f"Warning: Skill cache not found for '{installed_skill.name}' at {skill_path}")
+                        logger.warning("Skill cache not found for '%s' at %s", installed_skill.name, skill_path)
 
                 except Exception as e:
-                    print(f"Warning: Failed to load installed skill: {e}")
+                    logger.warning("Failed to load installed skill: %s", e)
 
         except json.JSONDecodeError as e:
-            print(f"Error: Failed to parse {self.installed_skills_file}: {e}")
+            logger.error("Failed to parse %s: %s", self.installed_skills_file, e)
             self.installed_skills = []
             self.loaded_skills = {}
 

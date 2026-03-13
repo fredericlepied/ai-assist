@@ -1,5 +1,6 @@
 """Condition evaluation and action execution for user-defined tasks"""
 
+import logging
 import re
 from datetime import datetime
 from typing import Any
@@ -7,6 +8,8 @@ from typing import Any
 from .agent import AiAssistAgent
 from .config import get_config_dir
 from .state import StateManager
+
+logger = logging.getLogger(__name__)
 
 
 class ConditionEvaluator:
@@ -164,7 +167,7 @@ class ActionExecutor:
         elif action_type == "store_kg":
             await self._store_kg(action, context)
         else:
-            print(f"Unknown action type: {action_type}")
+            logger.warning("Unknown action type: %s", action_type)
 
     async def _notify(self, action: dict, context: dict):
         """Send notification (console for now, extensible to Slack/email)"""
@@ -221,7 +224,7 @@ class ActionExecutor:
             await self.agent.query(prompt)
             print(f"📄 Created Google Doc: {title}")
         except Exception as e:
-            print(f"Error creating Google Doc: {e}")
+            logger.exception("Error creating Google Doc: %s", e)
 
     async def _store_kg(self, action: dict, context: dict):
         """Store result in knowledge graph"""

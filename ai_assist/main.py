@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import sys
 from datetime import datetime
@@ -19,6 +20,8 @@ from .monitors import MonitoringScheduler
 from .prompt_utils import extract_prompt_messages
 from .state import StateManager
 from .tui import format_tool_display_name
+
+logger = logging.getLogger(__name__)
 
 
 async def handle_prompt_command_basic(command: str, agent: AiAssistAgent, conversation_history: list, identity) -> bool:
@@ -111,7 +114,8 @@ async def handle_prompt_command_basic(command: str, agent: AiAssistAgent, conver
         conversation_history.append({"role": "assistant", "content": response})
 
     except Exception as e:
-        print(f"Error executing prompt: {e}")
+        logger.exception("Error executing prompt: %s", e)
+        print("Error executing prompt.")
 
     return True
 
@@ -298,6 +302,7 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
             print("\n\nGoodbye!")
             break
         except Exception as e:
+            logger.exception("Error in interactive loop: %s", e)
             print(f"\nError: {e}\n")
 
 

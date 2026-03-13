@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 # (we pass project_id explicitly to AnthropicVertex)
 logging.getLogger("google.auth._default").setLevel(logging.ERROR)
 
+logger = logging.getLogger(__name__)
+
 
 _CONTENT_BLOCK_KEYS = {
     "text": {"type", "text", "citations"},
@@ -335,7 +337,7 @@ class AiAssistAgent:
             else:
                 # Conservative default for unknown models
                 max_tokens = 4096
-                print(f"⚠️  Unknown model '{model}', using conservative max_tokens={max_tokens}")
+                logger.warning("Unknown model '%s', using conservative max_tokens=%s", model, max_tokens)
 
         return max_tokens
 
@@ -360,10 +362,7 @@ class AiAssistAgent:
                 # No warning if not connected yet - it may still connect later
 
             except Exception as e:
-                print(f"✗ Failed to connect to {server_name}: {e}")
-                import traceback
-
-                traceback.print_exc()
+                logger.exception("Failed to connect to %s: %s", server_name, e)
 
         # Add introspection tools for self-awareness
         introspection_tool_defs = self.introspection_tools.get_tool_definitions()
@@ -450,10 +449,10 @@ class AiAssistAgent:
                     try:
                         await asyncio.wait_for(session.initialize(), timeout=60.0)
                     except TimeoutError:
-                        print(f"⚠ Warning: {name} timed out during initialization", flush=True)
+                        logger.warning("%s timed out during initialization", name)
                         raise
                     except Exception as e:
-                        print(f"✗ Error connecting to {name}: {e}", flush=True)
+                        logger.exception("Error connecting to %s: %s", name, e)
                         raise
                     self.sessions[name] = session
 
@@ -472,9 +471,6 @@ class AiAssistAgent:
                         # Validate tool description for poisoning
                         desc_warnings = validate_tool_description(full_name, desc)
                         if desc_warnings:
-                            import logging
-
-                            logger = logging.getLogger(__name__)
                             for w in desc_warnings:
                                 logger.warning("Tool description warning for %s: %s", full_name, w)
                         self.available_tools.append(tool_def)
@@ -495,9 +491,6 @@ class AiAssistAgent:
                                         f"prompt:{name}/{prompt.name}", prompt.description
                                     )
                                     if prompt_warnings:
-                                        import logging
-
-                                        logger = logging.getLogger(__name__)
                                         for w in prompt_warnings:
                                             logger.warning(
                                                 "Prompt description warning for %s/%s: %s",
@@ -560,19 +553,16 @@ class AiAssistAgent:
             server_tools = [t for t in self.available_tools if t.get("_server") == name]
             changes = self._tool_registry.check_for_changes(server_tools, scope=old_server_tool_names)
             if changes:
-                import logging
-
-                logger = logging.getLogger(__name__)
                 for change in changes:
                     logger.warning(
                         "Rug-pull detection: Tool '%s' %s after reconnect",
                         change["tool_name"],
                         change["change_type"],
                     )
-                print(f"  ⚠ WARNING: {len(changes)} tool definition(s) changed after reconnect!")
+                logger.warning("%d tool definition(s) changed after reconnect", len(changes))
             self._tool_registry.register_tools(server_tools)
         else:
-            print(f"  ⚠ {name} did not initialize within timeout")
+            logger.warning("%s did not initialize within timeout", name)
 
     async def reload_mcp_servers(self):
         """Reload MCP server configuration and reconnect changed servers
@@ -632,16 +622,13 @@ class AiAssistAgent:
                     server_tools = [t for t in self.available_tools if t.get("_server") == name]
                     changes = self._tool_registry.check_for_changes(server_tools, scope=old_server_tool_names)
                     if changes:
-                        import logging
-
-                        logger = logging.getLogger(__name__)
                         for change in changes:
                             logger.warning(
                                 "Rug-pull detection: Tool '%s' %s after reload",
                                 change["tool_name"],
                                 change["change_type"],
                             )
-                        print(f"    ⚠ WARNING: {len(changes)} tool definition(s) changed after reload!")
+                        logger.warning("%d tool definition(s) changed after reload", len(changes))
                     self._tool_registry.register_tools(server_tools)
 
         # Update config
@@ -1588,9 +1575,6 @@ class AiAssistAgent:
             # Sanitize prompt message content for injection
             content, injection_warnings = sanitize_tool_result(content, f"prompt:{server_name}/{prompt_name}")
             if injection_warnings:
-                import logging
-
-                logger = logging.getLogger(__name__)
                 logger.warning(
                     "Suspicious content in MCP prompt %s/%s: %s",
                     server_name,
@@ -1727,7 +1711,7 @@ class AiAssistAgent:
 
         signatures: list[str] = []
         for block in tool_blocks:
-            sig = f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode()).hexdigest()[:8]}"
+            sig = f"{block.name}:{hashlib.md5(json.dumps(block.input, sort_keys=True).encode(), usedforsecurity=False).hexdigest()[:8]}"
             signatures.append(sig)
 
         # Execute uncached tools concurrently
@@ -1777,7 +1761,7 @@ class AiAssistAgent:
         # Validate arguments against tool schema before execution
         validation_error = self._validate_tool_arguments(tool_name, arguments)
         if validation_error:
-            print(f"⚠️  VALIDATION ERROR for {tool_name}: {validation_error[:150]}...")
+            logger.warning("Validation error for %s: %s...", tool_name, validation_error[:150])
             return validation_error
 
         parts = tool_name.split("__", 1)
@@ -1856,9 +1840,6 @@ class AiAssistAgent:
                     # Sanitize script output — scripts come from external skill repos
                     result_text, injection_warnings = sanitize_tool_result(result_text, tool_name)
                     if injection_warnings:
-                        import logging
-
-                        logger = logging.getLogger(__name__)
                         logger.warning(
                             "Suspicious content in script output from %s: %s",
                             tool_name,
@@ -1923,9 +1904,6 @@ class AiAssistAgent:
             # Sanitize MCP tool results for prompt injection
             result_text, injection_warnings = sanitize_tool_result(result_text, tool_name)
             if injection_warnings:
-                import logging
-
-                logger = logging.getLogger(__name__)
                 logger.warning("Suspicious content in %s result: %s", tool_name, ", ".join(injection_warnings))
 
             # Store tool call for potential KG storage
@@ -1974,7 +1952,7 @@ class AiAssistAgent:
 
             entity_id = (
                 f"{original_tool_name}:"
-                f"{hashlib.md5(json.dumps(arguments, sort_keys=True).encode()).hexdigest()[:8]}"
+                f"{hashlib.md5(json.dumps(arguments, sort_keys=True).encode(), usedforsecurity=False).hexdigest()[:8]}"
             )
             stored_data = {
                 "tool_name": original_tool_name,
@@ -2076,14 +2054,14 @@ class AiAssistAgent:
                     print(f"💡 Learned: {insight['category']}:{insight['key']}")
 
                 except Exception as e:
-                    print(f"⚠️  Failed to save insight {insight.get('key')}: {e}")
+                    logger.warning("Failed to save insight %s: %s", insight.get("key"), e)
 
             print(f"✓ Saved {saved_count} new learnings to knowledge base")
 
         except json.JSONDecodeError as e:
-            print(f"⚠️  Synthesis failed - invalid JSON: {e}")
+            logger.warning("Synthesis failed - invalid JSON: %s", e)
         except Exception as e:
-            print(f"⚠️  Synthesis failed: {e}")
+            logger.warning("Synthesis failed: %s", e)
 
     async def _run_synthesis_from_kg(self, hours: int = 24) -> str:
         """Review recent conversation entities from KG and extract knowledge,
@@ -2179,16 +2157,16 @@ class AiAssistAgent:
                             saved_count += 1
                             print(f"💡 Learned: {insight['category']}:{insight['key']}")
                         except Exception as e:
-                            print(f"⚠️  Failed to save insight {insight.get('key')}: {e}")
+                            logger.warning("Failed to save insight %s: %s", insight.get("key"), e)
 
                     synthesis_summary = f"Saved {saved_count} new learnings from {len(conversations)} conversations"
                     print(f"✓ {synthesis_summary}")
 
             except json.JSONDecodeError as e:
-                print(f"⚠️  Synthesis failed - invalid JSON: {e}")
+                logger.warning("Synthesis failed - invalid JSON: %s", e)
                 synthesis_summary = f"Synthesis failed - invalid JSON: {e}"
             except Exception as e:
-                print(f"⚠️  Synthesis failed: {e}")
+                logger.warning("Synthesis failed: %s", e)
                 synthesis_summary = f"Synthesis failed: {e}"
 
         # Run connection discovery before recording marker
@@ -2196,7 +2174,7 @@ class AiAssistAgent:
             connection_result = await self._run_connection_discovery(previous_reports_processed)
         except Exception as e:
             connection_result = f"Connection discovery error: {e}"
-            print(f"⚠️  {connection_result}")
+            logger.warning("%s", connection_result)
 
         # Record synthesis marker after connection discovery so it captures
         # which reports were processed and won't re-process them next time
@@ -2403,10 +2381,10 @@ class AiAssistAgent:
             return summary
 
         except json.JSONDecodeError as e:
-            print(f"⚠️  Connection discovery failed - invalid JSON: {e}")
+            logger.warning("Connection discovery failed - invalid JSON: %s", e)
             return f"Connection discovery failed - invalid JSON: {e}"
         except Exception as e:
-            print(f"⚠️  Connection discovery failed: {e}")
+            logger.warning("Connection discovery failed: %s", e)
             return f"Connection discovery failed: {e}"
 
     async def check_and_run_synthesis(self, conversation_memory: "ConversationMemory"):
