@@ -128,50 +128,40 @@ Default reports location: `~/ai-assist/reports/`
 
 ## Systemd Services
 
-Run multiple instances as services:
+Run instances as persistent user services that start on login and restart on failure.
 
-```ini
-# /etc/systemd/user/ai-assist-work.service
-[Unit]
-Description=ai-assist Work Instance
-After=network.target
-
-[Service]
-Type=simple
-Environment="AI_ASSIST_CONFIG_DIR=%h/.ai-assist-work"
-Environment="ANTHROPIC_API_KEY=your-api-key"
-ExecStart=/usr/local/bin/ai-assist /monitor
-Restart=always
-
-[Install]
-WantedBy=default.target
-```
-
-```ini
-# /etc/systemd/user/ai-assist-personal.service
-[Unit]
-Description=ai-assist Personal Instance
-After=network.target
-
-[Service]
-Type=simple
-Environment="AI_ASSIST_CONFIG_DIR=%h/.ai-assist-personal"
-Environment="ANTHROPIC_API_KEY=your-api-key"
-ExecStart=/usr/local/bin/ai-assist /monitor
-Restart=always
-
-[Install]
-WantedBy=default.target
-```
-
-Enable and start:
 ```bash
-systemctl --user enable ai-assist-work
-systemctl --user start ai-assist-work
+ai-assist /service install              # default instance (~/.ai-assist)
+ai-assist /service install ~/.iris      # named instance
+ai-assist /service install ~/.iris ~/reports/iris  # with reports dir
 
-systemctl --user enable ai-assist-personal
-systemctl --user start ai-assist-personal
+ai-assist /service status               # status of default instance
+ai-assist /service status ~/.iris       # status of specific instance
+ai-assist /service restart              # restart after updating code
+ai-assist /service restart ~/.iris      # restart specific instance
+ai-assist /service logs ~/.iris         # follow logs (Ctrl+C to exit)
+ai-assist /service stop ~/.iris
+ai-assist /service start ~/.iris
+ai-assist /service remove ~/.iris       # stop, disable, and remove
 ```
+
+Config dir falls back to `AI_ASSIST_CONFIG_DIR` env var, then `~/.ai-assist`.
+Reports dir falls back to `AI_ASSIST_REPORTS_DIR` env var.
+
+### Boot persistence
+
+```bash
+loginctl enable-linger $USER
+```
+
+Without this, user services stop when you log out.
+
+### Note on .env files
+
+`.env` files are loaded automatically by the app in all modes (service, interactive, query, etc.):
+
+1. **Project `.env`** — loaded first from the source/install directory
+2. **Instance `.env`** (`~/.{instance}/.env`) — loaded second, overrides the project `.env`
 
 ## Important Notes
 

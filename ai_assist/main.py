@@ -18,6 +18,7 @@ from .kg_queries import KnowledgeGraphQueries
 from .knowledge_graph import KnowledgeGraph
 from .monitors import MonitoringScheduler
 from .prompt_utils import extract_prompt_messages
+from .service import SUBCOMMANDS, install_service, remove_service, service_logs, service_status, service_systemctl
 from .state import StateManager
 from .tui import format_tool_display_name
 
@@ -623,7 +624,10 @@ async def main_async():
     state_commands = ["status", "clear-cache"]
     action_commands = ["cleanup-actions"]
     eval_commands = ["eval-stats"]
-    no_agent_commands = kg_commands + identity_commands + state_commands + action_commands + eval_commands + ["help"]
+    service_commands = ["service"]
+    no_agent_commands = (
+        kg_commands + identity_commands + state_commands + action_commands + eval_commands + service_commands + ["help"]
+    )
 
     needs_agent = command not in no_agent_commands
 
@@ -682,6 +686,8 @@ async def main_async():
                 print("  /kg-viz            - Visualize knowledge graph in browser")
                 print("  /cleanup-actions   - Archive old completed/failed actions")
                 print("  /eval-stats        - Show evaluation metrics from query traces")
+                print("  /service <sub> [dir] [rpts]   - Manage systemd user service")
+                print("    install, remove, start, stop, restart, enable, disable, status, logs")
                 print("\nRun without arguments for interactive mode\n")
                 sys.exit(0)
 
@@ -757,6 +763,24 @@ async def main_async():
 
                 archived = await manager.cleanup_old_actions(max_age_days=7)
                 print(f"✓ Archived {archived} old actions")
+            # Service commands
+            elif command == "service":
+                subcmd = sys.argv[2] if len(sys.argv) > 2 else None
+                if subcmd not in SUBCOMMANDS:
+                    print("Usage: ai-assist /service <subcommand> [config-dir] [reports-dir]")
+                    print(f"Subcommands: {', '.join(sorted(SUBCOMMANDS))}")
+                    sys.exit(1)
+                config_arg = sys.argv[3] if len(sys.argv) > 3 else None
+                if subcmd == "install":
+                    install_service(config_arg, sys.argv[4] if len(sys.argv) > 4 else None)
+                elif subcmd == "remove":
+                    remove_service(config_arg)
+                elif subcmd == "status":
+                    service_status(config_arg)
+                elif subcmd == "logs":
+                    service_logs(config_arg)
+                else:
+                    service_systemctl(subcmd, config_arg)
             # Note: Unknown commands are caught earlier, before agent initialization
         else:
             # Default to interactive mode

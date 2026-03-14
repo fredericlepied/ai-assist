@@ -8,7 +8,9 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-load_dotenv()
+_project_env = Path(__file__).parent.parent / ".env"
+if _project_env.exists():
+    load_dotenv(_project_env)
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +117,10 @@ class AiAssistConfig(BaseModel):
         """
         if config_dir is None:
             config_dir = get_config_dir()
+
+        env_file = config_dir / ".env"
+        if env_file.exists():
+            load_dotenv(env_file, override=True)
 
         if mcp_servers_file is None:
             mcp_servers_file = config_dir / "mcp_servers.yaml"

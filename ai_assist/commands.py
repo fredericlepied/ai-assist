@@ -32,6 +32,7 @@ CLI_COMMANDS = [
     "/cleanup-actions",
     "/kg-viz",
     "/eval-stats",
+    "/service",
     "/help",
 ]
 
