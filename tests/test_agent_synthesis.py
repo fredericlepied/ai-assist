@@ -10,6 +10,7 @@ from ai_assist.agent import AiAssistAgent
 from ai_assist.config import AiAssistConfig
 from ai_assist.context import ConversationMemory
 from ai_assist.knowledge_graph import KnowledgeGraph
+from ai_assist.report_tools import ReportTools
 
 
 @pytest.fixture
@@ -29,9 +30,10 @@ def config():
 
 
 @pytest.fixture
-def agent(config, kg):
-    """Create agent with knowledge graph"""
+def agent(config, kg, tmp_path):
+    """Create agent with knowledge graph and isolated reports directory"""
     agent = AiAssistAgent(config, knowledge_graph=kg)
+    agent.report_tools = ReportTools(reports_dir=tmp_path / "reports")
     return agent
 
 

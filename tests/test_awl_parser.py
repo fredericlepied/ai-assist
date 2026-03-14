@@ -3,6 +3,7 @@
 import pytest
 
 from ai_assist.awl_ast import (
+    FailNode,
     IfNode,
     LoopNode,
     ReturnNode,
@@ -431,3 +432,27 @@ def test_valid_hints_accepted():
     task = result.body[0]
     assert isinstance(task, TaskNode)
     assert task.hints == ["no-history", "no-kg"]
+
+
+def test_parse_fail_basic():
+    script = "@start\n@fail Jira is down\n@end\n"
+    result = AWLParser(script).parse()
+    assert len(result.body) == 1
+    assert isinstance(result.body[0], FailNode)
+    assert result.body[0].message == "Jira is down"
+
+
+def test_parse_fail_inside_if():
+    script = "@start\n@if not jira_report\n@fail Jira unavailable\n@end\n@end\n"
+    result = AWLParser(script).parse()
+    assert len(result.body) == 1
+    node = result.body[0]
+    assert isinstance(node, IfNode)
+    assert len(node.then_body) == 1
+    assert isinstance(node.then_body[0], FailNode)
+    assert node.then_body[0].message == "Jira unavailable"
+
+
+def test_parse_fail_missing_message():
+    with pytest.raises(ParseError):
+        AWLParser("@start\n@fail\n@end\n").parse()

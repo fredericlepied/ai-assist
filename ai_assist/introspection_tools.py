@@ -326,6 +326,8 @@ Every script starts with @start and ends with @end:
   @end
 
   @return <expr>         — return workflow result
+  @fail <message>        — abort the workflow immediately with an error message
+                           (combine with @if to abort conditionally)
 
 ## Task Hints (placed after task id)
 

@@ -198,6 +198,35 @@ Injected variables are available from the first node, just like `@set` variables
 
 ---
 
+# Failure Handling
+
+## @fail
+
+Aborts the workflow immediately with an error message.
+
+Syntax:
+
+@fail <message>
+
+Example — abort unconditionally:
+
+@fail Jira server is in maintenance
+
+Example — abort when a task did not produce the expected result:
+
+@if not jira_report
+  @fail Jira collection failed - aborting quarterly review
+@end
+
+The error is reported to the caller. Combine with `@if`/`@else` for conditional
+abort vs. alternative path.
+
+**Agent guidance**: When a task's upstream service is unavailable or returns an
+error, do NOT expose the expected variables — leave them unset. The script can
+then detect the failure with `@if not <variable>` and abort with `@fail`.
+
+---
+
 # Conditional Execution
 
 Syntax:

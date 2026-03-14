@@ -7,6 +7,7 @@ from typing import Any
 
 from .awl_ast import (
     ASTNode,
+    FailNode,
     IfNode,
     LoopNode,
     ReturnNode,
@@ -95,6 +96,8 @@ class AWLRuntime:
             await self._execute_loop(node)
         elif isinstance(node, ReturnNode):
             self._execute_return(node)
+        elif isinstance(node, FailNode):
+            raise AWLRuntimeError(node.message)
 
     async def _execute_task(self, task: TaskNode):
         prompt = self._build_task_prompt(task)
