@@ -52,8 +52,8 @@ def test_get_tool_definitions_with_kg(introspection_tools_with_kg):
     """Test tool definitions with KG only"""
     tools_defs = introspection_tools_with_kg.get_tool_definitions()
 
-    # Should have 3 KG tools + 1 MCP prompt inspection tool + 1 get_tool_help + 1 get_skill_help
-    assert len(tools_defs) == 6
+    # Should have 3 KG tools + 1 MCP prompt inspection tool + 1 get_tool_help + 1 get_skill_help + 1 validate_awl_script
+    assert len(tools_defs) == 7
 
     tool_names = [t["name"] for t in tools_defs]
     assert "introspection__search_knowledge_graph" in tool_names
@@ -71,8 +71,8 @@ def test_get_tool_definitions_with_both(introspection_tools_full):
     """Test tool definitions with both KG and conversation"""
     tools_defs = introspection_tools_full.get_tool_definitions()
 
-    # Should have 3 KG + 1 MCP prompt inspection + 1 conversation + 1 get_tool_help + 1 get_skill_help
-    assert len(tools_defs) == 7
+    # Should have 3 KG + 1 MCP prompt inspection + 1 conversation + 1 get_tool_help + 1 get_skill_help + 1 validate_awl_script
+    assert len(tools_defs) == 8
 
     tool_names = [t["name"] for t in tools_defs]
     assert "introspection__search_knowledge_graph" in tool_names
@@ -413,6 +413,54 @@ async def test_get_skill_help_via_execute_tool():
     result = await tools.execute_tool("get_skill_help", {"skill_name": "nonexistent"})
     data = json.loads(result)
     assert "error" in data
+
+
+# --- AWL script validation tests ---
+
+
+def test_validate_awl_tool_always_present():
+    """validate_awl_script appears in tool definitions regardless of agent"""
+    tools = IntrospectionTools(agent=None).get_tool_definitions()
+    names = [t["name"] for t in tools]
+    assert "introspection__validate_awl_script" in names
+
+
+@pytest.mark.asyncio
+async def test_validate_awl_script_valid():
+    """Return success message for a valid AWL script"""
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool(
+        "validate_awl_script",
+        {"awl_code": "@start\n@task t1\nGoal: do something\nExpose: result\n@end\n@end\n"},
+    )
+    assert "Valid" in result
+
+
+@pytest.mark.asyncio
+async def test_validate_awl_script_parse_error():
+    """Return parse error details for invalid AWL"""
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool("validate_awl_script", {"awl_code": "this is not awl\n"})
+    assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_validate_awl_script_empty():
+    """Return error for empty input"""
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool("validate_awl_script", {"awl_code": ""})
+    assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_validate_awl_script_line_number_in_error():
+    """Parse errors include a line number"""
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool(
+        "validate_awl_script",
+        {"awl_code": "@start\n@task t1\nGoal: ok\n@end\n@bogus\n@end\n"},
+    )
+    assert "Line" in result or "line" in result or "Error" in result
 
 
 # --- AWL script execution tests ---
