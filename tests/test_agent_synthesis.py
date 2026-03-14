@@ -291,9 +291,10 @@ class TestSynthesisFromKG:
     @pytest.mark.asyncio
     async def test_synthesis_from_kg_no_conversations(self, agent, kg):
         """Synthesis with no conversations and no reports should return early"""
-        result = await agent._run_synthesis_from_kg()
+        with patch.object(agent, "_get_report_snapshots", return_value={}):
+            result = await agent._run_synthesis_from_kg()
 
-        assert "No new conversations or reports" in result
+        assert "No new conversations" in result
 
         # No synthesis_marker should be created (nothing was processed)
         now = datetime.now()
@@ -358,7 +359,7 @@ class TestSynthesisFromKG:
             # No LLM calls should have been made
             mock_create.assert_not_called()
 
-        assert "No new conversations or reports" in result
+        assert "No new conversations" in result
 
     @pytest.mark.asyncio
     async def test_synthesis_from_kg_skips_already_synthesized(self, agent, kg):

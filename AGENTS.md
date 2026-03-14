@@ -40,10 +40,11 @@ This document provides guidance for AI agents and developers working on the ai-a
 4. **ai_assist/config.py**: Configuration management using Pydantic models
 5. **ai_assist/monitors.py**: Periodic monitoring tasks for Jira and DCI
 6. **ai_assist/state.py**: State management, caching, and history tracking
-7. **ai_assist/awl_parser.py**: AWL (Agent Workflow Language) parser
-8. **ai_assist/awl_runtime.py**: AWL workflow execution engine
-9. **ai_assist/awl_ast.py**: AWL AST node definitions
-10. **ai_assist/awl_expressions.py**: AWL expression evaluator and variable interpolation
+7. **ai_assist/service.py**: Systemd user service management (install, remove, status, logs)
+8. **ai_assist/awl_parser.py**: AWL (Agent Workflow Language) parser
+9. **ai_assist/awl_runtime.py**: AWL workflow execution engine
+10. **ai_assist/awl_ast.py**: AWL AST node definitions
+11. **ai_assist/awl_expressions.py**: AWL expression evaluator and variable interpolation
 11. **emacs/awl-mode.el**: Emacs major mode for AWL files (syntax highlighting, indentation)
 
 ## Documentation

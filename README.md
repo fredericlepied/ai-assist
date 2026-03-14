@@ -372,7 +372,13 @@ cat ~/.ai-assist/scheduled-actions-archive.jsonl | jq
 **⚠️ Important:** The `/monitor` process must be running for scheduled actions to execute:
 ```bash
 uv run ai-assist /monitor  # Keep running in background
+
+# Or install as a persistent systemd user service:
+ai-assist /install-service          # default instance (~/.ai-assist)
+ai-assist /install-service ~/.iris  # additional instance
 ```
+
+See [docs/MULTI_INSTANCE.md](docs/MULTI_INSTANCE.md#systemd-services) for details.
 
 #### MCP Prompts in Tasks
 
