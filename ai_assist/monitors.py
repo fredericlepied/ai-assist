@@ -216,10 +216,10 @@ class MonitoringScheduler:
             print(f"Scheduled {len(self.user_tasks)} user-defined tasks")
 
         # Watch schedules.json for changes using OS-level file watching
-        if self.schedule_file and self.schedule_file.exists():
+        if self.schedule_file:
             self.file_watchdog = FileWatchdog(self.schedule_file, self.reload_schedules, debounce_seconds=0.5)
             await self.file_watchdog.start()
-            print(f"Watching {self.schedule_file} for changes...")
+            print(f"Watching {self.schedule_file} for changes")
 
         # Start config watching (mcp_servers.yaml, identity.yaml, installed-skills.json)
         self.config_watcher = ConfigWatcher(self.agent)

@@ -374,8 +374,8 @@ cat ~/.ai-assist/scheduled-actions-archive.jsonl | jq
 uv run ai-assist /monitor  # Keep running in background
 
 # Or install as a persistent systemd user service:
-ai-assist /install-service          # default instance (~/.ai-assist)
-ai-assist /install-service ~/.iris  # additional instance
+ai-assist /service install          # default instance (~/.ai-assist)
+ai-assist /service install ~/.iris  # additional instance
 ```
 
 See [docs/MULTI_INSTANCE.md](docs/MULTI_INSTANCE.md#systemd-services) for details.

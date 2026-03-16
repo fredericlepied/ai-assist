@@ -601,6 +601,11 @@ async def main_async():
 
     config = get_config()
 
+    # Ensure schedules.json exists with default tasks (creates file on first run)
+    from .schedule_loader import ScheduleLoader
+
+    ScheduleLoader(get_config_dir() / "schedules.json").ensure_default_tasks()
+
     # Parse command - must start with /
     command = sys.argv[1] if len(sys.argv) > 1 else None
 

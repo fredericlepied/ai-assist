@@ -169,6 +169,7 @@ class _DebounceHandler(FileSystemEventHandler):
         if event_path != target_path:
             return
 
+        print(f"Detected change in {self.target_file.name}", flush=True)
         # Trigger debounced callback
         self._trigger_debounced()
 
