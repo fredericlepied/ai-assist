@@ -149,9 +149,14 @@ class TestServiceStatus:
 
 
 class TestServiceLogs:
-    def test_calls_journalctl(self, tmp_path):
+    def test_calls_journalctl_no_extra_args(self, tmp_path):
         with patch("ai_assist.service.subprocess.run") as mock_run:
             service_logs(str(tmp_path))
+        mock_run.assert_called_once_with(["journalctl", "--user", "-u", tmp_path.name], check=False)
+
+    def test_passes_extra_args(self, tmp_path):
+        with patch("ai_assist.service.subprocess.run") as mock_run:
+            service_logs(str(tmp_path), ["-f"])
         mock_run.assert_called_once_with(["journalctl", "--user", "-u", tmp_path.name, "-f"], check=False)
 
 

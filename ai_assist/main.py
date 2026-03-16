@@ -783,7 +783,10 @@ async def main_async():
                 elif subcmd == "status":
                     service_status(config_arg)
                 elif subcmd == "logs":
-                    service_logs(config_arg)
+                    if config_arg and config_arg.startswith("-"):
+                        service_logs(None, sys.argv[3:])
+                    else:
+                        service_logs(config_arg, sys.argv[4:])
                 else:
                     service_systemctl(subcmd, config_arg)
             # Note: Unknown commands are caught earlier, before agent initialization

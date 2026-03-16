@@ -35,6 +35,7 @@ def _service_content(config_dir: Path, reports_dir: Path | None, binary: str) ->
         "",
         "[Service]",
         "Type=simple",
+        "Environment=PYTHONUNBUFFERED=1",
         f"Environment=AI_ASSIST_CONFIG_DIR={config_dir}",
     ]
     if reports_dir:
@@ -94,7 +95,7 @@ def service_status(config_dir_arg: str | None) -> None:
     subprocess.run(["systemctl", "--user", "status", name], check=False)
 
 
-def service_logs(config_dir_arg: str | None) -> None:
+def service_logs(config_dir_arg: str | None, extra_args: list[str] | None = None) -> None:
     config_dir = _resolve_config_dir(config_dir_arg)
     name = _service_name(config_dir)
-    subprocess.run(["journalctl", "--user", "-u", name, "-f"], check=False)
+    subprocess.run(["journalctl", "--user", "-u", name] + (extra_args or []), check=False)
