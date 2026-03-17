@@ -951,9 +951,8 @@ class AiAssistAgent:
         prompt += "If you do not know the answer after searching available tools and knowledge, "
         prompt += "say so honestly and ask the user for clarification.\n\n"
         prompt += "## Source Citation\n\n"
-        prompt += "Every factual claim about specific data (job statuses, ticket details, dates, counts, component versions, test results) "
-        prompt += "MUST cite the tool call that provided it. Use inline references like: (source: search_dci_jobs) or (source: get_jira_ticket).\n"
-        prompt += "If you are about to state a specific fact but cannot cite a tool that provided it, call the appropriate tool first.\n"
+        prompt += "When citing specific data (job statuses, ticket details, dates, counts, component versions, test results), "
+        prompt += "reference the tool that provided it using inline citations like: (source: search_dci_jobs) or (source: get_jira_ticket).\n"
         prompt += "For general knowledge not from tools, prefix with: 'Based on my general knowledge: ...' to distinguish it from tool-sourced data.\n"
 
         # Add tool result security guidance

@@ -177,7 +177,9 @@ class AWLRuntime:
         v = self._variables
 
         parts = [f"You are executing task '{task.task_id}'."]
-        parts.append(f"\nGoal: {interp(task.goal, v)}")
+
+        goal_text = interp(task.goal, v)
+        parts.append(f"\nGoal: {goal_text}")
 
         if task.context:
             parts.append(f"Context: {interp(task.context, v)}")
@@ -191,6 +193,15 @@ class AWLRuntime:
             example = ", ".join(f'"{k}": "<value>"' for k in task.expose)
             parts.append(f"\nWhen complete, output results as JSON with these keys: {keys}")
             parts.append(f"Example: {{{example}}}")
+
+        # If the goal references an MCP prompt (e.g. /server/prompt), remind the agent
+        # to use introspection__execute_mcp_prompt to run it.
+        combined = goal_text + (" " + interp(task.context, v) if task.context else "")
+        if re.search(r"/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", combined):
+            parts.append(
+                "\nNote: To run an MCP prompt referenced as /server/prompt_name, "
+                "call the introspection__execute_mcp_prompt tool with the server and prompt name."
+            )
 
         return "\n".join(parts)
 
