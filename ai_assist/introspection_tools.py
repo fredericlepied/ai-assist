@@ -136,18 +136,25 @@ This helps you decide whether to search the KG or call external APIs.
                 "name": "introspection__inspect_mcp_prompt",
                 "description": """Get detailed information about an MCP prompt including its arguments.
 
-Use this tool BEFORE creating tasks with MCP prompts to discover:
+Use this tool BEFORE executing or scheduling an MCP prompt to discover:
 - What arguments the prompt accepts
 - Which arguments are required vs optional
 - Argument names and descriptions
 - Correct argument format
 
+After inspecting, call execute_mcp_prompt (or create_task for scheduling) directly
+with the discovered arguments. Do NOT collect data yourself in between — the prompt
+handles its own data collection internally.
+
+Example: User says "run /tpci/weekly_report for Semih"
+1. Call inspect_mcp_prompt with server="tpci" and prompt="weekly_report"
+2. See that it has argument "for" (required) - person to generate report for
+3. Call execute_mcp_prompt with server="tpci", prompt="weekly_report", arguments={"for": "Semih"}
+
 Example: User says "schedule /tpci/weekly_report for Semih"
 1. Call inspect_mcp_prompt with server="tpci" and prompt="weekly_report"
 2. See that it has argument "for" (required) - person to generate report for
 3. Create task with prompt="mcp://tpci/weekly_report" and prompt_arguments={"for": "Semih"}
-
-This ensures you use the correct argument names.
 """,
                 "input_schema": {
                     "type": "object",
@@ -217,6 +224,11 @@ Use this tool when:
 - User wants immediate results from an MCP prompt
 - You need to execute a prompt during conversation, not schedule it
 
+IMPORTANT: The MCP prompt handles its own data collection internally. Do NOT gather
+data yourself before calling this tool — that duplicates work the prompt already does.
+Call execute_mcp_prompt directly; it will call the necessary tools and produce the
+final result.
+
 Do NOT use this for:
 - Scheduling prompts to run later (use create_task instead)
 - Recurring prompts (use create_task with interval instead)
@@ -225,8 +237,6 @@ Example: User says "run /tpci/weekly_report for Peri now"
 1. Call inspect_mcp_prompt to discover arguments
 2. Call execute_mcp_prompt with server="tpci", prompt="weekly_report", arguments={"for": "Peri"}
 3. Return the result to the user
-
-This executes the prompt immediately in the current conversation.
 """,
                     "input_schema": {
                         "type": "object",
@@ -668,13 +678,17 @@ After the loop, `results` is a list of dicts from each successful iteration.
         # Get prompt definition
         prompt_def = self.available_prompts[server][prompt]
 
-        # Build response
+        # Build response — omit description intentionally: exposing what the prompt
+        # collects internally causes the agent to pre-collect that data itself.
         result = {
             "server": server,
             "prompt": prompt,
-            "mcp_format": f"mcp://{server}/{prompt}",
-            "description": prompt_def.description if hasattr(prompt_def, "description") else None,
             "arguments": [],
+            "next_step": (
+                f"Call introspection__execute_mcp_prompt with server='{server}', "
+                f"prompt='{prompt}' and the required arguments below. "
+                "Do NOT collect data yourself first — the prompt handles that internally."
+            ),
         }
 
         # Extract argument information
@@ -691,8 +705,9 @@ After the loop, `results` is a list of dicts from each successful iteration.
         if result["arguments"]:
             example_args = {arg["name"]: f"<{arg['name']}>" for arg in result["arguments"] if arg["required"]}
             result["example_usage"] = {
-                "prompt": f"mcp://{server}/{prompt}",
-                "prompt_arguments": example_args,
+                "server": server,
+                "prompt": prompt,
+                "arguments": example_args,
             }
 
         return json.dumps(result, indent=2)
