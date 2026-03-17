@@ -8,7 +8,14 @@ class AWLExpressionEvaluator:
     def is_truthy(self, value: Any) -> bool:
         if value is None:
             return False
-        if isinstance(value, str | list | dict):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            # Treat agent-produced boolean strings as their boolean equivalents
+            if value.strip().lower() in ("false", "0", "null", "none", ""):
+                return False
+            return True
+        if isinstance(value, list | dict):
             return len(value) > 0
         if isinstance(value, int | float):
             return value != 0

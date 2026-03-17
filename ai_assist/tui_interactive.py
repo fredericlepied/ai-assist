@@ -149,9 +149,11 @@ async def query_with_feedback(
         prompt, context_summary = kg_context.enrich_prompt(prompt)
     # State to track progress
     feedback_state = {"status": "Starting...", "turn": 0, "max_turns": 50, "tool": None, "streaming": False}
+    live_running = False  # Tracks whether the Rich Live display is currently active
 
     def progress_callback(status: str, turn: int, max_turns: int, tool_name: str | None):
         """Update feedback state and refresh the spinner display"""
+        nonlocal live_running
         feedback_state["turn"] = turn
         feedback_state["max_turns"] = max_turns
         feedback_state["tool"] = tool_name
@@ -170,9 +172,16 @@ async def query_with_feedback(
             feedback_state["status"] = "✨ Complete!"
             feedback_state["streaming"] = False
 
-        # Push updated spinner to the Live widget (only before response streaming starts)
+        # Push updated spinner to the Live widget (only before response streaming starts).
+        # Only restart Live when Claude is thinking — not when a tool is about to execute.
+        # "executing_tool" fires just before tool execution begins; restarting Live there
+        # would conflict with tools that print directly to stdout (e.g. AWL runtime).
         if not response_started:
-            live.update(create_feedback_display())
+            if not live_running and status in ("thinking", "calling_claude"):
+                live.start()
+                live_running = True
+            if live_running:
+                live.update(create_feedback_display())
 
     def create_feedback_display():
         """Create the feedback display"""
@@ -183,6 +192,7 @@ async def query_with_feedback(
     live = Live(create_feedback_display(), console=console, refresh_per_second=10)
     agent._active_live = live
     live.start()
+    live_running = True
 
     full_response = ""
     response_started = False
@@ -232,10 +242,9 @@ async def query_with_feedback(
                 elif isinstance(chunk, dict):
                     if chunk.get("type") == "tool_use":
                         # Stop Live before printing to avoid display corruption
-                        if not response_started:
+                        if live_running:
                             live.stop()
-                        else:
-                            live.stop()
+                            live_running = False
                         display_name = format_tool_display_name(chunk["name"])
                         console.print(f"\n[dim]🔧 {display_name}[/dim]")
 
@@ -248,42 +257,55 @@ async def query_with_feedback(
                                     console.print(f"[dim]   {line}[/dim]")
                             else:
                                 console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
-                        if response_started:
-                            # Restart Live with current Markdown content
-                            live = Live(Markdown(full_response), console=console, refresh_per_second=10)
-                            agent._active_live = live
+
+                        # For tools that write directly to stdout (e.g. AWL runtime uses
+                        # print() for task progress), do NOT restart Live — it would
+                        # conflict and produce repeated spinner lines. Live will restart
+                        # automatically via progress_callback when Claude resumes thinking.
+                        # For all other tools, restart Live immediately for feedback.
+                        prints_to_stdout = chunk["name"] == "introspection__execute_awl_script"
+                        if not prints_to_stdout:
+                            if response_started:
+                                # Restart Live with current Markdown content
+                                live = Live(Markdown(full_response), console=console, refresh_per_second=10)
+                                agent._active_live = live
+                            else:
+                                live.update(create_feedback_display())
                             live.start()
-                        else:
-                            live.update(create_feedback_display())
-                            live.start()
+                            live_running = True
 
                     elif chunk.get("type") == "cancelled":
-                        if response_started:
+                        if live_running:
                             live.stop()
+                            live_running = False
                         console.print("\n[yellow]Query cancelled[/yellow]")
                         break
 
                     elif chunk.get("type") == "done":
                         # Query complete
-                        if response_started:
+                        if live_running:
                             live.stop()
+                            live_running = False
                         break
 
                     elif chunk.get("type") == "error":
-                        if response_started:
+                        if live_running:
                             live.stop()
+                            live_running = False
                         console.print(f"\n[red]{chunk.get('message')}[/red]")
                         break
 
     except Exception as e:
         # Handle any streaming errors
-        if response_started and live._started:
+        if live_running:
             live.stop()
+            live_running = False
         console.print(f"\n[red]Error: {e}[/red]")
 
     finally:
-        if live._started:
+        if live_running:
             live.stop()
+            live_running = False
         agent._active_live = None
         agent._active_escape_watcher = None
 
