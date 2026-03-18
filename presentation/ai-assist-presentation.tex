@@ -1225,7 +1225,42 @@ Expose: handlers
 @end
 \end{lstlisting}
 \vspace{-2mm}
-{\scriptsize\texttt{uv run ai-assist /run workflow.awl}}
+{\scriptsize\texttt{uv run ai-assist /run workflow.awl}}\\
+{\scriptsize\textit{or ask the agent: ``run workflow.awl with project=CILAB''}}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ── Slide: AWL in Prompts ─────────────────────────────────────────
+\begin{frame}[fragile]{AWL Execution from Agent Prompts}
+\textbf{Agents can now execute AWL scripts dynamically}
+
+\medskip
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{How it works}
+\begin{itemize}\small
+  \item New introspection tool: \texttt{execute\_awl\_script}
+  \item Agent calls it when user references a \texttt{.awl} file
+  \item Variables injected at runtime (no hardcoding)
+  \item Results returned to conversation
+\end{itemize}
+
+\medskip
+\textbf{Example prompt}\\
+{\small\textit{``Run analysis.awl with project=CILAB and days=7''}}
+\end{column}
+\begin{column}{0.48\textwidth}
+\begin{lstlisting}[style=code,language={}]
+# Agent internally calls:
+introspection__execute_awl_script(
+  script_path="analysis.awl",
+  variables={
+    "project": "CILAB",
+    "days": 7
+  }
+)
+\end{lstlisting}
 \end{column}
 \end{columns}
 \end{frame}

@@ -4,6 +4,7 @@ import re
 
 from .awl_ast import (
     ASTNode,
+    FailNode,
     IfNode,
     LoopNode,
     ReturnNode,
@@ -89,6 +90,8 @@ class AWLParser:
                 nodes.append(self._parse_loop())
             elif line.startswith("@return"):
                 nodes.append(self._parse_return())
+            elif line.startswith("@fail"):
+                nodes.append(self._parse_fail())
             else:
                 raise ParseError(self._pos + 1, f"Unexpected: '{line}'")
         return nodes
@@ -239,3 +242,11 @@ class AWLParser:
         self._validate_expr(expression, "after @return")
         self._advance()
         return ReturnNode(expression=expression)
+
+    def _parse_fail(self) -> FailNode:
+        line = self._require_line()
+        message = line.removeprefix("@fail").strip()
+        if not message:
+            raise ParseError(self._pos + 1, "@fail requires a message")
+        self._advance()
+        return FailNode(message=message)

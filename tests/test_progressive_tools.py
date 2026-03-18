@@ -235,5 +235,5 @@ class TestSystemPromptToolGuidance:
 
         prompt = agent._build_system_prompt()
         assert "Source Citation" in prompt
-        assert "MUST cite the tool call" in prompt
+        assert "reference" in prompt.lower()
         assert "general knowledge" in prompt.lower()

@@ -181,6 +181,50 @@ Example:
 
 Goal: Find where ${target} is initialized.
 
+## Initial Variables
+
+Variables can be injected before the script runs, without needing `@set`.
+
+**From the CLI:**
+
+```bash
+ai-assist /run workflow.awl target="HTTP server" days=7
+```
+
+**From an agent prompt:** ask the agent to run a `.awl` file and it will call the
+`introspection__execute_awl_script` tool with the variables you specify.
+
+Injected variables are available from the first node, just like `@set` variables.
+
+---
+
+# Failure Handling
+
+## @fail
+
+Aborts the workflow immediately with an error message.
+
+Syntax:
+
+@fail <message>
+
+Example — abort unconditionally:
+
+@fail Jira server is in maintenance
+
+Example — abort when a task did not produce the expected result:
+
+@if not jira_report
+  @fail Jira collection failed - aborting quarterly review
+@end
+
+The error is reported to the caller. Combine with `@if`/`@else` for conditional
+abort vs. alternative path.
+
+**Agent guidance**: When a task's upstream service is unavailable or returns an
+error, do NOT expose the expected variables — leave them unset. The script can
+then detect the failure with `@if not <variable>` and abort with `@fail`.
+
 ---
 
 # Conditional Execution

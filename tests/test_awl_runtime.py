@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ai_assist.awl_ast import (
+    FailNode,
     IfNode,
     LoopNode,
     ReturnNode,
@@ -316,6 +317,46 @@ async def test_if_with_none_comparison_no_crash(mock_agent, runtime):
     result = await runtime.execute(workflow)
     assert result.success is True
     assert mock_agent.query.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_fail_directive_raises(runtime):
+    workflow = WorkflowNode(body=[FailNode(message="Jira is down")])
+    with pytest.raises(AWLRuntimeError, match="Jira is down"):
+        await runtime.execute(workflow)
+
+
+@pytest.mark.asyncio
+async def test_fail_inside_if_aborts(runtime):
+    workflow = WorkflowNode(
+        body=[
+            IfNode(
+                expression="not jira_report",
+                then_body=[FailNode(message="Jira unavailable")],
+                else_body=[],
+            )
+        ]
+    )
+    with pytest.raises(AWLRuntimeError, match="Jira unavailable"):
+        await runtime.execute(workflow)
+
+
+@pytest.mark.asyncio
+async def test_fail_not_reached_when_condition_false(runtime):
+    workflow = WorkflowNode(
+        body=[
+            SetNode(variable="jira_report", value="report.jsonl"),
+            IfNode(
+                expression="not jira_report",
+                then_body=[FailNode(message="should not fail")],
+                else_body=[],
+            ),
+            ReturnNode(expression="jira_report"),
+        ]
+    )
+    result = await runtime.execute(workflow)
+    assert result.success is True
+    assert result.return_value == "report.jsonl"
 
 
 @pytest.mark.asyncio

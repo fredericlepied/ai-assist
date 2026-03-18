@@ -48,4 +48,9 @@ class WorkflowNode:
     body: list[Any] = field(default_factory=list)
 
 
-ASTNode = WorkflowNode | TaskNode | SetNode | IfNode | LoopNode | ReturnNode
+@dataclass
+class FailNode:
+    message: str
+
+
+ASTNode = WorkflowNode | TaskNode | SetNode | IfNode | LoopNode | ReturnNode | FailNode

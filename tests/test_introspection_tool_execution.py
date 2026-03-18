@@ -50,8 +50,7 @@ async def test_execute_introspection_tool_via_agent(mock_config):
     assert "prompt" in data
     assert data["server"] == "test_server"
     assert data["prompt"] == "test_prompt"
-    assert "mcp_format" in data
-    assert data["mcp_format"] == "mcp://test_server/test_prompt"
+    assert "next_step" in data
 
 
 @pytest.mark.asyncio

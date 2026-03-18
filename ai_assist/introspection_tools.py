@@ -136,18 +136,25 @@ This helps you decide whether to search the KG or call external APIs.
                 "name": "introspection__inspect_mcp_prompt",
                 "description": """Get detailed information about an MCP prompt including its arguments.
 
-Use this tool BEFORE creating tasks with MCP prompts to discover:
+Use this tool BEFORE executing or scheduling an MCP prompt to discover:
 - What arguments the prompt accepts
 - Which arguments are required vs optional
 - Argument names and descriptions
 - Correct argument format
 
+After inspecting, call execute_mcp_prompt (or create_task for scheduling) directly
+with the discovered arguments. Do NOT collect data yourself in between — the prompt
+handles its own data collection internally.
+
+Example: User says "run /tpci/weekly_report for Semih"
+1. Call inspect_mcp_prompt with server="tpci" and prompt="weekly_report"
+2. See that it has argument "for" (required) - person to generate report for
+3. Call execute_mcp_prompt with server="tpci", prompt="weekly_report", arguments={"for": "Semih"}
+
 Example: User says "schedule /tpci/weekly_report for Semih"
 1. Call inspect_mcp_prompt with server="tpci" and prompt="weekly_report"
 2. See that it has argument "for" (required) - person to generate report for
 3. Create task with prompt="mcp://tpci/weekly_report" and prompt_arguments={"for": "Semih"}
-
-This ensures you use the correct argument names.
 """,
                 "input_schema": {
                     "type": "object",
@@ -167,6 +174,44 @@ This ensures you use the correct argument names.
             }
         )
 
+        # AWL script execution tool (only if agent is available)
+        if self.agent is not None:
+            tools.append(
+                {
+                    "name": "introspection__execute_awl_script",
+                    "description": """Execute an AWL (Agent Workflow Language) script from the filesystem.
+
+Use this tool when:
+- User asks to run an AWL workflow or references a .awl file
+- A task requires structured multi-step orchestration with variables and conditionals
+- User mentions workflow files like "run the analysis script"
+
+Script search order for relative paths:
+1. Current working directory
+
+Variable injection: Pass {"key": "value"} to pre-populate workflow variables (${key} in scripts).
+
+Returns task outcomes, return value, and final variables.
+""",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "script_path": {
+                                "type": "string",
+                                "description": "Path to AWL script (.awl extension, relative or absolute)",
+                            },
+                            "variables": {
+                                "type": "object",
+                                "description": "Optional initial variables to inject into the workflow",
+                                "additionalProperties": True,
+                            },
+                        },
+                        "required": ["script_path"],
+                    },
+                    "_server": "introspection",
+                }
+            )
+
         # MCP prompt execution tool (only if agent is available)
         if self.agent is not None:
             tools.append(
@@ -179,6 +224,11 @@ Use this tool when:
 - User wants immediate results from an MCP prompt
 - You need to execute a prompt during conversation, not schedule it
 
+IMPORTANT: The MCP prompt handles its own data collection internally. Do NOT gather
+data yourself before calling this tool — that duplicates work the prompt already does.
+Call execute_mcp_prompt directly; it will call the necessary tools and produce the
+final result.
+
 Do NOT use this for:
 - Scheduling prompts to run later (use create_task instead)
 - Recurring prompts (use create_task with interval instead)
@@ -187,8 +237,6 @@ Example: User says "run /tpci/weekly_report for Peri now"
 1. Call inspect_mcp_prompt to discover arguments
 2. Call execute_mcp_prompt with server="tpci", prompt="weekly_report", arguments={"for": "Peri"}
 3. Return the result to the user
-
-This executes the prompt immediately in the current conversation.
 """,
                     "input_schema": {
                         "type": "object",
@@ -242,6 +290,133 @@ Example: Search for previous mentions of "DCI failures" in conversation.
                 }
             )
 
+        # AWL validation tool — always available, teaches AWL syntax via its description
+        tools.append(
+            {
+                "name": "introspection__validate_awl_script",
+                "description": """Validate an AWL (Agent Workflow Language) script for syntax errors.
+
+Use this tool when:
+- You want to write an AWL script for the user
+- You need to verify AWL syntax before asking the user to run it
+- The user asks about AWL syntax or how to write a workflow
+
+Returns "Valid AWL script." on success, or a parse error with line number.
+
+━━━ AWL SYNTAX REFERENCE ━━━
+
+## Structure
+
+Every script starts with @start and ends with @end:
+
+  @start
+    ... directives ...
+  @end
+
+## Directives
+
+  @task <id> [hints]     — agent task block
+  Goal: <text>           — what to achieve (required)
+  Context: <text>        — additional context (optional)
+  Constraints: <text>    — limitations (optional)
+  Success: <text>        — completion criteria (optional)
+  Expose: var1, var2     — variables to extract from the agent response
+  @end
+
+  @set <var> = <value>   — assign a variable (literal or ${interpolation})
+
+  @if <expr>             — conditional
+    ...
+  @else
+    ...
+  @end
+
+  @loop <collection> as <item> [limit=N] [collect=<var>[(<fields>)]]
+    ...
+  @end
+
+  @return <expr>         — return workflow result
+  @fail <message>        — abort the workflow immediately with an error message
+                           (combine with @if to abort conditionally)
+
+## Task Hints (placed after task id)
+
+  @no-history    agent ignores prior conversation history
+  @no-kg         agent does not consult the knowledge graph
+
+## Variables
+
+  @set x = "literal"    assign a string
+  @set x = ${y}         copy from another variable
+  ${varname}            interpolation in any text field
+
+## Expressions (used in @if conditions and @loop collections)
+
+  handlers              variable truthiness
+  not report_exists     negation
+  len(handlers) > 0     length comparison (>, <, >=, <=, ==, !=)
+  handlers[0]           index access
+  config.entrypoint     property access
+
+## Collecting Loop Results
+
+  @loop items as item collect=results
+  collect=results(field1,field2)   — collect only specific exposed fields
+
+After the loop, `results` is a list of dicts from each successful iteration.
+
+## Initial Variables (injected before the script runs)
+
+  CLI:   ai-assist /run workflow.awl key=value
+  Agent: call introspection__execute_awl_script with variables={"key": "value"}
+
+## Complete Example
+
+  @start
+
+  @task find_handlers @no-kg
+  Goal: Find all HTTP handlers in the repository.
+  Expose: handlers
+  @end
+
+  @if len(handlers) > 0
+
+    @loop handlers as handler limit=5 collect=summaries
+
+      @task inspect_handler @no-history
+      Goal: Understand what ${handler} does.
+      Expose: handler_summary
+      @end
+
+    @end
+
+  @else
+
+    @task fallback_search
+    Goal: Search more broadly for request entry points.
+    Expose: handlers
+    @end
+
+  @end
+
+  @return handlers
+
+  @end
+""",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "awl_code": {
+                            "type": "string",
+                            "description": "The complete AWL script source to validate",
+                        }
+                    },
+                    "required": ["awl_code"],
+                },
+                "_server": "introspection",
+            }
+        )
+
         # Always add get_tool_help (works with any agent reference)
         tools.append(
             {
@@ -294,6 +469,8 @@ Example: Search for previous mentions of "DCI failures" in conversation.
             "search_conversation_history": self._search_conversation_history,
             "inspect_mcp_prompt": self._inspect_mcp_prompt,
             "execute_mcp_prompt": self._execute_mcp_prompt,
+            "execute_awl_script": self._execute_awl_script,
+            "validate_awl_script": self._validate_awl_script,
             "get_tool_help": self._get_tool_help,
             "get_skill_help": self._get_skill_help,
         }
@@ -501,13 +678,17 @@ Example: Search for previous mentions of "DCI failures" in conversation.
         # Get prompt definition
         prompt_def = self.available_prompts[server][prompt]
 
-        # Build response
+        # Build response — omit description intentionally: exposing what the prompt
+        # collects internally causes the agent to pre-collect that data itself.
         result = {
             "server": server,
             "prompt": prompt,
-            "mcp_format": f"mcp://{server}/{prompt}",
-            "description": prompt_def.description if hasattr(prompt_def, "description") else None,
             "arguments": [],
+            "next_step": (
+                f"Call introspection__execute_mcp_prompt with server='{server}', "
+                f"prompt='{prompt}' and the required arguments below. "
+                "Do NOT collect data yourself first — the prompt handles that internally."
+            ),
         }
 
         # Extract argument information
@@ -524,8 +705,9 @@ Example: Search for previous mentions of "DCI failures" in conversation.
         if result["arguments"]:
             example_args = {arg["name"]: f"<{arg['name']}>" for arg in result["arguments"] if arg["required"]}
             result["example_usage"] = {
-                "prompt": f"mcp://{server}/{prompt}",
-                "prompt_arguments": example_args,
+                "server": server,
+                "prompt": prompt,
+                "arguments": example_args,
             }
 
         return json.dumps(result, indent=2)
@@ -642,3 +824,66 @@ Example: Search for previous mentions of "DCI failures" in conversation.
             result,
             indent=2,
         )
+
+    def _validate_awl_script(self, arguments: dict) -> str:
+        """Parse an AWL script and report syntax errors"""
+        from .awl_parser import AWLParser, ParseError
+
+        awl_code = arguments.get("awl_code", "")
+        if not awl_code.strip():
+            return "Error: awl_code is required"
+
+        try:
+            AWLParser(awl_code).parse()
+            return "Valid AWL script."
+        except ParseError as e:
+            return f"Parse Error: {e}"
+        except Exception as e:
+            return f"Error: {e}"
+
+    async def _execute_awl_script(self, arguments: dict) -> str:
+        """Execute an AWL script with optional variable injection"""
+        from pathlib import Path
+
+        from .awl_parser import AWLParser, ParseError
+        from .awl_runtime import AWLRuntime, AWLRuntimeError
+
+        if self.agent is None:
+            return "Error: Agent not available for AWL execution"
+
+        script_path = arguments.get("script_path", "")
+        variables = arguments.get("variables") or {}
+
+        if not script_path.endswith(".awl"):
+            return f"Error: Script must have .awl extension, got: {script_path}"
+
+        path_obj = Path(script_path).expanduser()
+
+        if not path_obj.is_absolute():
+            candidate = Path.cwd() / script_path
+            if not candidate.exists() or not candidate.is_file():
+                return f"Error: AWL script not found: {script_path}\nSearched in: {Path.cwd()}"
+            path_obj = candidate
+        elif not path_obj.exists() or not path_obj.is_file():
+            return f"Error: AWL script not found: {script_path}"
+
+        try:
+            source = path_obj.read_text()
+            workflow = AWLParser(source).parse()
+        except ParseError as e:
+            return f"AWL Parse Error in {path_obj.name}:\n{e}"
+        except Exception as e:
+            return f"Error reading script: {e}"
+
+        try:
+            runtime = AWLRuntime(self.agent)
+            result = await runtime.execute(workflow, variables=variables or None)
+        except AWLRuntimeError as e:
+            return f"AWL Runtime Error:\n{e}"
+
+        lines = [f"AWL Workflow: {path_obj.name}", f"Success: {result.success}"]
+        if result.return_value is not None:
+            lines.append(f"Return: {json.dumps(result.return_value)}")
+        for outcome in result.task_outcomes:
+            lines.append(f"  [{outcome.status}] {outcome.summary[:100]}")
+        return "\n".join(lines)

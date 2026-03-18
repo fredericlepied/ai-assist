@@ -52,8 +52,8 @@ def test_get_tool_definitions_with_kg(introspection_tools_with_kg):
     """Test tool definitions with KG only"""
     tools_defs = introspection_tools_with_kg.get_tool_definitions()
 
-    # Should have 3 KG tools + 1 MCP prompt inspection tool + 1 get_tool_help + 1 get_skill_help
-    assert len(tools_defs) == 6
+    # Should have 3 KG tools + 1 MCP prompt inspection tool + 1 get_tool_help + 1 get_skill_help + 1 validate_awl_script
+    assert len(tools_defs) == 7
 
     tool_names = [t["name"] for t in tools_defs]
     assert "introspection__search_knowledge_graph" in tool_names
@@ -71,8 +71,8 @@ def test_get_tool_definitions_with_both(introspection_tools_full):
     """Test tool definitions with both KG and conversation"""
     tools_defs = introspection_tools_full.get_tool_definitions()
 
-    # Should have 3 KG + 1 MCP prompt inspection + 1 conversation + 1 get_tool_help + 1 get_skill_help
-    assert len(tools_defs) == 7
+    # Should have 3 KG + 1 MCP prompt inspection + 1 conversation + 1 get_tool_help + 1 get_skill_help + 1 validate_awl_script
+    assert len(tools_defs) == 8
 
     tool_names = [t["name"] for t in tools_defs]
     assert "introspection__search_knowledge_graph" in tool_names
@@ -413,3 +413,166 @@ async def test_get_skill_help_via_execute_tool():
     result = await tools.execute_tool("get_skill_help", {"skill_name": "nonexistent"})
     data = json.loads(result)
     assert "error" in data
+
+
+# --- AWL script validation tests ---
+
+
+def test_validate_awl_tool_always_present():
+    """validate_awl_script appears in tool definitions regardless of agent"""
+    tools = IntrospectionTools(agent=None).get_tool_definitions()
+    names = [t["name"] for t in tools]
+    assert "introspection__validate_awl_script" in names
+
+
+@pytest.mark.asyncio
+async def test_validate_awl_script_valid():
+    """Return success message for a valid AWL script"""
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool(
+        "validate_awl_script",
+        {"awl_code": "@start\n@task t1\nGoal: do something\nExpose: result\n@end\n@end\n"},
+    )
+    assert "Valid" in result
+
+
+@pytest.mark.asyncio
+async def test_validate_awl_script_parse_error():
+    """Return parse error details for invalid AWL"""
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool("validate_awl_script", {"awl_code": "this is not awl\n"})
+    assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_validate_awl_script_empty():
+    """Return error for empty input"""
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool("validate_awl_script", {"awl_code": ""})
+    assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_validate_awl_script_line_number_in_error():
+    """Parse errors include a line number"""
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool(
+        "validate_awl_script",
+        {"awl_code": "@start\n@task t1\nGoal: ok\n@end\n@bogus\n@end\n"},
+    )
+    assert "Line" in result or "line" in result or "Error" in result
+
+
+# --- AWL script execution tests ---
+
+
+@pytest.fixture
+def mock_agent():
+    from unittest.mock import AsyncMock, MagicMock
+
+    agent = MagicMock()
+    agent.query = AsyncMock(return_value='{"result": "done"}')
+    agent.skills_manager.loaded_skills = {}
+    return agent
+
+
+def test_awl_tool_in_definitions_when_agent_available(mock_agent):
+    """execute_awl_script appears in tool definitions when agent is set"""
+    tools = IntrospectionTools(agent=mock_agent).get_tool_definitions()
+    names = [t["name"] for t in tools]
+    assert "introspection__execute_awl_script" in names
+
+
+def test_awl_tool_absent_without_agent():
+    """execute_awl_script is NOT in tool definitions when agent is None"""
+    tools = IntrospectionTools(agent=None).get_tool_definitions()
+    names = [t["name"] for t in tools]
+    assert "introspection__execute_awl_script" not in names
+
+
+@pytest.mark.asyncio
+async def test_execute_awl_script_basic(mock_agent, tmp_path):
+    """Execute a minimal AWL script (no tasks, just @set)"""
+    script = tmp_path / "test.awl"
+    script.write_text("@start\n@set msg = hello\n@end\n")
+
+    tools = IntrospectionTools(agent=mock_agent)
+    result = await tools.execute_tool("execute_awl_script", {"script_path": str(script)})
+
+    assert "AWL Workflow" in result
+    assert "Success: True" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_awl_script_with_tasks(mock_agent, tmp_path):
+    """Execute an AWL script that runs a task and returns a value"""
+    script = tmp_path / "greet.awl"
+    script.write_text(
+        "@start\n" "@task greet\n" "Goal: Say hello\n" "Expose: result\n" "@end\n" "@return result\n" "@end\n"
+    )
+
+    tools = IntrospectionTools(agent=mock_agent)
+    result = await tools.execute_tool("execute_awl_script", {"script_path": str(script)})
+
+    assert "AWL Workflow" in result
+    assert "success" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_awl_script_with_variables(mock_agent, tmp_path):
+    """Variables are injected into the workflow"""
+    script = tmp_path / "var.awl"
+    script.write_text("@start\n@set greeting = ${name}\n@end\n")
+
+    tools = IntrospectionTools(agent=mock_agent)
+    result = await tools.execute_tool(
+        "execute_awl_script", {"script_path": str(script), "variables": {"name": "World"}}
+    )
+
+    assert "Success: True" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_awl_script_wrong_extension(mock_agent, tmp_path):
+    """Reject files without .awl extension"""
+    script = tmp_path / "script.py"
+    script.write_text("print('hello')")
+
+    tools = IntrospectionTools(agent=mock_agent)
+    result = await tools.execute_tool("execute_awl_script", {"script_path": str(script)})
+
+    assert "Error" in result
+    assert ".awl" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_awl_script_not_found(mock_agent):
+    """Return clear error for missing script"""
+    tools = IntrospectionTools(agent=mock_agent)
+    result = await tools.execute_tool("execute_awl_script", {"script_path": "/nonexistent/path/test.awl"})
+
+    assert "not found" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_execute_awl_script_parse_error(mock_agent, tmp_path):
+    """Return clear error for invalid AWL syntax"""
+    script = tmp_path / "bad.awl"
+    script.write_text("this is not valid AWL\n")
+
+    tools = IntrospectionTools(agent=mock_agent)
+    result = await tools.execute_tool("execute_awl_script", {"script_path": str(script)})
+
+    assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_awl_script_no_agent(tmp_path):
+    """Return error when no agent is available"""
+    script = tmp_path / "test.awl"
+    script.write_text("@start\n@set x = 1\n@end\n")
+
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool("execute_awl_script", {"script_path": str(script)})
+
+    assert "Error" in result

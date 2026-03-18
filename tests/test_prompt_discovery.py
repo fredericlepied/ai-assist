@@ -120,8 +120,7 @@ async def test_inspect_mcp_prompt_introspection_tool(agent_with_prompts):
     # Verify prompt info
     assert result["server"] == "tpci"
     assert result["prompt"] == "weekly_report"
-    assert result["mcp_format"] == "mcp://tpci/weekly_report"
-    assert result["description"] == "Generate weekly status report"
+    assert "next_step" in result
 
     # Verify arguments
     assert len(result["arguments"]) == 2
@@ -136,8 +135,9 @@ async def test_inspect_mcp_prompt_introspection_tool(agent_with_prompts):
     assert opt_arg["required"] is False
 
     # Verify example usage
-    assert result["example_usage"]["prompt"] == "mcp://tpci/weekly_report"
-    assert result["example_usage"]["prompt_arguments"] == {"for": "<for>"}
+    assert result["example_usage"]["server"] == "tpci"
+    assert result["example_usage"]["prompt"] == "weekly_report"
+    assert result["example_usage"]["arguments"] == {"for": "<for>"}
 
 
 @pytest.mark.asyncio

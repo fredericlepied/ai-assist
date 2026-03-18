@@ -193,6 +193,7 @@ class AiAssistAgent:
         self.knowledge_graph = knowledge_graph
         self.kg_save_enabled = True  # Can be toggled by user
         self._no_kg = False  # Per-query flag: @no-kg prefix suppresses KG injection
+        self._no_history = False  # Per-query flag: @no-history prefix strips conversation history
         self._query_depth = 0  # Track nesting depth for _no_kg reset
 
         # Load identity for personalized interactions
@@ -924,6 +925,22 @@ class AiAssistAgent:
             prompt += "Always use tools to retrieve real data. Never fabricate information that could be obtained through a tool call.\n"
             prompt += "For detailed tool documentation (query syntax, available fields, examples), call introspection__get_tool_help with the tool name.\n"
 
+        # Add MCP prompt execution guidance if any prompts are available
+        if self.available_prompts:
+            prompt += "\n\n# MCP Prompt Execution\n\n"
+            prompt += (
+                "When the user asks you to run an MCP prompt (e.g. /server/prompt_name), follow these steps exactly:\n"
+            )
+            prompt += "1. Call introspection__inspect_mcp_prompt to discover the required arguments.\n"
+            prompt += "2. Resolve all argument values from the information already available to you "
+            prompt += "(identity context, conversation, user input) — do NOT call any tools to look them up. "
+            prompt += "For example, a person's Jira username, GitHub username, or email are listed "
+            prompt += "in the identity context above; read them from there.\n"
+            prompt += "3. Call introspection__execute_mcp_prompt with the fully resolved arguments.\n"
+            prompt += "4. Return the result to the user.\n"
+            prompt += "Do NOT collect data yourself between steps 1 and 3. "
+            prompt += "The prompt handles all data collection internally.\n"
+
         # Add Knowledge Graph guidance
         if self.knowledge_graph and not self._no_kg:
             prompt += "\n\n# Knowledge Graph\n\n"
@@ -951,9 +968,8 @@ class AiAssistAgent:
         prompt += "If you do not know the answer after searching available tools and knowledge, "
         prompt += "say so honestly and ask the user for clarification.\n\n"
         prompt += "## Source Citation\n\n"
-        prompt += "Every factual claim about specific data (job statuses, ticket details, dates, counts, component versions, test results) "
-        prompt += "MUST cite the tool call that provided it. Use inline references like: (source: search_dci_jobs) or (source: get_jira_ticket).\n"
-        prompt += "If you are about to state a specific fact but cannot cite a tool that provided it, call the appropriate tool first.\n"
+        prompt += "When citing specific data (job statuses, ticket details, dates, counts, component versions, test results), "
+        prompt += "reference the tool that provided it using inline citations like: (source: search_dci_jobs) or (source: get_jira_ticket).\n"
         prompt += "For general knowledge not from tools, prefix with: 'Based on my general knowledge: ...' to distinguish it from tool-sourced data.\n"
 
         # Add tool result security guidance
@@ -967,23 +983,28 @@ class AiAssistAgent:
         return prompt
 
     def _apply_no_kg_prefix(self, text: str) -> str:
-        """Detect @no-kg prefix, set flag, strip prefix, return clean text.
+        """Detect @no-kg and @no-history prefixes, set flags, strip prefixes, return clean text.
 
-        Resets _no_kg at the top-level call (_query_depth == 1) so periodic
+        Resets flags at the top-level call (_query_depth == 1) so periodic
         tasks and scheduled actions start clean.  Nested calls preserve
-        the outer flag.
+        the outer flags.
         """
         if self._query_depth <= 1:
             self._no_kg = False
+            self._no_history = False
         stripped = text.lstrip()
-        if stripped.startswith("@no-kg"):
-            self._no_kg = True
-            clean = stripped.removeprefix("@no-kg").lstrip()
-            self._current_query_text = clean
-            return clean
-        else:
-            self._current_query_text = text
-            return text
+        # Strip any combination of @no-kg / @no-history prefixes
+        while True:
+            if stripped.startswith("@no-kg"):
+                self._no_kg = True
+                stripped = stripped.removeprefix("@no-kg").lstrip()
+            elif stripped.startswith("@no-history"):
+                self._no_history = True
+                stripped = stripped.removeprefix("@no-history").lstrip()
+            else:
+                break
+        self._current_query_text = stripped
+        return stripped
 
     def _get_kg_learnings_section(self) -> str:
         """Fetch synthesized learnings from KG for system prompt injection.
@@ -1130,15 +1151,42 @@ class AiAssistAgent:
                     self._current_query_text = msg["content"]
                     break
 
-        # Detect @no-kg prefix and strip it from query/messages
+        # Detect @no-kg / @no-history prefixes and strip them from query/messages
         if self._current_query_text:
             clean = self._apply_no_kg_prefix(self._current_query_text)
-            if self._no_kg and prompt:
+            if (self._no_kg or self._no_history) and prompt:
                 prompt = clean
                 messages = [{"role": "user", "content": prompt}]
 
-        # Build tools with progressive disclosure (truncated descriptions)
+        # Auto-detect MCP prompt references and apply @no-history @no-kg automatically.
+        # When the user asks to run a known MCP prompt, conversation history can mislead
+        # the agent into pre-collecting data it doesn't need to collect.
+        if not self._no_history and self.available_prompts and self._current_query_text:
+            for server, prompts in self.available_prompts.items():
+                for prompt_name in prompts:
+                    if f"/{server}/{prompt_name}" in self._current_query_text:
+                        self._no_history = True
+                        self._no_kg = True
+                        break
+                if self._no_history:
+                    break
+
+        # Strip conversation history when @no-history is active
+        if self._no_history and len(messages) > 1:
+            messages = [messages[-1]]
+
+        # Build tools with progressive disclosure (truncated descriptions).
+        # When @no-history is active (MCP prompt execution), restrict the outer agent
+        # to introspection and think tools only — data collection tools are intentionally
+        # withheld so the agent cannot pre-collect data before calling execute_mcp_prompt.
+        # The inner sub-query started by execute_mcp_prompt gets all tools back.
         api_tools = self._build_api_tools()
+        if self._no_history:
+            api_tools = [
+                t
+                for t in api_tools
+                if t["name"].startswith("introspection__") or t["name"].startswith("internal__think")
+            ]
 
         # Reset token tracking and extended context for this query
         self._turn_token_usage = []
