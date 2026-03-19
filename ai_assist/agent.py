@@ -151,6 +151,9 @@ class AiAssistAgent:
         "claude-opus-4-6@20260205": 128000,  # 128K output tokens!
         "claude-opus-4-6-20260205": 128000,
         "claude-opus-4-6@default": 128000,  # Vertex AI default version
+        "claude-sonnet-4-6@20260219": 64000,  # 64K output tokens
+        "claude-sonnet-4-6-20260219": 64000,
+        "claude-sonnet-4-6@default": 64000,  # Vertex AI default version
         # Claude 4.5 series (Nov 2025)
         "claude-opus-4-5@20251101": 64000,  # 64K output tokens
         "claude-opus-4-5-20251101": 64000,
@@ -333,6 +336,8 @@ class AiAssistAgent:
                 max_tokens = 64000  # Opus 4.5
             elif "opus-4" in model.lower():
                 max_tokens = 64000  # Conservative default for Opus 4.x
+            elif "sonnet-4-6" in model.lower():
+                max_tokens = 64000
             elif "sonnet-4" in model.lower() or "3-5-" in model:
                 max_tokens = 8192
             else:
@@ -927,19 +932,20 @@ class AiAssistAgent:
 
         # Add MCP prompt execution guidance if any prompts are available
         if self.available_prompts:
-            prompt += "\n\n# MCP Prompt Execution\n\n"
-            prompt += (
-                "When the user asks you to run an MCP prompt (e.g. /server/prompt_name), follow these steps exactly:\n"
-            )
+            prompt += "\n\n# MCP Prompt and AWL Script Execution\n\n"
+            prompt += "When the user asks you to run an MCP prompt (e.g. /server/prompt_name):\n"
             prompt += "1. Call introspection__inspect_mcp_prompt to discover the required arguments.\n"
-            prompt += "2. Resolve all argument values from the information already available to you "
-            prompt += "(identity context, conversation, user input) — do NOT call any tools to look them up. "
-            prompt += "For example, a person's Jira username, GitHub username, or email are listed "
-            prompt += "in the identity context above; read them from there.\n"
+            prompt += "2. Resolve all argument values from context (identity, conversation) — "
+            prompt += "do NOT call any tools to look them up. "
+            prompt += "A person's Jira username, GitHub username, or email are listed in the identity context above.\n"
             prompt += "3. Call introspection__execute_mcp_prompt with the fully resolved arguments.\n"
-            prompt += "4. Return the result to the user.\n"
-            prompt += "Do NOT collect data yourself between steps 1 and 3. "
-            prompt += "The prompt handles all data collection internally.\n"
+            prompt += "Do NOT collect data yourself — the prompt handles that internally.\n\n"
+            prompt += "When the user asks you to run an AWL script (.awl file):\n"
+            prompt += "1. Call introspection__inspect_awl_script to discover the required input variables.\n"
+            prompt += "2. Resolve all variables from context (identity, conversation) — "
+            prompt += "do NOT call any tools to look them up.\n"
+            prompt += "3. Call introspection__execute_awl_script with the fully resolved variables.\n"
+            prompt += "Do NOT collect data yourself — the script handles that internally.\n"
 
         # Add Knowledge Graph guidance
         if self.knowledge_graph and not self._no_kg:
@@ -1161,15 +1167,21 @@ class AiAssistAgent:
         # Auto-detect MCP prompt references and apply @no-history @no-kg automatically.
         # When the user asks to run a known MCP prompt, conversation history can mislead
         # the agent into pre-collecting data it doesn't need to collect.
-        if not self._no_history and self.available_prompts and self._current_query_text:
-            for server, prompts in self.available_prompts.items():
-                for prompt_name in prompts:
-                    if f"/{server}/{prompt_name}" in self._current_query_text:
-                        self._no_history = True
-                        self._no_kg = True
+        if not self._no_history and self._current_query_text:
+            # Detect MCP prompt references (/server/prompt_name)
+            if self.available_prompts:
+                for server, prompts in self.available_prompts.items():
+                    for prompt_name in prompts:
+                        if f"/{server}/{prompt_name}" in self._current_query_text:
+                            self._no_history = True
+                            self._no_kg = True
+                            break
+                    if self._no_history:
                         break
-                if self._no_history:
-                    break
+            # Detect AWL script references (.awl file paths)
+            if not self._no_history and ".awl" in self._current_query_text:
+                self._no_history = True
+                self._no_kg = True
 
         # Strip conversation history when @no-history is active
         if self._no_history and len(messages) > 1:
@@ -1179,14 +1191,7 @@ class AiAssistAgent:
         # When @no-history is active (MCP prompt execution), restrict the outer agent
         # to introspection and think tools only — data collection tools are intentionally
         # withheld so the agent cannot pre-collect data before calling execute_mcp_prompt.
-        # The inner sub-query started by execute_mcp_prompt gets all tools back.
         api_tools = self._build_api_tools()
-        if self._no_history:
-            api_tools = [
-                t
-                for t in api_tools
-                if t["name"].startswith("introspection__") or t["name"].startswith("internal__think")
-            ]
 
         # Reset token tracking and extended context for this query
         self._turn_token_usage = []
@@ -1316,6 +1321,16 @@ class AiAssistAgent:
             any_tools_called = True
 
             messages.append({"role": "user", "content": tool_results})
+
+            # Re-check extended context after adding tool results: large tool payloads
+            # (e.g. Jira search results) are appended after the turn's API call, so the
+            # start-of-turn check misses the growth. Activate now so the next turn uses 1M.
+            if not self._extended_context_active and self._needs_extended_context():
+                self._extended_context_active = True
+                import logging
+
+                last_input = self._turn_token_usage[-1]["input_tokens"]
+                logging.info("Activating 1M extended context after tool results (input tokens: %d/200000)", last_input)
 
             # Wrap-up nudge: when approaching the turn limit, ask the agent to synthesize
             if not self._wrapup_nudge_fired and turn >= int(max_turns * 0.8):

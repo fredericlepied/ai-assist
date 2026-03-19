@@ -52,8 +52,8 @@ def test_get_tool_definitions_with_kg(introspection_tools_with_kg):
     """Test tool definitions with KG only"""
     tools_defs = introspection_tools_with_kg.get_tool_definitions()
 
-    # Should have 3 KG tools + 1 MCP prompt inspection tool + 1 get_tool_help + 1 get_skill_help + 1 validate_awl_script
-    assert len(tools_defs) == 7
+    # Should have 3 KG tools + 1 MCP prompt inspection tool + 1 get_tool_help + 1 get_skill_help + 1 validate_awl_script + 1 inspect_awl_script
+    assert len(tools_defs) == 8
 
     tool_names = [t["name"] for t in tools_defs]
     assert "introspection__search_knowledge_graph" in tool_names
@@ -71,8 +71,8 @@ def test_get_tool_definitions_with_both(introspection_tools_full):
     """Test tool definitions with both KG and conversation"""
     tools_defs = introspection_tools_full.get_tool_definitions()
 
-    # Should have 3 KG + 1 MCP prompt inspection + 1 conversation + 1 get_tool_help + 1 get_skill_help + 1 validate_awl_script
-    assert len(tools_defs) == 8
+    # Should have 3 KG + 1 MCP prompt inspection + 1 conversation + 1 get_tool_help + 1 get_skill_help + 1 validate_awl_script + 1 inspect_awl_script
+    assert len(tools_defs) == 9
 
     tool_names = [t["name"] for t in tools_defs]
     assert "introspection__search_knowledge_graph" in tool_names
@@ -576,3 +576,201 @@ async def test_execute_awl_script_no_agent(tmp_path):
     result = await tools.execute_tool("execute_awl_script", {"script_path": str(script)})
 
     assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_awl_script_relative_path(mock_agent, tmp_path, monkeypatch):
+    """Relative script paths are resolved from cwd"""
+    script = tmp_path / "rel.awl"
+    script.write_text("@start\n@set x = 1\n@end\n")
+    monkeypatch.chdir(tmp_path)
+
+    tools = IntrospectionTools(agent=mock_agent)
+    result = await tools.execute_tool("execute_awl_script", {"script_path": "rel.awl"})
+
+    assert "AWL Workflow" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_awl_script_missing_variables(mock_agent, tmp_path):
+    """Return JSON error when required input variables are not provided"""
+    script = tmp_path / "greet.awl"
+    script.write_text("@start\n@set msg = ${name}\n@end\n")
+
+    tools = IntrospectionTools(agent=mock_agent)
+    result = await tools.execute_tool("execute_awl_script", {"script_path": str(script)})
+
+    data = json.loads(result)
+    assert "error" in data
+    assert "name" in data["missing"]
+
+
+@pytest.mark.asyncio
+async def test_execute_awl_script_runtime_error(mock_agent, tmp_path):
+    """Return JSON error on AWLRuntimeError"""
+    from unittest.mock import AsyncMock, patch
+
+    from ai_assist.awl_runtime import AWLRuntimeError
+
+    script = tmp_path / "fail.awl"
+    script.write_text("@start\n@task t1\nGoal: do something\nExpose: result\n@end\n@end\n")
+
+    tools = IntrospectionTools(agent=mock_agent)
+    with patch("ai_assist.awl_runtime.AWLRuntime") as MockRuntime:
+        instance = MockRuntime.return_value
+        instance.execute = AsyncMock(side_effect=AWLRuntimeError("boom"))
+        result = await tools.execute_tool("execute_awl_script", {"script_path": str(script)})
+
+    data = json.loads(result)
+    assert "error" in data
+    assert "boom" in data["error"]
+
+
+# --- inspect_awl_script tests ---
+
+
+def test_inspect_awl_tool_present_with_agent(mock_agent):
+    """inspect_awl_script appears in tool definitions when agent is set"""
+    tools = IntrospectionTools(agent=mock_agent).get_tool_definitions()
+    names = [t["name"] for t in tools]
+    assert "introspection__inspect_awl_script" in names
+
+
+@pytest.mark.asyncio
+async def test_inspect_awl_script_missing_path():
+    """Return error when script_path is empty"""
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool("inspect_awl_script", {"script_path": ""})
+
+    data = json.loads(result)
+    assert "error" in data
+
+
+@pytest.mark.asyncio
+async def test_inspect_awl_script_not_found():
+    """Return error when script does not exist"""
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool("inspect_awl_script", {"script_path": "/no/such/file.awl"})
+
+    data = json.loads(result)
+    assert "error" in data
+    assert "not found" in data["error"].lower() or "Script not found" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_inspect_awl_script_parse_error(tmp_path):
+    """Return error for invalid AWL syntax"""
+    script = tmp_path / "bad.awl"
+    script.write_text("this is not valid\n")
+
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool("inspect_awl_script", {"script_path": str(script)})
+
+    data = json.loads(result)
+    assert "error" in data
+
+
+@pytest.mark.asyncio
+async def test_inspect_awl_script_returns_input_variables(tmp_path):
+    """Return the set of input variables referenced but not defined in the script"""
+    script = tmp_path / "greet.awl"
+    script.write_text("@start\n@set msg = Hello ${name}\n@end\n")
+
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool("inspect_awl_script", {"script_path": str(script)})
+
+    data = json.loads(result)
+    assert "input_variables" in data
+    assert "name" in data["input_variables"]
+
+
+@pytest.mark.asyncio
+async def test_inspect_awl_script_no_input_variables(tmp_path):
+    """Script with no external variables returns empty input_variables"""
+    script = tmp_path / "simple.awl"
+    script.write_text("@start\n@set x = hello\n@end\n")
+
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool("inspect_awl_script", {"script_path": str(script)})
+
+    data = json.loads(result)
+    assert data["input_variables"] == []
+
+
+@pytest.mark.asyncio
+async def test_inspect_awl_script_relative_path(tmp_path, monkeypatch):
+    """Relative paths in inspect_awl_script are resolved from cwd"""
+    script = tmp_path / "rel.awl"
+    script.write_text("@start\n@set x = hello\n@end\n")
+    monkeypatch.chdir(tmp_path)
+
+    tools = IntrospectionTools(agent=None)
+    result = await tools.execute_tool("inspect_awl_script", {"script_path": "rel.awl"})
+
+    data = json.loads(result)
+    assert "input_variables" in data
+
+
+# --- _awl_input_variables edge cases ---
+
+
+def test_awl_input_variables_loop_with_collect(tmp_path):
+    """LoopNode with collect= should add collect var to defined set"""
+    from ai_assist.awl_parser import AWLParser
+
+    source = (
+        "@start\n"
+        "@loop items as item collect=results\n"
+        "@task t1\n"
+        "Goal: process ${item}\n"
+        "Expose: summary\n"
+        "@end\n"
+        "@end\n"
+        "@end\n"
+    )
+    workflow = AWLParser(source).parse()
+    vars_ = IntrospectionTools._awl_input_variables(workflow)
+    # 'items' is referenced but not defined → it's an input
+    assert "items" in vars_
+    # 'item' and 'results' are defined by the loop → not inputs
+    assert "item" not in vars_
+    assert "results" not in vars_
+
+
+def test_awl_input_variables_if_node(tmp_path):
+    """Variables used inside @if/@else bodies are detected"""
+    from ai_assist.awl_parser import AWLParser
+
+    source = "@start\n" "@if flag\n" "@set a = ${x}\n" "@else\n" "@set b = ${y}\n" "@end\n" "@end\n"
+    workflow = AWLParser(source).parse()
+    vars_ = IntrospectionTools._awl_input_variables(workflow)
+    assert "x" in vars_
+    assert "y" in vars_
+
+
+# --- _execute_mcp_prompt missing-argument validation ---
+
+
+@pytest.mark.asyncio
+async def test_execute_mcp_prompt_missing_required_args(mock_agent):
+    """Return JSON error when required prompt arguments are missing"""
+    from unittest.mock import MagicMock
+
+    arg = MagicMock()
+    arg.name = "days"
+    arg.required = True
+
+    prompt_def = MagicMock()
+    prompt_def.arguments = [arg]
+
+    available_prompts = {"myserver": {"myprompт": prompt_def}}
+
+    tools = IntrospectionTools(agent=mock_agent, available_prompts=available_prompts)
+    result = await tools.execute_tool(
+        "execute_mcp_prompt",
+        {"server": "myserver", "prompt": "myprompт", "arguments": {}},
+    )
+
+    data = json.loads(result)
+    assert "error" in data
+    assert "days" in data["missing"]
