@@ -171,7 +171,7 @@ DCI_CS_URL=https://api.distributed-ci.io
 
 # Optional: Jira
 JIRA_API_TOKEN=your_jira_token
-JIRA_URL=https://issues.redhat.com
+JIRA_URL=https://redhat.atlassian.net
 ```
 
 ## Testing Your Setup

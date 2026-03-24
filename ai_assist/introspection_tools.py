@@ -191,6 +191,11 @@ Script search order for relative paths:
 
 Variable injection: Pass {"key": "value"} to pre-populate workflow variables (${key} in scripts).
 
+IMPORTANT: Before calling this tool, call introspection__inspect_awl_script to discover
+which input variables the script requires. Then resolve ALL of them from context
+(identity, user message) before calling execute_awl_script — do NOT collect data
+yourself between these steps.
+
 Returns task outcomes, return value, and final variables.
 """,
                     "input_schema": {
@@ -458,6 +463,35 @@ After the loop, `results` is a list of dicts from each successful iteration.
             }
         )
 
+        # AWL script inspection tool — always available
+        tools.append(
+            {
+                "name": "introspection__inspect_awl_script",
+                "description": """Inspect an AWL script and return the input variables it requires.
+
+Use this tool BEFORE executing an AWL script to discover which variables must be
+injected. It performs static analysis on the AST to return only true input variables —
+variables referenced in the script but never produced by a task Expose:, @set, or
+@loop item — so internal step-to-step variables are excluded.
+
+After inspecting, resolve all input variables from available context (identity, user
+message) and call introspection__execute_awl_script with them. Do NOT collect data
+yourself between these two steps.
+""",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "script_path": {
+                            "type": "string",
+                            "description": "Path to AWL script (.awl extension, relative or absolute)",
+                        }
+                    },
+                    "required": ["script_path"],
+                },
+                "_server": "introspection",
+            }
+        )
+
         return tools
 
     async def execute_tool(self, tool_name: str, arguments: dict) -> str:
@@ -470,6 +504,7 @@ After the loop, `results` is a list of dicts from each successful iteration.
             "inspect_mcp_prompt": self._inspect_mcp_prompt,
             "execute_mcp_prompt": self._execute_mcp_prompt,
             "execute_awl_script": self._execute_awl_script,
+            "inspect_awl_script": self._inspect_awl_script,
             "validate_awl_script": self._validate_awl_script,
             "get_tool_help": self._get_tool_help,
             "get_skill_help": self._get_skill_help,
@@ -734,6 +769,30 @@ After the loop, `results` is a list of dicts from each successful iteration.
         if not server or not prompt:
             return json.dumps({"error": "Both 'server' and 'prompt' arguments are required"}, indent=2)
 
+        # Validate required arguments upfront, consistently with execute_awl_script
+        if server in (self.available_prompts or {}):
+            prompt_def = self.available_prompts[server].get(prompt)
+            if prompt_def and hasattr(prompt_def, "arguments") and prompt_def.arguments:
+                missing = [
+                    arg.name
+                    for arg in prompt_def.arguments
+                    if arg.required and arg.name not in (prompt_arguments or {})
+                ]
+                if missing:
+                    return json.dumps(
+                        {
+                            "error": "Missing required arguments",
+                            "missing": missing,
+                            "provided": sorted((prompt_arguments or {}).keys()),
+                            "next_step": (
+                                f"Call introspection__inspect_mcp_prompt with server='{server}', "
+                                f"prompt='{prompt}' to see all required arguments, resolve them "
+                                "from context (identity, user message), then retry."
+                            ),
+                        },
+                        indent=2,
+                    )
+
         try:
             # Execute the prompt using the agent's method
             result = await self.agent.execute_mcp_prompt(server, prompt, prompt_arguments)
@@ -825,6 +884,95 @@ After the loop, `results` is a list of dicts from each successful iteration.
             indent=2,
         )
 
+    def _inspect_awl_script(self, arguments: dict) -> str:
+        """Return the input variables an AWL script requires.
+
+        Performs static analysis on the parsed AST: collects all interpolated
+        ${variable} references, then subtracts variables that are defined
+        within the script itself (Expose:, @set, @loop item_var).
+        """
+        from pathlib import Path
+
+        from .awl_parser import AWLParser, ParseError
+
+        script_path = arguments.get("script_path", "")
+        if not script_path:
+            return json.dumps({"error": "script_path is required"})
+
+        path_obj = Path(script_path).expanduser()
+        if not path_obj.is_absolute():
+            path_obj = Path.cwd() / script_path
+        if not path_obj.exists():
+            return json.dumps({"error": f"Script not found: {script_path}"})
+
+        try:
+            source = path_obj.read_text()
+            workflow = AWLParser(source).parse()
+        except ParseError as e:
+            return json.dumps({"error": f"Parse error: {e}"})
+        except Exception as e:
+            return json.dumps({"error": f"Error reading script: {e}"})
+
+        input_vars = sorted(self._awl_input_variables(workflow))
+        return json.dumps(
+            {
+                "script": path_obj.name,
+                "input_variables": input_vars,
+                "next_step": (
+                    "Resolve all input_variables from context (identity, user message), "
+                    "then call introspection__execute_awl_script with them as 'variables'."
+                ),
+            },
+            indent=2,
+        )
+
+    @staticmethod
+    def _awl_input_variables(workflow) -> set[str]:
+        """Return the set of input variables an AWL workflow requires.
+
+        Input variables are those referenced via ${var} interpolation but never
+        produced within the script itself (Expose:, @set, @loop item_var/collect).
+        """
+        import re
+
+        from .awl_ast import IfNode, LoopNode, SetNode, TaskNode, WorkflowNode
+
+        interpolation_re = re.compile(r"\$\{(\w+)\}")
+
+        def collect_used(text: str | None, used: set[str]) -> None:
+            used.update(interpolation_re.findall(text or ""))
+
+        def walk(nodes: list, used: set[str], defined: set[str]) -> None:
+            for node in nodes:
+                if isinstance(node, TaskNode):
+                    for text in (node.goal, node.context, node.constraints, node.success):
+                        collect_used(text, used)
+                    defined.update(node.expose)
+                elif isinstance(node, SetNode):
+                    collect_used(node.value, used)
+                    defined.add(node.variable)
+                elif isinstance(node, LoopNode):
+                    used.add(node.collection)
+                    defined.add(node.item_var)
+                    if node.collect:
+                        defined.add(node.collect)
+                    walk(node.body, used, defined)
+                elif isinstance(node, IfNode):
+                    walk(node.then_body, used, defined)
+                    walk(node.else_body, used, defined)
+                elif isinstance(node, WorkflowNode):
+                    walk(node.body, used, defined)
+
+        used: set[str] = set()
+        defined: set[str] = set()
+        walk(workflow.body, used, defined)
+        return used - defined
+
+    def _get_missing_awl_variables(self, workflow, variables: dict) -> set[str]:
+        """Return input variables required by the workflow but absent from variables dict."""
+        required = self._awl_input_variables(workflow)
+        return {v for v in required if v not in variables}
+
     def _validate_awl_script(self, arguments: dict) -> str:
         """Parse an AWL script and report syntax errors"""
         from .awl_parser import AWLParser, ParseError
@@ -860,11 +1008,8 @@ After the loop, `results` is a list of dicts from each successful iteration.
         path_obj = Path(script_path).expanduser()
 
         if not path_obj.is_absolute():
-            candidate = Path.cwd() / script_path
-            if not candidate.exists() or not candidate.is_file():
-                return f"Error: AWL script not found: {script_path}\nSearched in: {Path.cwd()}"
-            path_obj = candidate
-        elif not path_obj.exists() or not path_obj.is_file():
+            path_obj = Path.cwd() / script_path
+        if not path_obj.exists() or not path_obj.is_file():
             return f"Error: AWL script not found: {script_path}"
 
         try:
@@ -875,11 +1020,34 @@ After the loop, `results` is a list of dicts from each successful iteration.
         except Exception as e:
             return f"Error reading script: {e}"
 
+        # Validate that all required input variables are provided
+        missing = self._get_missing_awl_variables(workflow, variables)
+        if missing:
+            return json.dumps(
+                {
+                    "error": "Missing required input variables",
+                    "missing": sorted(missing),
+                    "provided": sorted(variables.keys()),
+                    "next_step": (
+                        "Call introspection__inspect_awl_script to see all required variables, "
+                        "resolve them from context (identity, user message), "
+                        "then retry introspection__execute_awl_script with all variables provided."
+                    ),
+                },
+                indent=2,
+            )
+
         try:
             runtime = AWLRuntime(self.agent)
             result = await runtime.execute(workflow, variables=variables or None)
         except AWLRuntimeError as e:
-            return f"AWL Runtime Error:\n{e}"
+            return json.dumps(
+                {
+                    "error": f"AWL Runtime Error: {e}",
+                    "action": "Report this error to the user. Do not attempt alternative approaches or workarounds.",
+                },
+                indent=2,
+            )
 
         lines = [f"AWL Workflow: {path_obj.name}", f"Success: {result.success}"]
         if result.return_value is not None:
