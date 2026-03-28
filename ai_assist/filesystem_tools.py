@@ -413,7 +413,7 @@ class FilesystemTools:
         return [
             {
                 "name": "internal__read_file",
-                "description": "Read the contents of a file from the filesystem. Can read the entire file (up to 15KB) or specific line ranges. For large files, use line_start and line_end to read only relevant sections. Use search_in_file first to find line numbers of interest.",
+                "description": "Read the contents of a file from the filesystem. Can read the entire file or specific line ranges. For large files, use line_start and line_end to read only relevant sections, or use __save_to_file parameter to save output. Use search_in_file first to find line numbers of interest.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -430,7 +430,7 @@ class FilesystemTools:
                         },
                         "max_lines": {
                             "type": "integer",
-                            "description": "Maximum number of lines to read (default: unlimited, but subject to 15KB total limit)",
+                            "description": "Maximum number of lines to read (default: unlimited)",
                             "default": None,
                         },
                     },
@@ -491,7 +491,7 @@ class FilesystemTools:
             },
             {
                 "name": "internal__execute_command",
-                "description": "Execute a command and return the output. Commands are checked against an allowlist. Non-allowlisted commands require user approval in interactive mode. Be careful with commands that might take a long time or produce large output.",
+                "description": "Execute a command and return the output. Commands are checked against an allowlist. Non-allowlisted commands require user approval in interactive mode. For commands that produce large output, consider using __save_to_file parameter or redirecting output to a file.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -626,10 +626,6 @@ class FilesystemTools:
 
                     content = "\n".join(lines)
 
-                    max_size = 15000
-                    if len(content) > max_size:
-                        content = content[:max_size] + f"\n\n... (truncated at {max_size} chars)"
-
                     range_info = f"lines {start}"
                     if line_end:
                         range_info = f"lines {start}-{line_end}"
@@ -640,10 +636,6 @@ class FilesystemTools:
 
                 else:
                     content = f.read()
-                    max_size = 15000
-                    if len(content) > max_size:
-                        return f"File contents (first {max_size} chars, total {len(content)} chars):\n\n{content[:max_size]}\n\n... (truncated - use line_start/line_end to read specific sections or search_in_file to find patterns)"
-
                     return f"File contents ({len(content)} chars):\n\n{content}"
 
         except Exception as e:
@@ -890,13 +882,6 @@ class FilesystemTools:
 
             if result.returncode != 0:
                 output += f"\nCommand failed with exit code {result.returncode}"
-
-            max_size = 15000
-            if len(output) > max_size:
-                output = (
-                    output[:max_size]
-                    + f"\n\n... (truncated, total {len(output)} chars - pipe to file or use smaller commands)"
-                )
 
             return output
 

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
-from anthropic import Anthropic, AnthropicVertex
+from anthropic import Anthropic, AnthropicVertex, APIConnectionError, APIError, BadRequestError, RateLimitError
 from mcp import ClientSession, StdioServerParameters
 
 from .audit import AuditLogger
@@ -1228,26 +1228,64 @@ class AiAssistAgent:
             extra_headers = self._get_extra_headers()
 
             max_tokens = self.get_max_tokens()
-            # Use streaming for large max_tokens to avoid HTTP timeouts
-            if max_tokens > 8192:
-                with self.anthropic.messages.stream(
-                    model=self.config.model,
-                    max_tokens=max_tokens,
-                    system=self._build_system_prompt(),
-                    tools=api_tools,  # type: ignore[arg-type]
-                    messages=messages,  # type: ignore[arg-type]
-                    extra_headers=extra_headers,
-                ) as stream:
-                    response = stream.get_final_message()
-            else:
-                response = self.anthropic.messages.create(  # type: ignore[assignment]
-                    model=self.config.model,
-                    max_tokens=max_tokens,
-                    system=self._build_system_prompt(),
-                    tools=api_tools,  # type: ignore[arg-type]
-                    messages=messages,  # type: ignore[arg-type]
-                    extra_headers=extra_headers,
+
+            # Call Claude API with error handling
+            try:
+                # Use streaming for large max_tokens to avoid HTTP timeouts
+                if max_tokens > 8192:
+                    with self.anthropic.messages.stream(
+                        model=self.config.model,
+                        max_tokens=max_tokens,
+                        system=self._build_system_prompt(),
+                        tools=api_tools,  # type: ignore[arg-type]
+                        messages=messages,  # type: ignore[arg-type]
+                        extra_headers=extra_headers,
+                    ) as stream:
+                        response = stream.get_final_message()
+                else:
+                    response = self.anthropic.messages.create(  # type: ignore[assignment]
+                        model=self.config.model,
+                        max_tokens=max_tokens,
+                        system=self._build_system_prompt(),
+                        tools=api_tools,  # type: ignore[arg-type]
+                        messages=messages,  # type: ignore[arg-type]
+                        extra_headers=extra_headers,
+                    )
+            except BadRequestError as e:
+                # Context limit or invalid request - return error to agent
+                error_msg = str(e)
+                if "too long" in error_msg.lower() or "prompt" in error_msg.lower() or "context" in error_msg.lower():
+                    return (
+                        f"API Error: {error_msg}\n\n"
+                        f"The context is too large. To fix this:\n"
+                        f"- Use __save_to_file parameter to save large tool results to files\n"
+                        f"- Reduce batch sizes when fetching data (use smaller limit/offset)\n"
+                        f"- Process data in smaller chunks\n"
+                        f"- Re-call the problematic tool with __save_to_file added to its arguments"
+                    )
+                return f"API Error: {error_msg}"
+            except RateLimitError as e:
+                # Rate limit - agent should retry later
+                return (
+                    f"API Rate Limit Error: {str(e)}\n\n"
+                    f"The API rate limit has been exceeded. Please:\n"
+                    f"- Wait a moment before retrying\n"
+                    f"- Reduce the number of concurrent API calls\n"
+                    f"- Consider batching requests more efficiently"
                 )
+            except APIConnectionError as e:
+                # Network/connection issues
+                return (
+                    f"API Connection Error: {str(e)}\n\n"
+                    f"Could not connect to the API. This could be due to:\n"
+                    f"- Network connectivity issues\n"
+                    f"- API service temporarily unavailable\n"
+                    f"- Request timeout\n"
+                    f"Please retry the request."
+                )
+            except APIError as e:
+                # Generic API error
+                return f"API Error: {str(e)}\n\nPlease check the error message and adjust your request accordingly."
 
             # Track token usage
             self._track_token_usage(response, turn)

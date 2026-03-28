@@ -163,16 +163,16 @@ async def test_custom_debounce_time():
         test_file.write_text('{"test": 1}')
 
         callback = AsyncMock()
-        # Very short debounce
-        watchdog = FileWatchdog(test_file, callback, debounce_seconds=0.05)
+        # Short debounce time to test custom configuration
+        watchdog = FileWatchdog(test_file, callback, debounce_seconds=0.1)
 
         await watchdog.start()
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)  # Increased: give watchdog time to initialize under load
 
         test_file.write_text('{"test": 2}')
 
-        # Should trigger quickly with short debounce
-        await asyncio.sleep(0.15)
+        # Increased wait time to handle system load during parallel test execution
+        await asyncio.sleep(0.5)
 
         await watchdog.stop()
 

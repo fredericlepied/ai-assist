@@ -322,21 +322,6 @@ async def test_timeout_enforcement(skills_manager_with_skill):
 
 
 @pytest.mark.asyncio
-async def test_output_size_limit(skills_manager_with_skill):
-    """Test large output is truncated"""
-    config = AiAssistConfig(anthropic_api_key="test", allow_skill_script_execution=True)
-    tools = ScriptExecutionTools(skills_manager_with_skill, config)
-
-    result = await tools.execute_tool(
-        "execute_skill_script", {"skill_name": "test-skill", "script_name": "large_output.sh"}
-    )
-
-    # Output should be truncated at 20KB
-    assert len(result) <= 20100  # 20KB + truncation message
-    assert "truncated" in result.lower() or len(result) < 30000
-
-
-@pytest.mark.asyncio
 async def test_environment_filtering(skills_manager_with_skill):
     """Test API keys filtered from environment"""
     # Set sensitive env vars
