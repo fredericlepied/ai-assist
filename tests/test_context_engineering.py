@@ -122,35 +122,6 @@ class TestTokenBudgetMonitoring:
         assert len(agent.get_token_usage()) == 0
 
 
-class TestToolResultTruncation:
-    """Tests for _truncate_tool_result"""
-
-    def test_short_result_unchanged(self):
-        """Results under max_size are returned as-is"""
-        result = "Short result"
-        assert AiAssistAgent._truncate_tool_result(result) == result
-
-    def test_long_result_truncated(self):
-        """Results over max_size are truncated with message"""
-        result = "x" * 25000
-        truncated = AiAssistAgent._truncate_tool_result(result)
-        assert len(truncated) < len(result)
-        assert "Result truncated" in truncated
-        assert "25000 chars total" in truncated
-
-    def test_custom_max_size(self):
-        """Custom max_size is respected"""
-        result = "x" * 500
-        truncated = AiAssistAgent._truncate_tool_result(result, max_size=100)
-        assert len(truncated) < 500
-        assert "500 chars total" in truncated
-
-    def test_exact_max_size(self):
-        """Result exactly at max_size is not truncated"""
-        result = "x" * 20000
-        assert AiAssistAgent._truncate_tool_result(result) == result
-
-
 class TestObservationMasking:
     """Tests for _mask_old_observations"""
 

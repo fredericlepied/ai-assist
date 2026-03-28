@@ -172,7 +172,6 @@ skips = [
     "B603",  # subprocess without shell - we sanitize inputs
     "B606",  # start_process_with_no_shell - intentional for code reloading
     "B607",  # partial_path - using standard system tools (git, notify-send, etc.)
-    "B108",  # hardcoded_tmp_directory - acceptable for temp files
     "B113",  # request_without_timeout - false positive, we do specify timeouts
 ]
 
