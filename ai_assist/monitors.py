@@ -338,36 +338,13 @@ class MonitoringScheduler:
         print("Checking for missed scheduled runs...")
         print("=" * 60)
 
-        # Collect all scheduled items (monitors + user tasks)
-        all_scheduled = []
+        # Collect all tasks — recalculator filters to time-based ones internally
+        all_tasks = [
+            type("Adapter", (), {"schedule": runner.task_def.interval, "execute": runner.run})()
+            for runner in self.monitors + self.user_tasks
+        ]
 
-        for monitor in self.monitors:
-            if monitor.task_def.is_time_based:
-                # Create adapter object with execute method
-                adapter = type(
-                    "MonitorAdapter",
-                    (),
-                    {
-                        "schedule": monitor.task_def.interval,
-                        "execute": monitor.run,
-                    },
-                )()
-                all_scheduled.append(adapter)
-
-        for task_runner in self.user_tasks:
-            if task_runner.task_def.is_time_based:
-                adapter = type(
-                    "TaskAdapter",
-                    (),
-                    {
-                        "schedule": task_runner.task_def.interval,
-                        "execute": task_runner.run,
-                    },
-                )()
-                all_scheduled.append(adapter)
-
-        # Check for and execute missed runs
-        await self.schedule_recalculator.handle_wake_event(wall_jump_seconds, all_scheduled, now=now)
+        await self.schedule_recalculator.handle_wake_event(wall_jump_seconds, all_tasks, now=now)
 
         print("✓ Suspension recovery complete")
         print("=" * 60 + "\n")
