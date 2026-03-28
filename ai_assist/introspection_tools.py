@@ -492,6 +492,67 @@ yourself between these two steps.
             }
         )
 
+        # Context management tools — always available
+        tools.extend(
+            [
+                {
+                    "name": "introspection__get_context_usage",
+                    "description": """Check current context window usage and statistics.
+
+Use this tool to:
+- See how many tokens you're currently using
+- Check if you're approaching context limits
+- Decide whether to use __save_to_file or compact conversation
+- Determine if extended context (1M tokens) is available or active
+
+Returns JSON with: input_tokens, context_window, utilization, extended_context_available,
+extended_context_active, turns_in_conversation, and tool_results_cached.
+
+Use this proactively before making large data fetches or when you notice conversation
+getting long.
+""",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
+                    "_server": "introspection",
+                },
+                {
+                    "name": "introspection__compact_conversation",
+                    "description": """Manually compact the conversation by masking old tool results.
+
+Use this tool to:
+- Reduce context usage before making large data fetches
+- Clean up conversation when approaching token limits
+- Free context space while keeping recent tool results available
+
+Replaces old tool results with "[Result already retrieved]" placeholder.
+Recent tool results (controlled by keep_recent_turns parameter) are preserved.
+
+Use this strategically:
+- Before fetching bulk data (e.g., 200 jobs)
+- When context usage > 50%
+- After completing a multi-step task
+
+Do NOT compact if you still need the old tool results for your current task.
+""",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "keep_recent_turns": {
+                                "type": "integer",
+                                "description": "Number of recent tool result rounds to preserve (default: 10)",
+                                "default": 10,
+                            },
+                        },
+                        "required": [],
+                    },
+                    "_server": "introspection",
+                },
+            ]
+        )
+
         return tools
 
     async def execute_tool(self, tool_name: str, arguments: dict) -> str:
@@ -508,6 +569,8 @@ yourself between these two steps.
             "validate_awl_script": self._validate_awl_script,
             "get_tool_help": self._get_tool_help,
             "get_skill_help": self._get_skill_help,
+            "get_context_usage": self._get_context_usage,
+            "compact_conversation": self._compact_conversation,
         }
 
         handler = dispatch.get(tool_name)
@@ -883,6 +946,122 @@ yourself between these two steps.
             result,
             indent=2,
         )
+
+    def _get_context_usage(self, arguments: dict) -> str:
+        """Return current context window usage statistics.
+
+        Returns:
+            JSON string with token usage, context window size, utilization percentage,
+            extended context status, and conversation statistics
+        """
+        if not self.agent:
+            return json.dumps({"error": "Agent reference not available"})
+
+        # Get last turn's token usage
+        if self.agent._turn_token_usage:
+            last_usage = self.agent._turn_token_usage[-1]
+            input_tokens = last_usage["input_tokens"]
+        else:
+            input_tokens = 0
+
+        # Get context window size (accounts for extended context)
+        context_window = self.agent.get_context_window_size()
+
+        # Calculate utilization
+        utilization = (input_tokens / context_window * 100) if context_window > 0 else 0
+
+        # Check extended context support
+        extended_available = self.agent._supports_extended_context()
+        extended_active = self.agent._extended_context_active
+
+        # Count tool results in conversation (cached observations)
+        tool_results_count = 0
+        if hasattr(self.agent, "_conversation_messages"):
+            for msg in self.agent._conversation_messages:
+                if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+                    tool_results_count += sum(
+                        1 for item in msg["content"] if isinstance(item, dict) and item.get("type") == "tool_result"
+                    )
+
+        result = {
+            "input_tokens": input_tokens,
+            "context_window": context_window,
+            "utilization": f"{utilization:.1f}%",
+            "extended_context_available": extended_available,
+            "extended_context_active": extended_active,
+            "turns_in_conversation": len(self.agent._turn_token_usage),
+            "tool_results_cached": tool_results_count,
+        }
+
+        return json.dumps(result, indent=2)
+
+    def _compact_conversation(self, arguments: dict) -> str:
+        """Manually compact conversation by masking old tool results.
+
+        Args:
+            arguments: Dict with optional 'keep_recent_turns' (default: 10)
+
+        Returns:
+            JSON string with compaction summary
+        """
+        if not self.agent:
+            return json.dumps({"error": "Agent reference not available"})
+
+        keep_recent_turns = arguments.get("keep_recent_turns", 10)
+
+        # Validate parameter
+        if not isinstance(keep_recent_turns, int) or keep_recent_turns < 0:
+            return json.dumps({"error": "keep_recent_turns must be a non-negative integer"})
+
+        # Get messages from agent's conversation
+        if not hasattr(self.agent, "_conversation_messages"):
+            return json.dumps({"error": "No conversation messages available to compact"})
+
+        messages = self.agent._conversation_messages
+
+        # Find all tool result message indices
+        tool_result_indices = []
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+                if any(isinstance(item, dict) and item.get("type") == "tool_result" for item in msg["content"]):
+                    tool_result_indices.append(i)
+
+        # No tool results to compact
+        if not tool_result_indices:
+            return json.dumps(
+                {
+                    "status": "no tool results to compact",
+                    "tool_result_turns": 0,
+                    "masked": 0,
+                }
+            )
+
+        # Use the agent's masking method to avoid code duplication
+        from ai_assist.agent import AiAssistAgent
+
+        AiAssistAgent._mask_old_observations(messages, keep_recent=keep_recent_turns)
+
+        # Count how many results were actually masked for the response
+        indices_to_mask = (
+            tool_result_indices[:-keep_recent_turns] if len(tool_result_indices) > keep_recent_turns else []
+        )
+        masked_count = 0
+        for idx in indices_to_mask:
+            content = messages[idx]["content"]
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "tool_result":
+                        masked_count += 1
+
+        result = {
+            "status": "compacted",
+            "tool_result_turns": len(tool_result_indices),
+            "kept_recent": min(keep_recent_turns, len(tool_result_indices)),
+            "masked_turns": len(indices_to_mask),
+            "masked_results": masked_count,
+        }
+
+        return json.dumps(result, indent=2)
 
     def _inspect_awl_script(self, arguments: dict) -> str:
         """Return the input variables an AWL script requires.

@@ -316,6 +316,9 @@ class AiAssistAgent:
         # Token usage tracking per query
         self._turn_token_usage: list[dict[str, Any]] = []
 
+        # Conversation messages for introspection tools to access
+        self._conversation_messages: list[dict[str, Any]] = []
+
         # Current query text for KG context injection
         self._current_query_text: str = ""
 
@@ -1188,6 +1191,9 @@ class AiAssistAgent:
         self._turn_token_usage = []
         self._extended_context_active = False
 
+        # Store messages for introspection tools to access
+        self._conversation_messages = messages
+
         # Loop detection and dedup tracking
         start_time = time.time()
         max_time_seconds = 600  # 10 minutes max
@@ -1451,6 +1457,9 @@ class AiAssistAgent:
             self._extended_context_active = False
             self._grounding_nudge_fired = False
             self._wrapup_nudge_fired = False
+
+            # Store messages for introspection tools to access
+            self._conversation_messages = messages
 
             if progress_callback:
                 progress_callback("thinking", 0, max_turns, None)
