@@ -1147,9 +1147,10 @@ Do NOT compact if you still need the old tool results for your current task.
         walk(workflow.body, used, defined)
         return used - defined
 
-    def _get_missing_awl_variables(self, workflow, variables: dict) -> set[str]:
+    @staticmethod
+    def _get_missing_awl_variables(workflow, variables: dict) -> set[str]:
         """Return input variables required by the workflow but absent from variables dict."""
-        required = self._awl_input_variables(workflow)
+        required = IntrospectionTools._awl_input_variables(workflow)
         return {v for v in required if v not in variables}
 
     def _validate_awl_script(self, arguments: dict) -> str:

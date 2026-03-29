@@ -324,6 +324,8 @@ async def run_awl_script(agent: AiAssistAgent, script_path: str, variables: dict
     """Run an AWL workflow script"""
     from pathlib import Path
 
+    from .introspection_tools import IntrospectionTools
+
     path = Path(script_path)
     if not path.exists():
         print(f"Error: File not found: {script_path}")
@@ -331,6 +333,20 @@ async def run_awl_script(agent: AiAssistAgent, script_path: str, variables: dict
 
     source = path.read_text()
     workflow = AWLParser(source).parse()
+
+    # Validate that all required input variables are provided
+    # Uses the same validation method as introspection__execute_awl_script
+    missing_vars = IntrospectionTools._get_missing_awl_variables(workflow, variables or {})
+
+    if missing_vars:
+        required_vars = IntrospectionTools._awl_input_variables(workflow)
+        provided_vars = set(variables.keys()) if variables else set()
+        print(f"Error: Missing required input variables: {sorted(missing_vars)}")
+        print(f"\nRequired variables: {sorted(required_vars)}")
+        print(f"Provided variables: {sorted(provided_vars)}")
+        print(f"\nUsage: ai-assist /run {path.name} {' '.join(f'{v}=<value>' for v in sorted(required_vars))}")
+        sys.exit(1)
+
     runtime = AWLRuntime(agent)
     print(f"Running AWL workflow: {path.name}")
     result = await runtime.execute(workflow, variables=variables)
