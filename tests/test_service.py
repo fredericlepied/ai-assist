@@ -85,40 +85,62 @@ class TestInstallService:
     def test_writes_service_file_and_enables(self, tmp_path):
         config_dir = tmp_path / ".ai-assist"
         config_dir.mkdir()
-        with patch("ai_assist.service.subprocess.run"), patch("ai_assist.service.sys.argv", ["/usr/bin/ai-assist"]):
+        service_file = tmp_path / "systemd" / "user" / "ai-assist.service"
+        service_file.parent.mkdir(parents=True)
+
+        with (
+            patch("ai_assist.service.subprocess.run"),
+            patch("ai_assist.service.sys.argv", ["/usr/bin/ai-assist"]),
+            patch("ai_assist.service._service_file", return_value=service_file),
+        ):
             install_service(str(config_dir), None)
-        service_file = Path.home() / ".config" / "systemd" / "user" / "ai-assist.service"
+
         assert service_file.exists()
         assert "ExecStart=/usr/bin/ai-assist /monitor" in service_file.read_text()
-        service_file.unlink()
 
     def test_includes_reports_dir_when_provided(self, tmp_path):
         config_dir = tmp_path / ".ai-assist"
         config_dir.mkdir()
         reports_dir = tmp_path / "reports"
-        with patch("ai_assist.service.subprocess.run"), patch("ai_assist.service.sys.argv", ["/usr/bin/ai-assist"]):
+        service_file = tmp_path / "systemd" / "user" / "ai-assist.service"
+        service_file.parent.mkdir(parents=True)
+
+        with (
+            patch("ai_assist.service.subprocess.run"),
+            patch("ai_assist.service.sys.argv", ["/usr/bin/ai-assist"]),
+            patch("ai_assist.service._service_file", return_value=service_file),
+        ):
             install_service(str(config_dir), str(reports_dir))
-        service_file = Path.home() / ".config" / "systemd" / "user" / "ai-assist.service"
+
         content = service_file.read_text()
         assert f"AI_ASSIST_REPORTS_DIR={reports_dir.resolve()}" in content
-        service_file.unlink()
 
 
 class TestRemoveService:
     def test_removes_service_file(self, tmp_path):
         config_dir = tmp_path / ".ai-assist"
         config_dir.mkdir()
-        service_file = Path.home() / ".config" / "systemd" / "user" / "ai-assist.service"
+        service_file = tmp_path / "systemd" / "user" / "ai-assist.service"
         service_file.parent.mkdir(parents=True, exist_ok=True)
         service_file.write_text("[Unit]\n")
-        with patch("ai_assist.service.subprocess.run"):
+
+        with (
+            patch("ai_assist.service.subprocess.run"),
+            patch("ai_assist.service._service_file", return_value=service_file),
+        ):
             remove_service(str(config_dir))
+
         assert not service_file.exists()
 
     def test_remove_succeeds_without_service_file(self, tmp_path):
         config_dir = tmp_path / ".ai-assist"
         config_dir.mkdir()
-        with patch("ai_assist.service.subprocess.run"):
+        service_file = tmp_path / "systemd" / "user" / "ai-assist.service"
+
+        with (
+            patch("ai_assist.service.subprocess.run"),
+            patch("ai_assist.service._service_file", return_value=service_file),
+        ):
             remove_service(str(config_dir))  # should not raise
 
 
