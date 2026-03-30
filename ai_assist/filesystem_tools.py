@@ -291,17 +291,20 @@ def _extract_command_argument_paths(command: str) -> list[tuple[str, str]]:
 class FilesystemTools:
     """Internal filesystem tools for the agent"""
 
-    def __init__(self, config: AiAssistConfig):
+    def __init__(self, config: AiAssistConfig, load_user_config: bool = True):
         """Initialize filesystem tools
 
         Args:
             config: AiAssistConfig instance for security settings
+            load_user_config: Whether to load user-specific config from ~/.ai-assist (default True)
         """
         self.allowed_commands = list(config.allowed_commands)
-        self._load_user_allowed_commands()
+        if load_user_config:
+            self._load_user_allowed_commands()
         self.allowed_paths = [Path(p).expanduser().resolve() for p in config.allowed_paths if p]
         self._path_restrictions_enabled = bool(self.allowed_paths)
-        self._load_user_allowed_paths()
+        if load_user_config:
+            self._load_user_allowed_paths()
         self.confirm_tools = config.confirm_tools
         self.confirmation_callback: Callable[[str], Awaitable[bool]] | None = None
         self.path_confirmation_callback: Callable[[str], Awaitable[bool]] | None = None

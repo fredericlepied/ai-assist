@@ -180,6 +180,40 @@ async def test_custom_debounce_time():
 
 
 @pytest.mark.asyncio
+async def test_detects_atomic_write():
+    """Test that atomic write (temp file + rename) triggers callback.
+
+    This is the pattern used by schedule_tools.py and many editors:
+    1. Write to a temp file
+    2. Rename temp file over original
+
+    This triggers on_moved events, not on_modified.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_file = Path(tmpdir) / "test.json"
+        test_file.write_text('{"test": 1}')
+
+        callback = AsyncMock()
+        watchdog = FileWatchdog(test_file, callback, debounce_seconds=0.1)
+
+        await watchdog.start()
+        await asyncio.sleep(0.2)  # Let watchdog initialize
+
+        # Simulate atomic write (same pattern as schedule_tools.py)
+        temp_file = test_file.with_suffix(".json.tmp")
+        temp_file.write_text('{"test": 2}')
+        temp_file.rename(test_file)  # This triggers on_moved
+
+        # Wait for debounce + processing
+        await asyncio.sleep(0.3)
+
+        await watchdog.stop()
+
+        # Should have triggered callback for the atomic write
+        assert callback.call_count >= 1, "Atomic write (temp file + rename) should trigger callback"
+
+
+@pytest.mark.asyncio
 async def test_multiple_watchers_same_directory():
     """Test that multiple watchers on the same directory share one Observer."""
     with tempfile.TemporaryDirectory() as tmpdir:
