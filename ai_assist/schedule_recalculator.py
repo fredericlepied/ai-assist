@@ -4,10 +4,13 @@ This module handles detecting and executing missed scheduled runs
 after system suspension or clock changes.
 """
 
+import logging
 from datetime import datetime, timedelta
 from typing import Any
 
 from .tasks import TaskLoader
+
+logger = logging.getLogger(__name__)
 
 
 class ScheduleRecalculator:
@@ -48,4 +51,7 @@ class ScheduleRecalculator:
 
             next_run = TaskLoader.calculate_next_run(schedule, from_time=before_suspend)
             if next_run <= now:
-                await monitor.execute()
+                try:
+                    await monitor.execute()
+                except Exception as e:
+                    logger.error("Error executing missed task: %s", e)

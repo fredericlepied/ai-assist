@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -183,6 +183,8 @@ class MonitoringScheduler:
         if removed:
             print(f"Cleaned up {removed} expired cache entries")
 
+        await self._run_missed_tasks_at_startup()
+
         tasks = []
 
         for monitor in self.monitors:
@@ -323,6 +325,69 @@ class MonitoringScheduler:
             print(f"\n{result['summary']}")
             print(f"{'-'*60}")
 
+    async def _wait_for_network(self, timeout_seconds: float = 60.0, check_interval: float = 2.0) -> bool:
+        """Wait until DNS resolution works. Returns True if network is available, False if timed out."""
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout_seconds
+        while loop.time() < deadline:
+            try:
+                await loop.getaddrinfo("google.com", 443)
+                return True
+            except OSError:
+                await asyncio.sleep(check_interval)
+        return False
+
+    async def _run_missed_tasks_at_startup(self, now: datetime | None = None) -> None:
+        """Run any time-based tasks missed in the last 24 hours (startup/reboot catchup).
+
+        Checks each time-based task to see if it should have run since its last
+        recorded run. Skips tasks that already ran after their last scheduled time.
+        """
+        if now is None:
+            now = datetime.now()
+
+        lookback = now - timedelta(hours=24)
+        missed = []
+
+        for runner in self.monitors + self.user_tasks:
+            if not runner.task_def.is_time_based:
+                continue
+            try:
+                schedule = TaskLoader.parse_time_schedule(runner.task_def.interval)
+            except ValueError:
+                continue
+
+            last_scheduled = TaskLoader.calculate_next_run(schedule, from_time=lookback)
+            if last_scheduled > now:
+                continue  # Not due within the last 24h
+
+            last_run = runner.get_last_run()
+            if last_run and last_run >= last_scheduled:
+                # Only skip if the last run actually succeeded
+                state = runner.state_manager.get_monitor_state(runner.state_key)
+                if state.last_results.get("last_success", True):
+                    continue  # Already ran successfully since last scheduled time
+                # Last run failed — retry
+
+            missed.append((runner, last_scheduled))
+
+        if not missed:
+            return
+
+        print(f"Catching up {len(missed)} missed task(s) at startup...")
+        if not await self._wait_for_network():
+            logger.warning("Network not available at startup, skipping missed task catchup")
+            return
+
+        for runner, last_scheduled in missed:
+            print(
+                f"Running missed task: {runner.task_def.name} (was due at {last_scheduled.strftime('%Y-%m-%d %H:%M')})"
+            )
+            try:
+                await runner.run()
+            except Exception as e:
+                logger.error("Error running missed task %s at startup: %s", runner.task_def.name, e)
+
     async def _handle_wake_event(self, wall_jump_seconds: float, now: datetime | None = None) -> None:
         """Handle system wake event after suspension.
 
@@ -337,6 +402,12 @@ class MonitoringScheduler:
         print(f"⚠️  Suspension detected: {abs(wall_jump_seconds):.0f} seconds")
         print("Checking for missed scheduled runs...")
         print("=" * 60)
+
+        print("Waiting for network connectivity...")
+        if not await self._wait_for_network():
+            logger.warning("Network not available after wake, skipping missed task recovery")
+            print("⚠️  Network not available after timeout, skipping missed task recovery")
+            return
 
         # Collect all tasks — recalculator filters to time-based ones internally
         all_tasks = [
