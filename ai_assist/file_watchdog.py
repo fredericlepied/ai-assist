@@ -178,6 +178,21 @@ class _DebounceHandler(FileSystemEventHandler):
         # Treat creation as modification for our purposes
         self.on_modified(event)
 
+    def on_moved(self, event: FileSystemEvent) -> None:
+        """Handle file move/rename events (atomic saves)."""
+        if event.is_directory:
+            return
+
+        # Check if file was moved TO our target path (atomic save pattern)
+        # dest_path is always present on FileSystemEvent but is empty string for non-move events
+        if event.dest_path:
+            dest_path = Path(str(event.dest_path)).resolve()
+            target_path = self.target_file.resolve()
+
+            if dest_path == target_path:
+                print(f"Detected change in {self.target_file.name}", flush=True)
+                self._trigger_debounced()
+
     def _trigger_debounced(self) -> None:
         """Trigger callback after debounce period."""
         # Cancel existing debounce task

