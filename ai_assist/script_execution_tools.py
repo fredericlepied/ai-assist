@@ -201,10 +201,7 @@ class ScriptExecutionTools:
                 check=False,
             )
 
-            # Limit output size
             output = result.stdout
-            if len(output) > 20000:  # 20KB
-                output = output[:20000] + "\n... [output truncated at 20KB limit]"
 
             if result.returncode != 0:
                 stderr = result.stderr[:500] if result.stderr else "No error output"

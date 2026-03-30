@@ -47,6 +47,10 @@ This document provides guidance for AI agents and developers working on the ai-a
 11. **ai_assist/awl_expressions.py**: AWL expression evaluator and variable interpolation
 11. **emacs/awl-mode.el**: Emacs major mode for AWL files (syntax highlighting, indentation)
 
+### Large Tool Results
+
+All tools support `__save_to_file` parameter - add it to any tool call to save the raw result directly to a file instead of returning it. Agent receives a summary. No automatic truncation.
+
 ## Documentation
 
 Only create the minimum document for the end user.

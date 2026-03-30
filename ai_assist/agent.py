@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
-from anthropic import Anthropic, AnthropicVertex
+from anthropic import Anthropic, AnthropicVertex, APIConnectionError, APIError, BadRequestError, RateLimitError
 from mcp import ClientSession, StdioServerParameters
 
 from .audit import AuditLogger
@@ -315,6 +315,9 @@ class AiAssistAgent:
 
         # Token usage tracking per query
         self._turn_token_usage: list[dict[str, Any]] = []
+
+        # Conversation messages for introspection tools to access
+        self._conversation_messages: list[dict[str, Any]] = []
 
         # Current query text for KG context injection
         self._current_query_text: str = ""
@@ -837,23 +840,6 @@ class AiAssistAgent:
         )
 
     @staticmethod
-    def _truncate_tool_result(result: str, max_size: int = 20000) -> str:
-        """Truncate large tool results to prevent context overflow.
-
-        Args:
-            result: Tool result string
-            max_size: Maximum allowed size in characters (~5K tokens at 4 chars/token)
-
-        Returns:
-            Original or truncated result
-        """
-        if len(result) <= max_size:
-            return result
-        truncated = result[:max_size]
-        truncated += f"\n\n... [Result truncated: {len(result)} chars total, showing first {max_size} chars]"
-        return truncated
-
-    @staticmethod
     def _mask_old_observations(messages: list, keep_recent: int = 10) -> None:
         """Replace old tool results with compact placeholders in-place.
 
@@ -929,6 +915,14 @@ class AiAssistAgent:
             prompt += "You have access to tools from these MCP servers: " + ", ".join(mcp_servers) + ".\n"
             prompt += "Always use tools to retrieve real data. Never fabricate information that could be obtained through a tool call.\n"
             prompt += "For detailed tool documentation (query syntax, available fields, examples), call introspection__get_tool_help with the tool name.\n"
+            prompt += "\n## Handling Large Tool Results\n\n"
+            prompt += "ALL tools (MCP, internal, introspection) support a special `__save_to_file` parameter:\n"
+            prompt += '- Add `__save_to_file: "/path/to/file.json"` to ANY tool call arguments\n'
+            prompt += "- The tool execution layer will save the raw result directly to the file\n"
+            prompt += "- You receive a short summary instead of the full result (keeps context clean)\n"
+            prompt += "- Use this proactively for bulk data fetches (limit > 50, pagination, large API responses)\n"
+            prompt += '- Example: `search_dci_jobs(query="...", limit=200, __save_to_file="/tmp/batch.json")`\n'
+            prompt += "- The file will contain the complete untruncated tool response\n\n"
 
         # Add MCP prompt execution guidance if any prompts are available
         if self.available_prompts:
@@ -1197,6 +1191,9 @@ class AiAssistAgent:
         self._turn_token_usage = []
         self._extended_context_active = False
 
+        # Store messages for introspection tools to access
+        self._conversation_messages = messages
+
         # Loop detection and dedup tracking
         start_time = time.time()
         max_time_seconds = 600  # 10 minutes max
@@ -1237,26 +1234,64 @@ class AiAssistAgent:
             extra_headers = self._get_extra_headers()
 
             max_tokens = self.get_max_tokens()
-            # Use streaming for large max_tokens to avoid HTTP timeouts
-            if max_tokens > 8192:
-                with self.anthropic.messages.stream(
-                    model=self.config.model,
-                    max_tokens=max_tokens,
-                    system=self._build_system_prompt(),
-                    tools=api_tools,  # type: ignore[arg-type]
-                    messages=messages,  # type: ignore[arg-type]
-                    extra_headers=extra_headers,
-                ) as stream:
-                    response = stream.get_final_message()
-            else:
-                response = self.anthropic.messages.create(  # type: ignore[assignment]
-                    model=self.config.model,
-                    max_tokens=max_tokens,
-                    system=self._build_system_prompt(),
-                    tools=api_tools,  # type: ignore[arg-type]
-                    messages=messages,  # type: ignore[arg-type]
-                    extra_headers=extra_headers,
+
+            # Call Claude API with error handling
+            try:
+                # Use streaming for large max_tokens to avoid HTTP timeouts
+                if max_tokens > 8192:
+                    with self.anthropic.messages.stream(
+                        model=self.config.model,
+                        max_tokens=max_tokens,
+                        system=self._build_system_prompt(),
+                        tools=api_tools,  # type: ignore[arg-type]
+                        messages=messages,  # type: ignore[arg-type]
+                        extra_headers=extra_headers,
+                    ) as stream:
+                        response = stream.get_final_message()
+                else:
+                    response = self.anthropic.messages.create(  # type: ignore[assignment]
+                        model=self.config.model,
+                        max_tokens=max_tokens,
+                        system=self._build_system_prompt(),
+                        tools=api_tools,  # type: ignore[arg-type]
+                        messages=messages,  # type: ignore[arg-type]
+                        extra_headers=extra_headers,
+                    )
+            except BadRequestError as e:
+                # Context limit or invalid request - return error to agent
+                error_msg = str(e)
+                if "too long" in error_msg.lower() or "prompt" in error_msg.lower() or "context" in error_msg.lower():
+                    return (
+                        f"API Error: {error_msg}\n\n"
+                        f"The context is too large. To fix this:\n"
+                        f"- Use __save_to_file parameter to save large tool results to files\n"
+                        f"- Reduce batch sizes when fetching data (use smaller limit/offset)\n"
+                        f"- Process data in smaller chunks\n"
+                        f"- Re-call the problematic tool with __save_to_file added to its arguments"
+                    )
+                return f"API Error: {error_msg}"
+            except RateLimitError as e:
+                # Rate limit - agent should retry later
+                return (
+                    f"API Rate Limit Error: {str(e)}\n\n"
+                    f"The API rate limit has been exceeded. Please:\n"
+                    f"- Wait a moment before retrying\n"
+                    f"- Reduce the number of concurrent API calls\n"
+                    f"- Consider batching requests more efficiently"
                 )
+            except APIConnectionError as e:
+                # Network/connection issues
+                return (
+                    f"API Connection Error: {str(e)}\n\n"
+                    f"Could not connect to the API. This could be due to:\n"
+                    f"- Network connectivity issues\n"
+                    f"- API service temporarily unavailable\n"
+                    f"- Request timeout\n"
+                    f"Please retry the request."
+                )
+            except APIError as e:
+                # Generic API error
+                return f"API Error: {str(e)}\n\nPlease check the error message and adjust your request accordingly."
 
             # Track token usage
             self._track_token_usage(response, turn)
@@ -1422,6 +1457,9 @@ class AiAssistAgent:
             self._extended_context_active = False
             self._grounding_nudge_fired = False
             self._wrapup_nudge_fired = False
+
+            # Store messages for introspection tools to access
+            self._conversation_messages = messages
 
             if progress_callback:
                 progress_callback("thinking", 0, max_turns, None)
@@ -1783,7 +1821,6 @@ class AiAssistAgent:
                 self._duplicate_tool_call_count += 1
                 return self._tool_result_cache[sig]
             result = await self._execute_tool(block.name, block.input)
-            result = self._truncate_tool_result(result)
             self._tool_result_cache[sig] = result
             return result
 
@@ -1819,7 +1856,21 @@ class AiAssistAgent:
         return tool_results, loop_detected
 
     async def _execute_tool(self, tool_name: str, arguments: dict) -> str:
-        """Execute a tool call on the appropriate MCP server, introspection, or internal tool"""
+        """Execute a tool call on the appropriate MCP server, introspection, or internal tool
+
+        Args:
+            tool_name: Name of the tool to execute (format: server__tool_name)
+            arguments: Tool arguments. If '__save_to_file' is present, the raw result
+                      will be saved to that path and a summary will be returned instead.
+
+        Returns:
+            Tool result string, or a summary if __save_to_file was specified
+        """
+
+        # Extract special __save_to_file parameter if present
+        save_to_file = arguments.pop("__save_to_file", None)
+        if save_to_file:
+            logger.info("Tool %s called with __save_to_file=%s", tool_name, save_to_file)
 
         # Validate arguments against tool schema before execution
         validation_error = self._validate_tool_arguments(tool_name, arguments)
@@ -1851,6 +1902,22 @@ class AiAssistAgent:
                 )
 
                 self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=True)
+
+                # Handle __save_to_file for introspection tools
+                if save_to_file:
+                    from pathlib import Path
+
+                    try:
+                        output_path = Path(save_to_file)
+                        output_path.parent.mkdir(parents=True, exist_ok=True)
+                        output_path.write_text(result_text)
+                        summary = f"Result saved to {save_to_file} ({len(result_text):,} bytes, {len(result_text.splitlines())} lines)"
+                        logger.info("Saved tool result to file: %s (%d bytes)", save_to_file, len(result_text))
+                        return summary
+                    except Exception as e:
+                        error_msg = f"Error saving result to {save_to_file}: {str(e)}"
+                        logger.error(error_msg)
+                        return error_msg
 
                 return result_text
             except Exception as e:
@@ -1943,6 +2010,22 @@ class AiAssistAgent:
                 is_success = not (isinstance(result_text, str) and result_text.startswith("Error:"))
                 self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=is_success)
 
+                # Handle __save_to_file for internal tools
+                if save_to_file:
+                    from pathlib import Path
+
+                    try:
+                        output_path = Path(save_to_file)
+                        output_path.parent.mkdir(parents=True, exist_ok=True)
+                        output_path.write_text(result_text)
+                        summary = f"Result saved to {save_to_file} ({len(result_text):,} bytes, {len(result_text.splitlines())} lines)"
+                        logger.info("Saved tool result to file: %s (%d bytes)", save_to_file, len(result_text))
+                        return summary
+                    except Exception as e:
+                        error_msg = f"Error saving result to {save_to_file}: {str(e)}"
+                        logger.error(error_msg)
+                        return error_msg
+
                 return result_text
             except Exception as e:
                 error_msg = f"Error executing internal tool {original_tool_name}: {str(e)}"
@@ -1986,6 +2069,22 @@ class AiAssistAgent:
                 await self._save_tool_result_to_kg(tool_name, original_tool_name, arguments, result_text)
 
             self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=True)
+
+            # Handle __save_to_file: save raw result to file and return summary
+            if save_to_file:
+                from pathlib import Path
+
+                try:
+                    output_path = Path(save_to_file)
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.write_text(result_text)
+                    summary = f"Result saved to {save_to_file} ({len(result_text):,} bytes, {len(result_text.splitlines())} lines)"
+                    logger.info("Saved tool result to file: %s (%d bytes)", save_to_file, len(result_text))
+                    return summary
+                except Exception as e:
+                    error_msg = f"Error saving result to {save_to_file}: {str(e)}"
+                    logger.error(error_msg)
+                    return error_msg
 
             return result_text
         except Exception as e:
