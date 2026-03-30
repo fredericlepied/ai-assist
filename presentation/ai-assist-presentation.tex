@@ -69,7 +69,7 @@
 \title{ai-assist}
 \subtitle{An AI-Powered Assistant for Engineering Teams}
 \author{Fr\'ed\'eric Lepied\\{\small Senior Manager -- Telco Partner CI}}
-\date{2026}
+\date{March 2026}
 \institute{Red Hat}
 
 % ══════════════════════════════════════════════════════════════════
@@ -343,18 +343,19 @@ ai-assist
 \textbf{Tech Stack}
 \begin{itemize}\scriptsize
   \item Python 3.12+
-  \item Claude Opus / Sonnet (Vertex AI or direct)
+  \item Claude Opus 4.6 / Sonnet 4.5/4.6 (Vertex AI or direct)
   \item MCP (Model Context Protocol)
   \item SQLite + sqlite-vec (Knowledge Graph)
   \item prompt-toolkit + Rich (TUI)
+  \item fastembed (vector embeddings)
 \end{itemize}
 \end{column}
 \begin{column}{0.48\textwidth}
 \textbf{Project Stats}
 \begin{itemize}\scriptsize
-  \item 9,300 lines of production code
-  \item 800+ tests across 57 test files
-  \item 9 core dependencies
+  \item 16,864 lines of production code
+  \item 366 tests across 71 test files
+  \item 16 core dependencies
   \item Pre-commit hooks (black, ruff, mypy, pylint for similarities, pytest)
   \item Comprehensive user documentation
 \end{itemize}
@@ -1107,7 +1108,7 @@ def filter_env(env):
   \item Write failing test first
   \item Make it pass
   \item Refactor
-  \item 532+ tests, 55 files
+  \item 366 tests, 71 files
   \item pytest + asyncio + mocks
   \item Pre-commit enforced
 \end{itemize}
@@ -1273,21 +1274,24 @@ introspection__execute_awl_script(
 \begin{frame}{Roadmap}
 \begin{columns}[T]
 \begin{column}{0.48\textwidth}
-\textbf{Near-Term}
+\textbf{Recently Completed}
 \begin{itemize}\small
-  \item Multiple event sources (file events, DBUS, ...)
   \item \textcolor{green!60!black}{\checkmark} Systemd user service (\texttt{/service install})
-  \item \textcolor{green!60!black}{\checkmark} Vector-based semantic search for Knowledge Graph
+  \item \textcolor{green!60!black}{\checkmark} Vector-based semantic search (sqlite-vec)
   \item \textcolor{green!60!black}{\checkmark} Think tool for multi-step planning
+  \item \textcolor{green!60!black}{\checkmark} Extended context (1M tokens on demand)
+  \item \textcolor{green!60!black}{\checkmark} Multi-instance support
+  \item \textcolor{green!60!black}{\checkmark} AWL workflow execution from prompts
 \end{itemize}
 \end{column}
 \begin{column}{0.48\textwidth}
 \textbf{Future}
 \begin{itemize}\small
-  \item More security with sandboxing tech (Landlock or Bubblewrap)
+  \item Multiple event sources (DBUS, webhooks, ...)
+  \item More security sandboxing (Landlock or Bubblewrap)
   \item Network restrictions for scripts
-  \item A2A (Agent to Agent)
-  \item Multi-channel notifications (Slack)
+  \item A2A (Agent to Agent) communication
+  \item Multi-channel notifications (Slack, Teams)
   \item ML-based anomaly detection
 \end{itemize}
 \end{column}
