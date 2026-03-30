@@ -27,6 +27,9 @@ def _service_file(config_dir: Path) -> Path:
 
 
 def _service_content(config_dir: Path, reports_dir: Path | None, binary: str) -> str:
+    # Capture current PATH to preserve user's environment (including ~/.local/bin)
+    current_path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+
     lines = [
         "[Unit]",
         f"Description=ai-assist monitor ({config_dir})",
@@ -35,6 +38,7 @@ def _service_content(config_dir: Path, reports_dir: Path | None, binary: str) ->
         "",
         "[Service]",
         "Type=simple",
+        f"Environment=PATH={current_path}",
         "Environment=PYTHONUNBUFFERED=1",
         f"Environment=AI_ASSIST_CONFIG_DIR={config_dir}",
     ]
