@@ -36,8 +36,8 @@ class ScheduleActionTools:
                             "type": "string",
                             "description": (
                                 "When to execute the action. Examples: "
-                                "'in 2 hours', 'in 30 minutes', 'tomorrow at 9am', "
-                                "'next monday 10:00', 'in 1 day'"
+                                "'in 2 hours', 'in 30 minutes', 'at 5pm', '5pm', 'at 17:00', "
+                                "'today at 5pm', 'tomorrow at 9am', 'next monday 10:00', 'in 1 day'"
                             ),
                         },
                         "description": {
@@ -95,7 +95,14 @@ class ScheduleActionTools:
         # Parse time specification
         scheduled_at = parse_time_spec(time_spec)
         if not scheduled_at:
-            return f"Error: Could not parse time specification '{time_spec}'"
+            return (
+                f"Error: Could not parse time specification '{time_spec}'\n\n"
+                "Supported formats:\n"
+                "  - Relative: 'in 2 hours', 'in 30 minutes', 'in 1 day'\n"
+                "  - Today: 'at 5pm', '5pm', 'at 17:00', '17:00', 'today at 5pm'\n"
+                "  - Tomorrow: 'tomorrow at 9am', 'tomorrow at 14:30'\n"
+                "  - Next week: 'next monday 10:00', 'next friday 14:30'"
+            )
 
         # Agent has decided the behavior via parameters (no inference needed)
 
@@ -155,6 +162,8 @@ def parse_time_spec(spec: str) -> datetime | None:
 
     Supports:
     - "in X hours/minutes/days"
+    - "at 5pm", "at 17:00", "5pm", "17:00"
+    - "today at 5pm"
     - "tomorrow at HH:MM"
     - "next monday HH:MM"
     - Relative times
@@ -175,11 +184,43 @@ def parse_time_spec(spec: str) -> datetime | None:
         elif unit in ["day", "d"]:
             return now + timedelta(days=amount)
 
-    # Pattern: "tomorrow at HH:MM" or "tomorrow HH:MM"
-    tomorrow_match = re.match(r"tomorrow\s+(?:at\s+)?(\d{1,2}):(\d{2})", spec)
+    # Pattern: "at 5pm", "5pm", "at 17:00", "17:00" (today)
+    # Also "today at 5pm"
+    time_today_match = re.match(r"(?:today\s+)?(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", spec)
+    if time_today_match:
+        hour = int(time_today_match.group(1))
+        minute = int(time_today_match.group(2)) if time_today_match.group(2) else 0
+        meridiem = time_today_match.group(3)
+
+        # Convert 12-hour to 24-hour if am/pm specified
+        if meridiem:
+            if meridiem == "pm" and hour != 12:
+                hour += 12
+            elif meridiem == "am" and hour == 12:
+                hour = 0
+
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+        # If the time has already passed today, assume they mean tomorrow
+        if target <= now:
+            target += timedelta(days=1)
+
+        return target
+
+    # Pattern: "tomorrow at 9am", "tomorrow at HH:MM", "tomorrow HH:MM"
+    tomorrow_match = re.match(r"tomorrow\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", spec)
     if tomorrow_match:
         hour = int(tomorrow_match.group(1))
-        minute = int(tomorrow_match.group(2))
+        minute = int(tomorrow_match.group(2)) if tomorrow_match.group(2) else 0
+        meridiem = tomorrow_match.group(3)
+
+        # Convert 12-hour to 24-hour if am/pm specified
+        if meridiem:
+            if meridiem == "pm" and hour != 12:
+                hour += 12
+            elif meridiem == "am" and hour == 12:
+                hour = 0
+
         target = now + timedelta(days=1)
         return target.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
