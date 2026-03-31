@@ -721,6 +721,44 @@ class AiAssistAgent:
                 return size
         return 200000  # Default for unknown models
 
+    def get_truncation_limits(self) -> dict[str, int]:
+        """Calculate adaptive truncation limits based on current context window.
+
+        Returns dynamic limits that scale with extended context activation.
+        Uses percentage-based allocation configured via AiAssistConfig.
+
+        Returns:
+            Dict with keys:
+            - max_message_chars: Maximum characters per individual message
+            - max_total_chars: Maximum characters for all messages combined
+            - context_window_tokens: Current context window size in tokens
+            - usable_tokens: Tokens available after reserving for system/output
+        """
+        context_window_tokens = self.get_context_window_size()
+        chars_per_token = 4  # Empirical ratio from line 1299
+
+        # Calculate reserves
+        reserve_pct = self.config.reserve_pct / 100.0
+        reserve_tokens = int(context_window_tokens * reserve_pct)
+        usable_tokens = context_window_tokens - reserve_tokens
+
+        # Calculate per-message limit (percentage of total context)
+        message_limit_pct = self.config.message_limit_pct / 100.0
+        max_message_tokens = int(context_window_tokens * message_limit_pct)
+        max_message_chars = max_message_tokens * chars_per_token
+
+        # Calculate total messages limit (percentage of total context)
+        total_messages_pct = self.config.total_messages_pct / 100.0
+        max_total_tokens = int(context_window_tokens * total_messages_pct)
+        max_total_chars = max_total_tokens * chars_per_token
+
+        return {
+            "max_message_chars": max_message_chars,
+            "max_total_chars": max_total_chars,
+            "context_window_tokens": context_window_tokens,
+            "usable_tokens": usable_tokens,
+        }
+
     def _supports_extended_context(self) -> bool:
         """Check if extended context is allowed and the model supports it."""
         if not self.config.allow_extended_context:
@@ -923,6 +961,23 @@ class AiAssistAgent:
             prompt += "- Use this proactively for bulk data fetches (limit > 50, pagination, large API responses)\n"
             prompt += '- Example: `search_dci_jobs(query="...", limit=200, __save_to_file="/tmp/batch.json")`\n'
             prompt += "- The file will contain the complete untruncated tool response\n\n"
+            prompt += "## Auto-Truncated Tool Results\n\n"
+            limits = self.get_truncation_limits()
+            max_chars = limits["max_message_chars"]
+            max_tokens = max_chars // 4  # Character to token ratio
+            prompt += f"Tool results are automatically truncated to {max_chars:,} characters (~{max_tokens:,} tokens) to prevent context overflow.\n"
+            prompt += "If you see '[... truncated X characters ...]' in a tool result:\n"
+            prompt += "- The result was too large to fit in context\n"
+            prompt += f"- You only received the first {max_chars:,} characters\n"
+            prompt += "- DO NOT make definitive conclusions based on incomplete data\n"
+            prompt += "- Options to get complete data:\n"
+            prompt += (
+                '  1. Re-call the tool with __save_to_file="/tmp/result.txt" to get the full result saved to disk\n'
+            )
+            prompt += "  2. Use internal__read_file to read the saved file (will also be truncated if huge)\n"
+            prompt += "  3. Use internal__search_in_file with specific patterns to find relevant sections\n"
+            prompt += "  4. Reduce the scope (smaller limit, narrower date range, more specific query)\n"
+            prompt += "- Always tell the user when you're working with truncated data\n\n"
 
         # Add MCP prompt execution guidance if any prompts are available
         if self.available_prompts:
@@ -1231,9 +1286,80 @@ class AiAssistAgent:
                 last_input = self._turn_token_usage[-1]["input_tokens"]
                 logging.info("Activating 1M extended context (input tokens: %d/200000)", last_input)
 
+            # Truncate individual large messages to prevent context overflow
+            # Tool results can be huge (e.g., read_file on 12MB log, search with 200 results)
+            # Get adaptive limits based on current context window
+            limits = self.get_truncation_limits()
+            MAX_MESSAGE_CHARS = limits["max_message_chars"]
+            MAX_TOTAL_MESSAGE_CHARS = limits["max_total_chars"]
+
+            total_chars = 0
+            for msg in messages:
+                content = msg.get("content")
+                if isinstance(content, str):
+                    if len(content) > MAX_MESSAGE_CHARS:
+                        msg["content"] = (
+                            content[:MAX_MESSAGE_CHARS]
+                            + f"\n\n[... truncated {len(content) - MAX_MESSAGE_CHARS:,} characters ...]"
+                        )
+                    total_chars += len(msg["content"])
+                elif isinstance(content, list):
+                    # Handle multi-part content (text + tool results)
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text", "")
+                            if len(text) > MAX_MESSAGE_CHARS:
+                                block["text"] = (
+                                    text[:MAX_MESSAGE_CHARS]
+                                    + f"\n\n[... truncated {len(text) - MAX_MESSAGE_CHARS:,} characters ...]"
+                                )
+                            total_chars += len(block.get("text", ""))
+                        elif isinstance(block, dict) and block.get("type") == "tool_result":
+                            result_content = block.get("content", "")
+                            if isinstance(result_content, str) and len(result_content) > MAX_MESSAGE_CHARS:
+                                block["content"] = (
+                                    result_content[:MAX_MESSAGE_CHARS]
+                                    + f"\n\n[... truncated {len(result_content) - MAX_MESSAGE_CHARS:,} characters ...]"
+                                )
+                            total_chars += len(block.get("content", "")) if isinstance(block.get("content"), str) else 0
+
+            # If total messages exceed limit, drop oldest messages
+            while total_chars > MAX_TOTAL_MESSAGE_CHARS and len(messages) > 2:
+                messages.pop(0)
+                # Recalculate total
+                total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+
             extra_headers = self._get_extra_headers()
 
             max_tokens = self.get_max_tokens()
+
+            # Debug: estimate token counts for debugging context overflow
+            system_prompt = self._build_system_prompt()
+            system_chars = len(system_prompt)
+            messages_chars = sum(len(str(m.get("content", ""))) for m in messages)
+            tools_chars = sum(len(str(t)) for t in api_tools)
+
+            # Rough estimate: 1 token ≈ 4 characters
+            estimated_system_tokens = system_chars // 4
+            estimated_messages_tokens = messages_chars // 4
+            estimated_tools_tokens = tools_chars // 4
+            estimated_total = estimated_system_tokens + estimated_messages_tokens + estimated_tools_tokens
+
+            # Log context size for debugging
+            logger.debug(
+                "Context: system=%st, messages=%st (%d), tools=%st (%d), total≈%st",
+                f"{estimated_system_tokens:,}",
+                f"{estimated_messages_tokens:,}",
+                len(messages),
+                f"{estimated_tools_tokens:,}",
+                len(api_tools),
+                f"{estimated_total:,}",
+            )
+            if estimated_total > 1000000:  # Warn if over 1M tokens
+                logger.warning(
+                    "Estimated context (%s tokens) exceeds 1M token limit!",
+                    f"{estimated_total:,}",
+                )
 
             # Call Claude API with error handling
             try:
@@ -1242,7 +1368,7 @@ class AiAssistAgent:
                     with self.anthropic.messages.stream(
                         model=self.config.model,
                         max_tokens=max_tokens,
-                        system=self._build_system_prompt(),
+                        system=system_prompt,
                         tools=api_tools,  # type: ignore[arg-type]
                         messages=messages,  # type: ignore[arg-type]
                         extra_headers=extra_headers,
@@ -1252,7 +1378,7 @@ class AiAssistAgent:
                     response = self.anthropic.messages.create(  # type: ignore[assignment]
                         model=self.config.model,
                         max_tokens=max_tokens,
-                        system=self._build_system_prompt(),
+                        system=system_prompt,
                         tools=api_tools,  # type: ignore[arg-type]
                         messages=messages,  # type: ignore[arg-type]
                         extra_headers=extra_headers,
@@ -1263,11 +1389,16 @@ class AiAssistAgent:
                 if "too long" in error_msg.lower() or "prompt" in error_msg.lower() or "context" in error_msg.lower():
                     return (
                         f"API Error: {error_msg}\n\n"
+                        f"Context breakdown (estimated):\n"
+                        f"- System prompt: {estimated_system_tokens:,} tokens ({system_chars:,} chars)\n"
+                        f"- Messages: {estimated_messages_tokens:,} tokens ({len(messages)} messages, {messages_chars:,} chars)\n"
+                        f"- Tools: {estimated_tools_tokens:,} tokens ({len(api_tools)} tools, {tools_chars:,} chars)\n"
+                        f"- Total: ~{estimated_total:,} tokens\n\n"
                         f"The context is too large. To fix this:\n"
+                        f"- Use /clear to reset conversation history\n"
                         f"- Use __save_to_file parameter to save large tool results to files\n"
                         f"- Reduce batch sizes when fetching data (use smaller limit/offset)\n"
-                        f"- Process data in smaller chunks\n"
-                        f"- Re-call the problematic tool with __save_to_file added to its arguments"
+                        f"- Process data in smaller chunks"
                     )
                 return f"API Error: {error_msg}"
             except RateLimitError as e:
@@ -1486,135 +1617,208 @@ class AiAssistAgent:
                     last_input = self._turn_token_usage[-1]["input_tokens"]
                     logging.info("Activating 1M extended context (input tokens: %d/200000)", last_input)
 
+                # Truncate messages (same as in query())
+                # Get adaptive limits based on current context window
+                limits = self.get_truncation_limits()
+                MAX_MESSAGE_CHARS = limits["max_message_chars"]
+                MAX_TOTAL_MESSAGE_CHARS = limits["max_total_chars"]
+                total_chars = 0
+                for msg in messages:
+                    content = msg.get("content")
+                    if isinstance(content, str):
+                        if len(content) > MAX_MESSAGE_CHARS:
+                            msg["content"] = (
+                                content[:MAX_MESSAGE_CHARS]
+                                + f"\n\n[... truncated {len(content) - MAX_MESSAGE_CHARS:,} characters ...]"
+                            )
+                        total_chars += len(msg["content"])
+                    elif isinstance(content, list):
+                        for block in content:
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                text = block.get("text", "")
+                                if len(text) > MAX_MESSAGE_CHARS:
+                                    block["text"] = (
+                                        text[:MAX_MESSAGE_CHARS]
+                                        + f"\n\n[... truncated {len(text) - MAX_MESSAGE_CHARS:,} characters ...]"
+                                    )
+                                total_chars += len(block.get("text", ""))
+                            elif isinstance(block, dict) and block.get("type") == "tool_result":
+                                result_content = block.get("content", "")
+                                if isinstance(result_content, str) and len(result_content) > MAX_MESSAGE_CHARS:
+                                    block["content"] = (
+                                        result_content[:MAX_MESSAGE_CHARS]
+                                        + f"\n\n[... truncated {len(result_content) - MAX_MESSAGE_CHARS:,} characters ...]"
+                                    )
+                                total_chars += (
+                                    len(block.get("content", "")) if isinstance(block.get("content"), str) else 0
+                                )
+                while total_chars > MAX_TOTAL_MESSAGE_CHARS and len(messages) > 2:
+                    messages.pop(0)
+                    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+
                 extra_headers = self._get_extra_headers()
+                system_prompt = self._build_system_prompt()
 
-                # Use streaming API
-                with self.anthropic.messages.stream(
-                    model=self.config.model,
-                    max_tokens=self.get_max_tokens(),
-                    system=self._build_system_prompt(),
-                    tools=api_tools,  # type: ignore[arg-type]
-                    messages=messages,  # type: ignore[arg-type]
-                    extra_headers=extra_headers,
-                ) as stream:
-                    # Track content blocks
-                    current_text = ""
+                # Use streaming API with error handling
+                try:
+                    with self.anthropic.messages.stream(
+                        model=self.config.model,
+                        max_tokens=self.get_max_tokens(),
+                        system=system_prompt,
+                        tools=api_tools,  # type: ignore[arg-type]
+                        messages=messages,  # type: ignore[arg-type]
+                        extra_headers=extra_headers,
+                    ) as stream:
+                        # Track content blocks
+                        current_text = ""
 
-                    for event in stream:
-                        # Check cancellation during streaming
+                        for event in stream:
+                            # Check cancellation during streaming
+                            if cancel_event and cancel_event.is_set():
+                                self._last_turn_count = turn + 1
+                                yield {"type": "cancelled"}
+                                return
+
+                            # Content block delta - streaming text
+                            if event.type == "content_block_delta":
+                                if hasattr(event.delta, "text"):
+                                    chunk = event.delta.text
+                                    current_text += chunk
+                                    yield chunk  # Stream text to user
+
+                            # Content block start - tool use
+                            elif event.type == "content_block_start":
+                                if hasattr(event.content_block, "type") and event.content_block.type == "tool_use":
+                                    # Just track that we're starting a tool use
+                                    # We'll yield the notification with full input later
+                                    pass
+
+                            # Input JSON delta for tool
+                            elif event.type == "content_block_delta":
+                                if hasattr(event.delta, "partial_json"):
+                                    # Tool input is being streamed
+                                    pass  # We'll get the full input later
+
+                        # Get final message from stream
+                        final_message = stream.get_final_message()
+
+                        # Track token usage
+                        self._track_token_usage(final_message, turn)
+
+                        messages.append({"role": "assistant", "content": _serialize_content(final_message.content)})
+
+                        # Yield tool use notifications with complete inputs
+                        for block in final_message.content:
+                            if block.type == "tool_use":
+                                yield {"type": "tool_use", "name": block.name, "id": block.id, "input": block.input}
+
+                        # Execute any tools concurrently
+                        tool_results, loop_detected = await self._execute_tools_concurrently(
+                            final_message.content,
+                            cancel_event=cancel_event,
+                            progress_callback=progress_callback,
+                            turn=turn,
+                            max_turns=max_turns,
+                        )
+
+                        # Check cancellation (concurrent method returns empty on cancel)
                         if cancel_event and cancel_event.is_set():
                             self._last_turn_count = turn + 1
                             yield {"type": "cancelled"}
                             return
 
-                        # Content block delta - streaming text
-                        if event.type == "content_block_delta":
-                            if hasattr(event.delta, "text"):
-                                chunk = event.delta.text
-                                current_text += chunk
-                                yield chunk  # Stream text to user
+                        if loop_detected:
+                            self._last_turn_count = turn + 1
+                            tool_blocks = [b for b in final_message.content if b.type == "tool_use"]
+                            loop_name = tool_blocks[-1].name if tool_blocks else "unknown"
+                            yield {
+                                "type": "error",
+                                "message": f"Loop detected: {loop_name} called repeatedly with same arguments",
+                            }
+                            return
 
-                        # Content block start - tool use
-                        elif event.type == "content_block_start":
-                            if hasattr(event.content_block, "type") and event.content_block.type == "tool_use":
-                                # Just track that we're starting a tool use
-                                # We'll yield the notification with full input later
-                                pass
+                        # If no tool calls, check for grounding nudge
+                        if not tool_results:
+                            # Grounding nudge: if tools are available but none were called
+                            # during the entire query, ask the model to verify (once only).
+                            # Skip if tools were already used — the answer is already grounded.
+                            if (
+                                api_tools
+                                and not any_tools_called
+                                and not self._grounding_nudge_fired
+                                and current_text.strip()
+                            ):
+                                self._grounding_nudge_fired = True
+                                messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": (
+                                            "Before I accept this answer: you have tools available but did not call any. "
+                                            "Please verify any specific factual claims (dates, statuses, counts, versions) "
+                                            "by calling the appropriate tool. If your answer is based purely on general "
+                                            "knowledge and no tool is relevant, confirm that explicitly."
+                                        ),
+                                    }
+                                )
+                                continue
 
-                        # Input JSON delta for tool
-                        elif event.type == "content_block_delta":
-                            if hasattr(event.delta, "partial_json"):
-                                # Tool input is being streamed
-                                pass  # We'll get the full input later
+                            if progress_callback:
+                                progress_callback("complete", turn + 1, max_turns, None)
 
-                    # Get final message from stream
-                    final_message = stream.get_final_message()
+                            self._last_turn_count = turn + 1
+                            yield {"type": "done", "turns": turn + 1}
+                            return
 
-                    # Track token usage
-                    self._track_token_usage(final_message, turn)
+                        # Continue with tool results
+                        any_tools_called = True
+                        messages.append({"role": "user", "content": tool_results})
 
-                    messages.append({"role": "assistant", "content": _serialize_content(final_message.content)})
-
-                    # Yield tool use notifications with complete inputs
-                    for block in final_message.content:
-                        if block.type == "tool_use":
-                            yield {"type": "tool_use", "name": block.name, "id": block.id, "input": block.input}
-
-                    # Execute any tools concurrently
-                    tool_results, loop_detected = await self._execute_tools_concurrently(
-                        final_message.content,
-                        cancel_event=cancel_event,
-                        progress_callback=progress_callback,
-                        turn=turn,
-                        max_turns=max_turns,
-                    )
-
-                    # Check cancellation (concurrent method returns empty on cancel)
-                    if cancel_event and cancel_event.is_set():
-                        self._last_turn_count = turn + 1
-                        yield {"type": "cancelled"}
-                        return
-
-                    if loop_detected:
-                        self._last_turn_count = turn + 1
-                        tool_blocks = [b for b in final_message.content if b.type == "tool_use"]
-                        loop_name = tool_blocks[-1].name if tool_blocks else "unknown"
-                        yield {
-                            "type": "error",
-                            "message": f"Loop detected: {loop_name} called repeatedly with same arguments",
-                        }
-                        return
-
-                    # If no tool calls, check for grounding nudge
-                    if not tool_results:
-                        # Grounding nudge: if tools are available but none were called
-                        # during the entire query, ask the model to verify (once only).
-                        # Skip if tools were already used — the answer is already grounded.
-                        if (
-                            api_tools
-                            and not any_tools_called
-                            and not self._grounding_nudge_fired
-                            and current_text.strip()
-                        ):
-                            self._grounding_nudge_fired = True
+                        # Wrap-up nudge: when approaching the turn limit, ask the agent to synthesize
+                        if not self._wrapup_nudge_fired and turn >= int(max_turns * 0.8):
+                            self._wrapup_nudge_fired = True
                             messages.append(
                                 {
                                     "role": "user",
                                     "content": (
-                                        "Before I accept this answer: you have tools available but did not call any. "
-                                        "Please verify any specific factual claims (dates, statuses, counts, versions) "
-                                        "by calling the appropriate tool. If your answer is based purely on general "
-                                        "knowledge and no tool is relevant, confirm that explicitly."
+                                        "You are approaching the maximum number of tool calls allowed. "
+                                        "Please synthesize the information you have gathered so far into "
+                                        "a final answer. Do not make additional tool calls unless absolutely "
+                                        "necessary to complete the answer."
                                     ),
                                 }
                             )
-                            continue
 
-                        if progress_callback:
-                            progress_callback("complete", turn + 1, max_turns, None)
+                except Exception as e:
+                    from anthropic import BadRequestError
 
-                        self._last_turn_count = turn + 1
-                        yield {"type": "done", "turns": turn + 1}
-                        return
+                    # Handle API errors
+                    error_msg = str(e)
+                    if isinstance(e, BadRequestError) and (
+                        "too long" in error_msg.lower() or "prompt" in error_msg.lower()
+                    ):
+                        # Calculate message stats for helpful error message
+                        messages_chars = sum(len(str(m.get("content", ""))) for m in messages)
+                        system_chars = len(system_prompt) if "system_prompt" in locals() else 0
+                        tools_chars = sum(len(str(t)) for t in api_tools) if "api_tools" in locals() else 0
 
-                    # Continue with tool results
-                    any_tools_called = True
-                    messages.append({"role": "user", "content": tool_results})
-
-                    # Wrap-up nudge: when approaching the turn limit, ask the agent to synthesize
-                    if not self._wrapup_nudge_fired and turn >= int(max_turns * 0.8):
-                        self._wrapup_nudge_fired = True
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": (
-                                    "You are approaching the maximum number of tool calls allowed. "
-                                    "Please synthesize the information you have gathered so far into "
-                                    "a final answer. Do not make additional tool calls unless absolutely "
-                                    "necessary to complete the answer."
-                                ),
-                            }
+                        yield (
+                            f"API Error: {error_msg}\n\n"
+                            f"Context breakdown (estimated):\n"
+                            f"- System prompt: {system_chars // 4:,} tokens ({system_chars:,} chars)\n"
+                            f"- Messages: {messages_chars // 4:,} tokens ({len(messages)} messages, {messages_chars:,} chars)\n"
+                            f"- Tools: {tools_chars // 4:,} tokens ({len(api_tools)} tools, {tools_chars:,} chars)\n"
+                            f"- Total: ~{(system_chars + messages_chars + tools_chars) // 4:,} tokens\n\n"
+                            f"The context is too large. To fix this:\n"
+                            f"- Use /clear to reset conversation history\n"
+                            f"- Use __save_to_file parameter to save large tool results to files\n"
+                            f"- Reduce batch sizes when fetching data (use smaller limit/offset)\n"
+                            f"- Process data in smaller chunks"
                         )
+                    else:
+                        yield f"API Error: {error_msg}"
+
+                    yield {"type": "error", "message": error_msg}
+                    return
 
             # Max turns reached
             self._last_turn_count = max_turns

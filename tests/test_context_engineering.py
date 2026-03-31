@@ -435,6 +435,90 @@ class TestExtendedContext:
         assert agent._extended_context_active is False
 
 
+class TestAdaptiveTruncationLimits:
+    """Tests for adaptive truncation limit calculation"""
+
+    def test_standard_context_limits(self):
+        """Standard 200K context returns default percentages"""
+        config = AiAssistConfig(
+            anthropic_api_key="test-key",
+            mcp_servers={},
+            message_limit_pct=5.0,
+            total_messages_pct=60.0,
+            reserve_pct=25.0,
+        )
+        agent = AiAssistAgent(config)
+        agent._extended_context_active = False
+
+        limits = agent.get_truncation_limits()
+
+        # 200K tokens * 5% * 4 chars/token = 40K chars per message
+        assert limits["max_message_chars"] == 40000
+        # 200K tokens * 60% * 4 chars/token = 480K chars total
+        assert limits["max_total_chars"] == 480000
+        assert limits["context_window_tokens"] == 200000
+
+    def test_extended_context_limits(self):
+        """Extended 1M context scales limits proportionally"""
+        config = AiAssistConfig(
+            anthropic_api_key="test-key",
+            mcp_servers={},
+            allow_extended_context=True,
+            message_limit_pct=5.0,
+            total_messages_pct=60.0,
+        )
+        agent = AiAssistAgent(config)
+        agent._extended_context_active = True
+
+        limits = agent.get_truncation_limits()
+
+        # 1M tokens * 5% * 4 chars/token = 200K chars per message
+        assert limits["max_message_chars"] == 200000
+        # 1M tokens * 60% * 4 chars/token = 2.4M chars total
+        assert limits["max_total_chars"] == 2400000
+        assert limits["context_window_tokens"] == 1000000
+
+    def test_custom_percentage_configuration(self):
+        """Custom percentages are respected"""
+        config = AiAssistConfig(
+            anthropic_api_key="test-key",
+            mcp_servers={},
+            message_limit_pct=10.0,  # 10% per message
+            total_messages_pct=70.0,  # 70% total
+            reserve_pct=20.0,  # 20% reserve
+        )
+        agent = AiAssistAgent(config)
+
+        limits = agent.get_truncation_limits()
+
+        # 200K * 10% * 4 = 80K chars per message
+        assert limits["max_message_chars"] == 80000
+        # 200K * 70% * 4 = 560K chars total
+        assert limits["max_total_chars"] == 560000
+
+    def test_limits_change_when_extended_activates(self):
+        """Limits scale up when extended context activates mid-conversation"""
+        config = AiAssistConfig(
+            anthropic_api_key="test-key",
+            mcp_servers={},
+            allow_extended_context=True,
+        )
+        agent = AiAssistAgent(config)
+
+        # Before activation
+        limits_before = agent.get_truncation_limits()
+        assert limits_before["context_window_tokens"] == 200000
+
+        # Simulate activation
+        agent._extended_context_active = True
+
+        # After activation
+        limits_after = agent.get_truncation_limits()
+        assert limits_after["context_window_tokens"] == 1000000
+        assert limits_after["max_message_chars"] == limits_before["max_message_chars"] * 5
+        assert limits_after["max_total_chars"] == limits_before["max_total_chars"] * 5
+
+
 class TestGroundingNudge:
     """Tests for grounding nudge when tools available but not called"""
 

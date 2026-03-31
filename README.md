@@ -87,6 +87,22 @@ Edit `~/.ai-assist/identity.yaml` to configure:
 
 📖 **Full identity guide:** See [docs/IDENTITY.md](docs/IDENTITY.md)
 
+**Logging** (Optional):
+
+Control logging verbosity for debugging and monitoring:
+
+```bash
+# File logging level (default: INFO)
+export AI_ASSIST_LOG_LEVEL=DEBUG
+
+# Console logging level (default: WARNING)
+export AI_ASSIST_CONSOLE_LOG_LEVEL=INFO
+```
+
+Logs are written to: `~/.ai-assist/logs/ai-assist-YYYY-MM-DD.log`
+
+📖 **Logging guide:** See [docs/LOGGING.md](docs/LOGGING.md)
+
 ## Usage
 
 ### Interactive Mode
@@ -257,6 +273,21 @@ uv run ai-assist
 ```
 
 When enabled, the agent monitors token usage and automatically activates the extended context only when approaching the 200K limit. Supported on Opus 4.6, Sonnet 4.6, Sonnet 4.5, and Sonnet 4.
+
+#### Adaptive Context Limits
+
+Truncation limits scale automatically with the context window. By default, each message is limited to 5% of the context window and total messages to 60%. This means:
+
+- **Standard (200K tokens)**: 40K chars/message, 480K chars total
+- **Extended (1M tokens)**: 200K chars/message, 2.4M chars total
+
+You can tune these percentages via environment variables:
+
+```bash
+export AI_ASSIST_MESSAGE_LIMIT_PCT=5      # Max % of context per message (1-20, default: 5)
+export AI_ASSIST_TOTAL_MESSAGES_PCT=60    # Max % of context for all messages (20-80, default: 60)
+export AI_ASSIST_RESERVE_PCT=25           # Reserve % for system prompt + output (10-40, default: 25)
+```
 
 ### Monitoring Mode
 
@@ -620,6 +651,7 @@ ai-assist/
 - **[docs/AWL_SPECIFICATIONS.md](docs/AWL_SPECIFICATIONS.md)** - AWL (Agent Workflow Language) specification
 - **[docs/PERSONAL_SKILLS.md](docs/PERSONAL_SKILLS.md)** - Creating and managing personal Agent Skills
 - **[docs/IDENTITY.md](docs/IDENTITY.md)** - Complete guide to identity.yaml configuration
+- **[docs/LOGGING.md](docs/LOGGING.md)** - Logging configuration and troubleshooting
 - **[docs/MULTI_INSTANCE.md](docs/MULTI_INSTANCE.md)** - Running multiple ai-assist instances
 - **[VERTEX_AI_SETUP.md](VERTEX_AI_SETUP.md)** - Vertex AI configuration and troubleshooting
 - **[SECURITY.md](SECURITY.md)** - Security model for skill script execution

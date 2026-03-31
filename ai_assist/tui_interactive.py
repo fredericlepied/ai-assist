@@ -209,6 +209,14 @@ async def query_with_feedback(
             messages = conversation_memory.to_messages()
             messages.append({"role": "user", "content": prompt})
 
+            # Truncate large individual messages to prevent context overflow
+            # Tool results can be huge (e.g., search_in_file with max_results=200)
+            from ai_assist.message_utils import truncate_large_messages
+
+            # Get adaptive limits from agent
+            limits = agent.get_truncation_limits()
+            truncate_large_messages(messages, limits["max_message_chars"])
+
             # Show context indicator if we have history
             if len(conversation_memory) > 0:
                 console.print(f"[dim]💬 Using context from {len(conversation_memory)} previous exchange(s)[/dim]")
@@ -716,7 +724,14 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
             watcher.stop()
 
         console.print(f"\n[yellow]{message}[/yellow]")
-        console.print(f"  [bold]{detail}[/bold]")
+        # Truncate very long commands for readability
+        if len(detail) > 200:
+            display_detail = detail[:200] + "..."
+        else:
+            display_detail = detail
+        console.print(f"  [bold]{display_detail}[/bold]")
+        console.print()  # Blank line
+        console.file.flush()  # Ensure Rich output is flushed before raw input
 
         def _raw_input(prompt_text: str) -> str:
             """Read input with Escape/Ctrl-C support using cbreak mode."""
@@ -727,6 +742,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                 # Fallback to regular input on non-Unix
                 return input(prompt_text)
 
+            # Write prompt directly to stdout (not through Rich console)
             sys.stdout.write(prompt_text)
             sys.stdout.flush()
 
@@ -774,7 +790,10 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                 termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_attrs)
 
         try:
-            answer = await asyncio.to_thread(_raw_input, "Allow? [y/N/a(lways)/Esc to cancel] ")
+            # Write the prompt choices on a separate line for better visibility
+            console.print("[dim]Options: y=yes, N=no (default), a=always allow, Esc=cancel[/dim]")
+            console.file.flush()
+            answer = await asyncio.to_thread(_raw_input, "Your choice: ")
             choice = answer.strip().lower()
         except EOFError:
             choice = "n"
@@ -876,6 +895,27 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                     # Convert conversation_memory to messages for prompt injection
                     messages = conversation_memory.to_messages()
                     if await handle_prompt_command(user_input, agent, messages, console, session):
+                        # Trim messages after MCP prompt injection to prevent context overflow
+                        # Get adaptive limits from agent
+                        limits = agent.get_truncation_limits()
+                        MAX_MESSAGE_CHARS = limits["max_message_chars"]
+                        MAX_TOTAL_MESSAGE_CHARS = limits["max_total_chars"]
+
+                        # Truncate individual messages
+                        from ai_assist.message_utils import truncate_large_messages
+
+                        truncate_large_messages(messages, MAX_MESSAGE_CHARS)
+
+                        # Trim total if needed
+                        total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+                        if total_chars > MAX_TOTAL_MESSAGE_CHARS and len(messages) > 2:
+                            while total_chars > MAX_TOTAL_MESSAGE_CHARS and len(messages) > 2:
+                                messages.pop(0)
+                                total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+                            console.print(
+                                f"[dim]Trimmed messages to fit context window: {total_chars:,} / {MAX_TOTAL_MESSAGE_CHARS:,} chars[/dim]"
+                            )
+
                         # Automatically send the loaded prompt to Claude
                         # The prompt has been injected into 'messages' and is the last user message
                         try:
@@ -965,25 +1005,35 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                                 messages[-1]["content"] if messages and messages[-1]["role"] == "user" else user_input
                             )
 
-                            # Add the exchange to conversation memory
-                            conversation_memory.add_exchange(prompt_content, full_response)
+                            # Check if response is an API error
+                            from ai_assist.message_utils import is_api_error, is_context_overflow_error
 
-                            # Compact conversation memory if threshold reached
-                            if conversation_memory.needs_compaction():
-                                try:
-                                    if conversation_memory.compact(agent.anthropic, agent.config.model):
-                                        console.print("[dim]Compacted conversation history[/dim]")
-                                except Exception:
-                                    pass
+                            if is_api_error(full_response):
+                                # Don't add API errors to conversation memory
+                                if is_context_overflow_error(full_response):
+                                    console.print(
+                                        "\n[yellow]💡 Tip: Use /clear to reset conversation history and recover from context overflow[/yellow]\n"
+                                    )
+                            else:
+                                # Add the exchange to conversation memory
+                                conversation_memory.add_exchange(prompt_content, full_response)
 
-                            # Track for state manager
-                            conversation_context.append(
-                                {
-                                    "user": user_input,  # Original /dci/rca command
-                                    "assistant": full_response,
-                                    "timestamp": str(asyncio.get_event_loop().time()),
-                                }
-                            )
+                                # Compact conversation memory if threshold reached
+                                if conversation_memory.needs_compaction():
+                                    try:
+                                        if conversation_memory.compact(agent.anthropic, agent.config.model):
+                                            console.print("[dim]Compacted conversation history[/dim]")
+                                    except Exception:
+                                        pass
+
+                                # Track for state manager
+                                conversation_context.append(
+                                    {
+                                        "user": user_input,  # Original /dci/rca command
+                                        "assistant": full_response,
+                                        "timestamp": str(asyncio.get_event_loop().time()),
+                                    }
+                                )
 
                             # Save to knowledge graph for cross-session memory (fire-and-forget)
                             if kg_context and kg_context.knowledge_graph:
@@ -1081,21 +1131,35 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                     if response and not response.endswith("\n"):
                         console.print()
 
-                    # Add to conversation memory for context
-                    conversation_memory.add_exchange(user_input, response)
+                    # Check if response is an API error
+                    from ai_assist.message_utils import is_api_error, is_context_overflow_error
 
-                    # Compact conversation memory if threshold reached
-                    if conversation_memory.needs_compaction():
-                        try:
-                            if conversation_memory.compact(agent.anthropic, agent.config.model):
-                                console.print("[dim]Compacted conversation history[/dim]")
-                        except Exception:
-                            pass
+                    if is_api_error(response):
+                        # Don't add API errors to conversation memory (prevents poisoning)
+                        if is_context_overflow_error(response):
+                            console.print(
+                                "\n[yellow]💡 Tip: Use /clear to reset conversation history and recover from context overflow[/yellow]\n"
+                            )
+                    else:
+                        # Add to conversation memory for context
+                        conversation_memory.add_exchange(user_input, response)
 
-                    # Track conversation in context list for state manager
-                    conversation_context.append(
-                        {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
-                    )
+                        # Compact conversation memory if threshold reached
+                        if conversation_memory.needs_compaction():
+                            try:
+                                if conversation_memory.compact(agent.anthropic, agent.config.model):
+                                    console.print("[dim]Compacted conversation history[/dim]")
+                            except Exception:
+                                pass
+
+                        # Track conversation in context list for state manager
+                        conversation_context.append(
+                            {
+                                "user": user_input,
+                                "assistant": response,
+                                "timestamp": str(asyncio.get_event_loop().time()),
+                            }
+                        )
 
                     # Save to knowledge graph for cross-session memory (fire-and-forget)
                     if kg_context and kg_context.knowledge_graph:

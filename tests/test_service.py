@@ -84,7 +84,6 @@ class TestResolveReportsDir:
 class TestInstallService:
     def test_writes_service_file_and_enables(self, tmp_path):
         config_dir = tmp_path / ".ai-assist"
-        config_dir.mkdir()
         service_file = tmp_path / "systemd" / "user" / "ai-assist.service"
         service_file.parent.mkdir(parents=True)
 
@@ -100,7 +99,6 @@ class TestInstallService:
 
     def test_includes_reports_dir_when_provided(self, tmp_path):
         config_dir = tmp_path / ".ai-assist"
-        config_dir.mkdir()
         reports_dir = tmp_path / "reports"
         service_file = tmp_path / "systemd" / "user" / "ai-assist.service"
         service_file.parent.mkdir(parents=True)
@@ -119,7 +117,6 @@ class TestInstallService:
 class TestRemoveService:
     def test_removes_service_file(self, tmp_path):
         config_dir = tmp_path / ".ai-assist"
-        config_dir.mkdir()
         service_file = tmp_path / "systemd" / "user" / "ai-assist.service"
         service_file.parent.mkdir(parents=True, exist_ok=True)
         service_file.write_text("[Unit]\n")
@@ -134,7 +131,6 @@ class TestRemoveService:
 
     def test_remove_succeeds_without_service_file(self, tmp_path):
         config_dir = tmp_path / ".ai-assist"
-        config_dir.mkdir()
         service_file = tmp_path / "systemd" / "user" / "ai-assist.service"
 
         with (
