@@ -1,8 +1,18 @@
 """Pytest configuration and fixtures"""
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolate_config_dir(tmp_path):
+    """Prevent tests from writing to ~/.ai-assist by redirecting get_config_dir() to a temp directory."""
+    test_config_dir = tmp_path / ".ai-assist"
+    test_config_dir.mkdir(exist_ok=True)
+    with patch("ai_assist.config.get_config_dir", return_value=test_config_dir):
+        yield test_config_dir
 
 
 @pytest.fixture(scope="session", autouse=True)
