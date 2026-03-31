@@ -1,7 +1,26 @@
 """AWL expression evaluator and variable interpolation"""
 
+import ast
+import json
 import re
 from typing import Any
+
+
+def _parse_str_to_collection(val: str) -> Any:
+    """Try to parse a string as a JSON or Python collection."""
+    try:
+        parsed = json.loads(val)
+        if isinstance(parsed, list | dict):
+            return parsed
+    except (json.JSONDecodeError, ValueError):
+        pass
+    try:
+        parsed = ast.literal_eval(val)
+        if isinstance(parsed, list | dict):
+            return parsed
+    except (ValueError, SyntaxError):
+        pass
+    return val
 
 
 class AWLExpressionEvaluator:
@@ -72,6 +91,9 @@ class AWLExpressionEvaluator:
             val = variables.get(var_name)
             if val is None:
                 return 0
+            # Parse JSON or Python-repr strings that are actually arrays/objects
+            if isinstance(val, str):
+                val = _parse_str_to_collection(val)
             return len(val)
 
         for num_type in (int, float):

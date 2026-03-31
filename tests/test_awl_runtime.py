@@ -377,6 +377,61 @@ async def test_if_with_out_of_range_index_no_crash(mock_agent, runtime):
     assert mock_agent.query.call_count == 0
 
 
+@pytest.mark.asyncio
+async def test_loop_with_json_string_variable(mock_agent, runtime):
+    """Test that @loop parses JSON string variables into lists"""
+    mock_agent.query = AsyncMock(return_value='{"summary": "done"}')
+    workflow = WorkflowNode(
+        body=[
+            LoopNode(
+                collection="jobs",
+                item_var="job",
+                body=[TaskNode(task_id="process", goal="Process ${job}.", expose=["summary"])],
+            ),
+        ]
+    )
+    # Pass jobs as a JSON string (as agent might expose it)
+    result = await runtime.execute(workflow, variables={"jobs": '[{"id": "a"}, {"id": "b"}]'})
+    assert result.success is True
+    assert mock_agent.query.call_count == 2  # 2 items in the JSON array
+
+
+@pytest.mark.asyncio
+async def test_loop_with_single_dict_wraps_in_list(mock_agent, runtime):
+    """Test that @loop wraps a single dict in a list"""
+    mock_agent.query = AsyncMock(return_value='{"summary": "done"}')
+    workflow = WorkflowNode(
+        body=[
+            LoopNode(
+                collection="job",
+                item_var="j",
+                body=[TaskNode(task_id="process", goal="Process ${j}.", expose=["summary"])],
+            ),
+        ]
+    )
+    result = await runtime.execute(workflow, variables={"job": {"id": "abc", "name": "test"}})
+    assert result.success is True
+    assert mock_agent.query.call_count == 1  # Single dict wrapped in list = 1 iteration
+
+
+@pytest.mark.asyncio
+async def test_loop_with_python_repr_string(mock_agent, runtime):
+    """Test that @loop parses Python-repr strings (single quotes)"""
+    mock_agent.query = AsyncMock(return_value='{"summary": "done"}')
+    workflow = WorkflowNode(
+        body=[
+            LoopNode(
+                collection="jobs",
+                item_var="job",
+                body=[TaskNode(task_id="process", goal="Process ${job}.", expose=["summary"])],
+            ),
+        ]
+    )
+    result = await runtime.execute(workflow, variables={"jobs": "[{'id': 'a'}, {'id': 'b'}]"})
+    assert result.success is True
+    assert mock_agent.query.call_count == 2
+
+
 # ── @goal directive runtime tests ────────────────────────────────
 
 

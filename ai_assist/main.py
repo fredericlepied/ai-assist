@@ -380,7 +380,7 @@ async def monitoring_mode(agent: AiAssistAgent, config, state_manager: StateMana
         scheduler.stop()
 
 
-async def run_awl_script(agent: AiAssistAgent, script_path: str, variables: dict | None = None):
+async def run_awl_script(agent: AiAssistAgent, script_path: str, variables: dict | None = None, verbose: bool = False):
     """Run an AWL workflow script"""
     from pathlib import Path
 
@@ -407,8 +407,8 @@ async def run_awl_script(agent: AiAssistAgent, script_path: str, variables: dict
         print(f"\nUsage: ai-assist /run {path.name} {' '.join(f'{v}=<value>' for v in sorted(required_vars))}")
         sys.exit(1)
 
-    runtime = AWLRuntime(agent)
-    print(f"Running AWL workflow: {path.name}")
+    runtime = AWLRuntime(agent, verbose=verbose)
+    print(f"Running AWL workflow: {path.name}{' (verbose)' if verbose else ''}")
     result = await runtime.execute(workflow, variables=variables)
 
     for outcome in result.task_outcomes:
@@ -786,11 +786,14 @@ async def main_async():
                     sys.exit(1)
                 assert agent is not None
                 variables = {}
+                verbose = False
                 for arg in sys.argv[3:]:
-                    if "=" in arg:
+                    if arg in ("-v", "--verbose"):
+                        verbose = True
+                    elif "=" in arg:
                         k, _, v = arg.partition("=")
                         variables[k] = v
-                await run_awl_script(agent, sys.argv[2], variables=variables or None)
+                await run_awl_script(agent, sys.argv[2], variables=variables or None, verbose=verbose)
             elif command == "query":
                 if len(sys.argv) < 3:
                     print("Usage: ai-assist /query 'your question here'")
