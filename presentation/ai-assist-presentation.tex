@@ -241,9 +241,9 @@
 \begin{itemize}\scriptsize
   \item Periodic task execution
   \item Schedule-driven (cron-like)
+  \item \alert{Autonomous goal pursuit}
   \item Hot-reload configuration
   \item Suspension recovery
-  \item Multi-channel notifications
 \end{itemize}
 \smallskip
 \texttt{\scriptsize ai-assist /monitor}
@@ -622,10 +622,16 @@ Skills are \alert{untrusted code} --- defense in depth:
 \end{itemize}
 
 \smallskip
-\textbf{\color{rhred}Planning}
+\textbf{\color{rhred}Goals}
+\begin{itemize}\scriptsize
+  \item Create / list / update goals
+  \item Autonomous OODA pursuit
+\end{itemize}
+
+\smallskip
+\textbf{\color{rhdarkgray}Planning}
 \begin{itemize}\scriptsize
   \item Think / plan / reason
-  \item No side effects
 \end{itemize}
 \end{column}
 \end{columns}
@@ -1266,6 +1272,68 @@ introspection__execute_awl_script(
 \end{columns}
 \end{frame}
 
+% ── Slide: Autonomous Goals ─────────────────────────────────────
+\begin{frame}[fragile]{Autonomous Goals via AWL}
+\begin{columns}[T]
+\begin{column}{0.45\textwidth}
+\textbf{Goal-Driven Autonomous Agent}
+\begin{itemize}\small
+  \item New \texttt{@goal} AWL directive
+  \item Run from CLI, schedule, or \texttt{/monitor}
+  \item Body uses standard AWL constructs
+  \item \alert{Success criteria} evaluated by Claude each cycle
+  \item Variables \alert{persist between cycles}
+  \item Safety: \texttt{max\_actions} limit per cycle
+\end{itemize}
+
+\medskip
+\vspace{-2mm}
+\begin{lstlisting}[style=code,basicstyle=\ttfamily\tiny,title={\scriptsize goals/track\_failures.awl}]
+@start
+@goal track max_actions=5
+  Success: Failure rate below 10%
+  @task check @no-history
+  Goal: Check DCI failure rate.
+  Expose: failure_rate
+  @end
+@end
+@end
+\end{lstlisting}
+\end{column}
+\begin{column}{0.50\textwidth}
+\centering
+\begin{tikzpicture}[
+  step/.style={draw=#1, fill=#1!15, rounded corners=4pt,
+    font=\scriptsize\sffamily, minimum width=1.8cm, minimum height=0.8cm,
+    align=center, text=#1!80!black},
+  arr/.style={-{Stealth}, thick, #1},
+  scale=0.85, transform shape
+]
+  % Goal cycle
+  \node[step=rhblue] (exec) at (90:2.0cm) {Execute\\{\tiny AWL body}};
+  \node[step=rhorange] (eval) at (210:2.0cm) {Evaluate\\{\tiny success criteria}};
+  \node[step=rhgreen] (persist) at (330:2.0cm) {Persist\\{\tiny vars + state}};
+
+  % Arrows
+  \draw[arr=rhblue] (exec) -- (eval);
+  \draw[arr=rhorange] (eval) -- (persist);
+  \draw[arr=rhgreen] (persist) -- (exec);
+
+  % Center
+  \node[font=\scriptsize\sffamily\color{gray}, align=center] at (0,0) {Goal\\Cycle};
+
+  % Annotations
+  \node[font=\tiny\sffamily\color{gray}, above=3mm of exec] {every interval};
+  \node[font=\tiny\sffamily\color{rhred}, below=3mm of eval] {stops when met};
+\end{tikzpicture}
+
+\smallskip
+{\scriptsize\color{gray}
+One DSL for all agent orchestration --- goals reuse \texttt{@task}, \texttt{@if}, \texttt{@loop}}
+\end{column}
+\end{columns}
+\end{frame}
+
 % ══════════════════════════════════════════════════════════════════
 \section{What's Next?}
 % ══════════════════════════════════════════════════════════════════
@@ -1276,6 +1344,7 @@ introspection__execute_awl_script(
 \begin{column}{0.48\textwidth}
 \textbf{Recently Completed}
 \begin{itemize}\small
+  \item \textcolor{green!60!black}{\checkmark} \alert{Autonomous goal-driven agent (OODA)}
   \item \textcolor{green!60!black}{\checkmark} Systemd user service (\texttt{/service install})
   \item \textcolor{green!60!black}{\checkmark} Vector-based semantic search (sqlite-vec)
   \item \textcolor{green!60!black}{\checkmark} Think tool for multi-step planning

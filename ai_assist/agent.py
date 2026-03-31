@@ -226,6 +226,11 @@ class AiAssistAgent:
 
         self.schedule_action_tools = ScheduleActionTools(self)
 
+        # Initialize goal tools (autonomous agent goals via AWL)
+        from ai_assist.goal_tools import GoalTools
+
+        self.goal_tools = GoalTools(self)
+
         # Initialize skills system
         self.skills_loader = SkillsLoader()
         self.skills_manager = SkillsManager(self.skills_loader)
@@ -416,6 +421,12 @@ class AiAssistAgent:
         if schedule_action_tool_defs:
             self.available_tools.extend(schedule_action_tool_defs)
             print(f"✓ Added {len(schedule_action_tool_defs)} schedule action tools")
+
+        # Add goal tools (autonomous agent goals)
+        goal_tool_defs = self.goal_tools.get_tool_definitions()
+        if goal_tool_defs:
+            self.available_tools.extend(goal_tool_defs)
+            print(f"✓ Added {len(goal_tool_defs)} goal tools")
 
         # Add script execution tools if enabled
         script_tool_defs = self.script_execution_tools.get_tool_definitions()
@@ -994,7 +1005,19 @@ class AiAssistAgent:
             prompt += "2. Resolve all variables from context (identity, conversation) — "
             prompt += "do NOT call any tools to look them up.\n"
             prompt += "3. Call introspection__execute_awl_script with the fully resolved variables.\n"
-            prompt += "Do NOT collect data yourself — the script handles that internally.\n"
+            prompt += "Do NOT collect data yourself — the script handles that internally.\n\n"
+            prompt += "## AWL @goal Directive\n\n"
+            prompt += "AWL supports a @goal directive for autonomous agent behavior. Syntax:\n"
+            prompt += "```\n@goal <id> [max_actions=N]\n  Success: <criterion>\n  <body with @task, @if, @loop, etc.>\n@end\n```\n"
+            prompt += "Key features:\n"
+            prompt += "- Success: field is mandatory — Claude evaluates it after each cycle\n"
+            prompt += "- Variables exposed by tasks persist between cycles (state stored in JSON sidecar)\n"
+            prompt += "- max_actions limits tool calls per cycle (default: 5)\n"
+            prompt += "- When success criteria are met, the goal status becomes 'completed'\n\n"
+            prompt += "Scheduling is independent from the goal definition:\n"
+            prompt += "- Run once from CLI: ai-assist /run goal.awl\n"
+            prompt += '- Schedule periodically via schedules.json: {"prompt": "goals/my_goal.awl", "interval": "30m"}\n'
+            prompt += "- Use goal__create to generate a goal AWL file from natural language\n"
 
         # Add Knowledge Graph guidance
         if self.knowledge_graph and not self._no_kg:
@@ -2126,6 +2149,29 @@ class AiAssistAgent:
                 return result_text
             except Exception as e:
                 error_msg = f"Error executing introspection tool {original_tool_name}: {str(e)}"
+                self.audit_logger.log_tool_call(tool_name, arguments, error_msg, success=False)
+                return error_msg
+
+        # Handle goal tools (autonomous agent goals)
+        if server_name == "goal":
+            try:
+                result_text = await self.goal_tools.execute_tool(tool_name, arguments)
+
+                self.last_tool_calls.append(
+                    {
+                        "tool_name": tool_name,
+                        "server_name": server_name,
+                        "original_tool_name": original_tool_name,
+                        "arguments": arguments,
+                        "result": result_text,
+                        "timestamp": datetime.now(),
+                    }
+                )
+
+                self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=True)
+                return result_text
+            except Exception as e:
+                error_msg = f"Error executing goal tool {original_tool_name}: {str(e)}"
                 self.audit_logger.log_tool_call(tool_name, arguments, error_msg, success=False)
                 return error_msg
 

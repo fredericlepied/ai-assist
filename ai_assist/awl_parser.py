@@ -5,6 +5,7 @@ import re
 from .awl_ast import (
     ASTNode,
     FailNode,
+    GoalNode,
     IfNode,
     LoopNode,
     ReturnNode,
@@ -92,6 +93,8 @@ class AWLParser:
                 nodes.append(self._parse_return())
             elif line.startswith("@fail"):
                 nodes.append(self._parse_fail())
+            elif line.startswith("@goal "):
+                nodes.append(self._parse_goal())
             else:
                 raise ParseError(self._pos + 1, f"Unexpected: '{line}'")
         return nodes
@@ -227,6 +230,41 @@ class AWLParser:
             limit=limit,
             collect=collect,
             collect_fields=collect_fields,
+            body=body,
+        )
+
+    def _parse_goal(self) -> GoalNode:
+        line = self._require_line()
+        match = re.match(r"@goal\s+(\w+)(.*)", line)
+        if not match:
+            raise ParseError(self._pos + 1, "Invalid @goal syntax. Expected: @goal <id> [max_actions=N]")
+
+        goal_id = match.group(1)
+        opts = match.group(2)
+
+        # Extract max_actions (optional, default 5)
+        max_actions_match = re.search(r"max_actions=(\d+)", opts)
+        max_actions = int(max_actions_match.group(1)) if max_actions_match else 5
+
+        self._advance()
+
+        # Parse required Success: field
+        goal_fields = {"Success:"}
+        success_criteria = None
+        current = self._current_line()
+        if current is not None and current.startswith("Success:"):
+            success_criteria = self._parse_field_value("Success:", goal_fields)
+
+        if success_criteria is None:
+            raise ParseError(self._pos + 1, f"@goal '{goal_id}' missing required Success field")
+
+        body = self._parse_body()
+        self._expect("@end")
+
+        return GoalNode(
+            goal_id=goal_id,
+            success_criteria=success_criteria,
+            max_actions=max_actions,
             body=body,
         )
 

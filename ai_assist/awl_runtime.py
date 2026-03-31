@@ -8,6 +8,7 @@ from typing import Any
 from .awl_ast import (
     ASTNode,
     FailNode,
+    GoalNode,
     IfNode,
     LoopNode,
     ReturnNode,
@@ -96,6 +97,8 @@ class AWLRuntime:
             await self._execute_loop(node)
         elif isinstance(node, ReturnNode):
             self._execute_return(node)
+        elif isinstance(node, GoalNode):
+            await self._execute_goal(node)
         elif isinstance(node, FailNode):
             raise AWLRuntimeError(node.message)
 
@@ -171,6 +174,36 @@ class AWLRuntime:
     def _execute_return(self, node: ReturnNode):
         value = self._expr.evaluate(node.expression, self._variables)
         raise _ReturnSignal(value)
+
+    async def _execute_goal(self, goal: GoalNode):
+        """Execute one cycle of a goal block."""
+        saved_limit = self._limits.max_tool_calls
+        self._limits.max_tool_calls = min(goal.max_actions, saved_limit)
+
+        try:
+            await self._execute_body(goal.body)
+        finally:
+            self._limits.max_tool_calls = saved_limit
+
+        # Evaluate success criteria
+        await self._evaluate_goal_success(goal)
+
+    async def _evaluate_goal_success(self, goal: GoalNode):
+        """Ask the agent whether the goal's success criterion is met."""
+        var_summary = "\n".join(f"  {k} = {v}" for k, v in self._variables.items() if not k.startswith("_goal_"))
+        prompt = (
+            f"You are evaluating whether a goal's success criterion has been met.\n\n"
+            f"Goal: {goal.goal_id}\n"
+            f"Success criterion: {goal.success_criteria}\n\n"
+            f"Current state after this cycle:\n{var_summary}\n\n"
+            f"Has the success criterion been met? Respond with JSON:\n"
+            f'{{"success_met": true/false, "reason": "brief explanation"}}'
+        )
+        response = await self._agent.query(prompt, max_turns=1)
+        result = self._extract_exposed(response, ["success_met", "reason"])
+
+        self._variables["_goal_success_met"] = result.get("success_met", False)
+        self._variables["_goal_success_reason"] = result.get("reason", "")
 
     def _build_task_prompt(self, task: TaskNode) -> str:
         interp = self._expr.interpolate

@@ -11,19 +11,20 @@
     (modify-syntax-entry ?\' "\"" table)
     table))
 
-(defvar awl-task-fields
+(defconst awl-task-fields
   '("Goal" "Context" "Constraints" "Success" "Expose"))
 
-(defvar awl-font-lock-keywords
+(defconst awl-font-lock-keywords
   `(;; Comments - full line and inline
     ("^[ \t]*\\(#.*\\)" 1 font-lock-comment-face t)
     ("\\( #.*\\)" 1 font-lock-comment-face t)
     ;; Directives - match @word at start of line (with optional indentation)
-    ("^[ \t]*\\(@start\\|@end\\|@task\\|@set\\|@if\\|@else\\|@loop\\|@return\\)\\b" 1 font-lock-keyword-face t)
+    ("^[ \t]*\\(@start\\|@end\\|@task\\|@set\\|@if\\|@else\\|@loop\\|@return\\|@goal\\|@fail\\)\\b" 1 font-lock-keyword-face t)
     ;; Hints - match @hint after whitespace
     ("[ \t]\\(@no-history\\|@no-kg\\)\\b" 1 font-lock-constant-face t)
-    ;; Task ID after @task
+    ;; Task/Goal ID after @task or @goal
     ("@task[ \t]+\\(\\w+\\)" 1 font-lock-function-name-face t)
+    ("@goal[ \t]+\\(\\w+\\)" 1 font-lock-function-name-face t)
     ;; Task fields
     (,(concat "^[ \t]*\\(" (regexp-opt awl-task-fields) "\\):") 1 font-lock-type-face)
     ;; Variable interpolation ${...}
@@ -31,7 +32,7 @@
     ;; @set variable name
     ("@set[ \t]+\\(\\w+\\)" 1 font-lock-variable-name-face t)
     ;; Loop options: limit=N collect=var(fields)
-    ("\\b\\(limit\\|collect\\)=" 1 font-lock-builtin-face)
+    ("\\b\\(limit\\|collect\\|max_actions\\)=" 1 font-lock-builtin-face)
     ;; Loop variable: as <var>
     ("\\bas[ \t]+\\(\\w+\\)" 1 font-lock-variable-name-face)
     ;; Built-in functions
@@ -47,7 +48,7 @@
       (goto-char (point-min))
       (while (< (point) cur-line-start)
         (let ((l (string-trim (thing-at-point 'line t))))
-          (when (and l (string-match-p "^@\\(start\\|task\\|if\\|else\\|loop\\)\\b" l))
+          (when (and l (string-match-p "^@\\(start\\|task\\|if\\|else\\|loop\\|goal\\)\\b" l))
             (setq indent (+ indent 2)))
           (when (and l (or (string-match-p "^@end\\b" l)
                            (string-match-p "^@else\\b" l)))

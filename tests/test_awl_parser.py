@@ -4,6 +4,7 @@ import pytest
 
 from ai_assist.awl_ast import (
     FailNode,
+    GoalNode,
     IfNode,
     LoopNode,
     ReturnNode,
@@ -456,3 +457,118 @@ def test_parse_fail_inside_if():
 def test_parse_fail_missing_message():
     with pytest.raises(ParseError):
         AWLParser("@start\n@fail\n@end\n").parse()
+
+
+# ── @goal directive tests ────────────────────────────────────────
+
+
+def test_parse_goal_basic():
+    script = """\
+@start
+
+@goal track_failures
+  Success: Failure rate below 10%
+
+  @task check
+  Goal: Check failure rate.
+  Expose: failure_rate
+  @end
+
+@end
+
+@end"""
+    result = AWLParser(script).parse()
+    assert len(result.body) == 1
+    goal = result.body[0]
+    assert isinstance(goal, GoalNode)
+    assert goal.goal_id == "track_failures"
+    assert goal.success_criteria == "Failure rate below 10%"
+    assert goal.max_actions == 5  # default
+    assert len(goal.body) == 1
+    assert isinstance(goal.body[0], TaskNode)
+
+
+def test_parse_goal_with_max_actions():
+    script = """\
+@start
+
+@goal weekly_report max_actions=3
+  Success: Report generated and sent
+
+  @task generate
+  Goal: Generate weekly report.
+  @end
+
+@end
+
+@end"""
+    result = AWLParser(script).parse()
+    goal = result.body[0]
+    assert isinstance(goal, GoalNode)
+    assert goal.max_actions == 3
+
+
+def test_parse_goal_with_complex_body():
+    script = """\
+@start
+
+@goal monitor_ci max_actions=5
+  Success: All CI pipelines green for 24 hours
+
+  @task check_pipelines @no-history
+  Goal: Check CI pipeline status.
+  Expose: failed_pipelines, total
+  @end
+
+  @if len(failed_pipelines) > 0
+    @task create_report
+    Goal: Write report about ${failed_pipelines}.
+    @end
+  @end
+
+@end
+
+@end"""
+    result = AWLParser(script).parse()
+    goal = result.body[0]
+    assert isinstance(goal, GoalNode)
+    assert len(goal.body) == 2
+    assert isinstance(goal.body[0], TaskNode)
+    assert isinstance(goal.body[1], IfNode)
+
+
+def test_parse_goal_missing_success():
+    script = """\
+@start
+@goal my_goal
+  @task t1
+  Goal: Do something.
+  @end
+@end
+@end"""
+    with pytest.raises(ParseError, match="Success"):
+        AWLParser(script).parse()
+
+
+def test_parse_goal_with_set_before():
+    """Test that @set nodes can appear before @goal in the workflow"""
+    script = """\
+@start
+
+@set product = "OCP 4.19"
+
+@goal track
+  Success: Product stable
+
+  @task check
+  Goal: Check ${product} status.
+  Expose: status
+  @end
+
+@end
+
+@end"""
+    result = AWLParser(script).parse()
+    assert len(result.body) == 2
+    assert isinstance(result.body[0], SetNode)
+    assert isinstance(result.body[1], GoalNode)
