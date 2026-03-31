@@ -246,7 +246,7 @@ class MacOSLaunchdBackend(ServiceBackend):
 # =============================================================================
 
 
-_backend_cache = None
+_backend_cache: ServiceBackend | None = None
 
 
 def _get_backend() -> ServiceBackend:
