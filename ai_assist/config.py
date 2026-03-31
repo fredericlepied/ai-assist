@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 _project_env = Path(__file__).parent.parent / ".env"
 if _project_env.exists():
@@ -42,6 +42,65 @@ def get_config_dir(override: str | None = None) -> Path:
     config_dir.mkdir(parents=True, exist_ok=True)
 
     return config_dir
+
+
+def setup_logging(config_dir: Path | None = None) -> None:
+    """Configure logging to write to both console and file.
+
+    Logging levels can be controlled via environment variables:
+    - AI_ASSIST_LOG_LEVEL: File logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    - AI_ASSIST_CONSOLE_LOG_LEVEL: Console logging level (default: WARNING)
+
+    Args:
+        config_dir: Optional config directory path. If None, uses get_config_dir()
+    """
+    if config_dir is None:
+        config_dir = get_config_dir()
+
+    # Create logs directory
+    logs_dir = config_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Log file path with date
+    from datetime import datetime
+
+    log_file = logs_dir / f"ai-assist-{datetime.now().strftime('%Y-%m-%d')}.log"
+
+    # Get logging levels from environment
+    file_level_name = os.getenv("AI_ASSIST_LOG_LEVEL", "INFO").upper()
+    console_level_name = os.getenv("AI_ASSIST_CONSOLE_LOG_LEVEL", "WARNING").upper()
+
+    # Map level names to logging constants
+    level_map = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "CRITICAL": logging.CRITICAL,
+    }
+
+    file_level = level_map.get(file_level_name, logging.INFO)
+    console_level = level_map.get(console_level_name, logging.WARNING)
+
+    # Configure logging
+    logging.basicConfig(
+        level=file_level,  # Root logger level (controls file handler)
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            # File handler - writes to daily log file
+            logging.FileHandler(log_file),
+            # Console handler - only show warnings and errors by default
+            logging.StreamHandler(),
+        ],
+    )
+
+    # Set console handler to specified level
+    console_handler = logging.getLogger().handlers[1]  # StreamHandler
+    console_handler.setLevel(console_level)
+
+    logger.info(
+        "Logging initialized - file: %s (level=%s), console (level=%s)", log_file, file_level_name, console_level_name
+    )
 
 
 class MCPServerConfig(BaseModel):
@@ -106,6 +165,44 @@ class AiAssistConfig(BaseModel):
         default_factory=lambda: os.getenv("AI_ASSIST_ALLOW_EXTENDED_CONTEXT", "false").lower() == "true",
         description="Allow dynamic activation of 1M context window when needed (beta, higher cost)",
     )
+
+    # Adaptive truncation limits (percentage of context window)
+    # These percentages scale automatically with extended context activation
+    message_limit_pct: float = Field(
+        default_factory=lambda: float(os.getenv("AI_ASSIST_MESSAGE_LIMIT_PCT", "5.0")),
+        description="Maximum percentage of context window per message (default: 5%, range: 1-20%)",
+    )
+    total_messages_pct: float = Field(
+        default_factory=lambda: float(os.getenv("AI_ASSIST_TOTAL_MESSAGES_PCT", "60.0")),
+        description="Maximum percentage of context window for all messages (default: 60%, range: 20-80%)",
+    )
+    reserve_pct: float = Field(
+        default_factory=lambda: float(os.getenv("AI_ASSIST_RESERVE_PCT", "25.0")),
+        description="Reserve percentage for system prompt and output buffer (default: 25%, range: 10-40%)",
+    )
+
+    @model_validator(mode="after")
+    def validate_percentages(self) -> "AiAssistConfig":
+        """Validate that percentage allocations are within acceptable ranges"""
+        # Validate individual ranges
+        if not 1.0 <= self.message_limit_pct <= 20.0:
+            raise ValueError(f"message_limit_pct must be between 1 and 20, got {self.message_limit_pct}")
+        if not 20.0 <= self.total_messages_pct <= 80.0:
+            raise ValueError(f"total_messages_pct must be between 20 and 80, got {self.total_messages_pct}")
+        if not 10.0 <= self.reserve_pct <= 40.0:
+            raise ValueError(f"reserve_pct must be between 10 and 40, got {self.reserve_pct}")
+
+        # Validate combinations don't exceed 100%
+        if self.message_limit_pct + self.reserve_pct >= 100.0:
+            raise ValueError(
+                f"message_limit_pct ({self.message_limit_pct}) + reserve_pct ({self.reserve_pct}) " f"must be < 100"
+            )
+        if self.total_messages_pct + self.reserve_pct >= 100.0:
+            raise ValueError(
+                f"total_messages_pct ({self.total_messages_pct}) + reserve_pct ({self.reserve_pct}) " f"must be < 100"
+            )
+
+        return self
 
     @classmethod
     def from_env(cls, mcp_servers_file: Path | None = None, config_dir: Path | None = None) -> "AiAssistConfig":

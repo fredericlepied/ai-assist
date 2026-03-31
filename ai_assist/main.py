@@ -103,6 +103,25 @@ async def handle_prompt_command_basic(command: str, agent: AiAssistAgent, conver
         print(f"\n✓ Loaded prompt: {prompt_name} from {server_name}")
         print(f"  Messages added: {len(result.messages)}\n")
 
+        # Trim messages after MCP prompt injection to prevent context overflow
+        # Get adaptive limits from agent based on current context window
+        limits = agent.get_truncation_limits()
+        MAX_MESSAGE_CHARS = limits["max_message_chars"]
+        MAX_TOTAL_MESSAGE_CHARS = limits["max_total_chars"]
+
+        # Truncate large individual messages
+        from .message_utils import truncate_large_messages
+
+        truncate_large_messages(conversation_history, MAX_MESSAGE_CHARS)
+
+        # Trim total if needed (character-based limit, scales with context)
+        total_chars = sum(len(str(m.get("content", ""))) for m in conversation_history)
+        if total_chars > MAX_TOTAL_MESSAGE_CHARS and len(conversation_history) > 2:
+            while total_chars > MAX_TOTAL_MESSAGE_CHARS and len(conversation_history) > 2:
+                conversation_history.pop(0)
+                total_chars = sum(len(str(m.get("content", ""))) for m in conversation_history)
+            print(f"[Trimmed messages to fit context window: {total_chars:,} / {MAX_TOTAL_MESSAGE_CHARS:,} chars]\n")
+
         # Automatically send the loaded prompt to Claude
         print(f"{identity.assistant.nickname}: ", end="", flush=True)
 
@@ -166,7 +185,7 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
     print(f"ai-assist - {identity.get_greeting()}")
     print("=" * 60)
     print("\nType your questions or commands.")
-    print("Commands: /status, /history, /clear-cache, /prompts, /help")
+    print("Commands: /status, /history, /clear, /clear-cache, /prompts, /help")
     print("Type /exit or /quit to exit\n")
 
     conversation_context: list[dict] = []
@@ -245,12 +264,20 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
                 print(f"\nCleared {removed} cache entries\n")
                 continue
 
+            if user_input.lower() == "/clear":
+                messages.clear()
+                conversation_context.clear()
+                state_manager.save_conversation_context("last_interactive_session", {"messages": []})
+                print("\n✓ Conversation history cleared\n")
+                continue
+
             if user_input.lower() == "/help":
                 print("\nai-assist Interactive Mode Help")
                 print("=" * 60)
                 print("Commands:")
                 print("  /status           - Show state statistics")
                 print("  /history          - Show recent monitoring history")
+                print("  /clear            - Clear conversation history")
                 print("  /clear-cache      - Clear expired cache")
                 print("  /prompts          - List available MCP prompts")
                 print("  /server/prompt    - Load an MCP prompt (e.g., /dci/rca)")
@@ -274,6 +301,23 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
             # Add user message to messages list
             messages.append({"role": "user", "content": user_input})
 
+            # Trim messages BEFORE query to prevent unbounded growth
+            # Get adaptive limits from agent based on current context window
+            limits = agent.get_truncation_limits()
+            MAX_MESSAGE_CHARS = limits["max_message_chars"]
+            MAX_TOTAL_MESSAGE_CHARS = limits["max_total_chars"]
+
+            # Truncate individual messages first
+            from .message_utils import truncate_large_messages
+
+            truncate_large_messages(messages, MAX_MESSAGE_CHARS)
+
+            # Then trim total if needed (character-based limit, scales with context)
+            total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+            while total_chars > MAX_TOTAL_MESSAGE_CHARS and len(messages) > 2:
+                messages.pop(0)
+                total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+
             # Query with full message history (including any injected prompts)
             import time
 
@@ -282,22 +326,38 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
             print(response)
             print()
 
-            # Capture trace (best-effort)
-            try:
-                from .eval import TraceStore
+            # Check if response is an API error
+            from .message_utils import is_api_error, is_context_overflow_error
 
-                trace = agent.capture_trace(user_input, response, start_time)
-                TraceStore().append(trace)
-            except Exception:
-                pass
+            if is_api_error(response):
+                # Don't append error to messages (prevents poisoning conversation)
+                # Suggest /clear if context is too large
+                if is_context_overflow_error(response):
+                    print("💡 Tip: Use /clear to reset conversation history and recover from context overflow\n")
+                # Don't track API errors in conversation context
+            else:
+                # Capture trace (best-effort)
+                try:
+                    from .eval import TraceStore
 
-            # Add assistant response to messages
-            messages.append({"role": "assistant", "content": response})
+                    trace = agent.capture_trace(user_input, response, start_time)
+                    TraceStore().append(trace)
+                except Exception:
+                    pass
 
-            # Track conversation
-            conversation_context.append(
-                {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
-            )
+                # Add assistant response to messages
+                messages.append({"role": "assistant", "content": response})
+
+                # Trim again after adding response (character-based limit)
+                total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+                while total_chars > MAX_TOTAL_MESSAGE_CHARS and len(messages) > 2:
+                    messages.pop(0)
+                    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+
+                # Track conversation
+                conversation_context.append(
+                    {"user": user_input, "assistant": response, "timestamp": str(asyncio.get_event_loop().time())}
+                )
 
         except KeyboardInterrupt:
             print("\n\nGoodbye!")
@@ -604,6 +664,11 @@ def identity_init_command():
 
 async def main_async():
     """Async main function"""
+    # Setup logging early
+    from .config import setup_logging
+
+    setup_logging()
+
     # Check for --dev flag and enable code watching
     dev_mode = "--dev" in sys.argv
     if dev_mode:

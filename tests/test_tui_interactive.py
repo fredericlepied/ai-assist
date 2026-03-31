@@ -45,6 +45,16 @@ def mock_agent():
     agent.filesystem_tools = MagicMock()
     agent.filesystem_tools.confirmation_callback = None
 
+    # Mock adaptive truncation limits
+    agent.get_truncation_limits = MagicMock(
+        return_value={
+            "max_message_chars": 40000,
+            "max_total_chars": 480000,
+            "context_window_tokens": 200000,
+            "usable_tokens": 150000,
+        }
+    )
+
     return agent
 
 
@@ -218,6 +228,14 @@ async def test_conversation_tracking(mock_state_manager):
     agent.skills_manager.installed_skills = []
     agent.filesystem_tools = MagicMock()
     agent.filesystem_tools.confirmation_callback = None
+    agent.get_truncation_limits = MagicMock(
+        return_value={
+            "max_message_chars": 40000,
+            "max_total_chars": 480000,
+            "context_window_tokens": 200000,
+            "usable_tokens": 150000,
+        }
+    )
 
     with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
@@ -328,6 +346,14 @@ async def test_feedback_with_tool_calls(mock_state_manager):
     agent.skills_manager.installed_skills = []
     agent.filesystem_tools = MagicMock()
     agent.filesystem_tools.confirmation_callback = None
+    agent.get_truncation_limits = MagicMock(
+        return_value={
+            "max_message_chars": 40000,
+            "max_total_chars": 480000,
+            "context_window_tokens": 200000,
+            "usable_tokens": 150000,
+        }
+    )
 
     with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
@@ -363,6 +389,9 @@ async def test_query_streaming_cancel_event():
     mock_config.allowed_paths = ["~/.ai-assist", "/tmp/ai-assist"]
     mock_config.confirm_tools = ["internal__create_directory"]
     mock_config.allow_extended_context = False
+    mock_config.message_limit_pct = 5.0
+    mock_config.total_messages_pct = 60.0
+    mock_config.reserve_pct = 25.0
 
     agent = AiAssistAgent(mock_config)
 
