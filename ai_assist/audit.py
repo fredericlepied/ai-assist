@@ -1,12 +1,15 @@
 """Audit logging for tool calls"""
 
 import json
+import logging
 import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import get_config_dir
+
+logger = logging.getLogger(__name__)
 
 SECRET_PATTERNS = re.compile(
     r"(sk-ant-[a-zA-Z0-9]+|ghp_[a-zA-Z0-9]+|gho_[a-zA-Z0-9]+"
@@ -75,6 +78,12 @@ class AuditLogger:
             "success": success,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
+
+        # Log to standard logger for log file visibility
+        args_short = json.dumps(sanitized_args)
+        if len(args_short) > 300:
+            args_short = args_short[:300] + "..."
+        logger.info("Tool call: %s(%s) -> %s", tool_name, args_short, "ok" if success else "FAILED")
 
         with open(self.log_file, "a") as f:
             f.write(json.dumps(entry) + "\n")

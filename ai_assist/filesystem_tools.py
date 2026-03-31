@@ -444,7 +444,7 @@ class FilesystemTools:
             },
             {
                 "name": "internal__search_in_file",
-                "description": "Search for a regex pattern in a file. Returns matching lines with line numbers. Use this to find specific patterns, errors, or keywords in log files.",
+                "description": "Search for a regex pattern in a file. Returns matching lines with line numbers. Use this to find specific patterns, errors, or keywords in log files. Supports line ranges to search only a portion of the file (e.g., last 100 lines with line_start=-100).",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -454,6 +454,14 @@ class FilesystemTools:
                             "type": "integer",
                             "description": "Maximum number of matching lines to return (default: 100)",
                             "default": 100,
+                        },
+                        "line_start": {
+                            "type": "integer",
+                            "description": "Start searching from this line number (1-based). Negative values count from the end (e.g., -100 = last 100 lines). Default: search entire file.",
+                        },
+                        "line_end": {
+                            "type": "integer",
+                            "description": "Stop searching at this line number (inclusive). Negative values count from the end. Default: search to end of file.",
                         },
                     },
                     "required": ["path", "pattern"],
@@ -645,10 +653,12 @@ class FilesystemTools:
             return f"Error reading file: {str(e)}"
 
     async def _search_in_file(self, args: dict) -> str:
-        """Search for a pattern in a file"""
+        """Search for a pattern in a file, optionally within a line range"""
         path = args.get("path")
         pattern = args.get("pattern")
         max_results = args.get("max_results", 100)
+        line_start = args.get("line_start")
+        line_end = args.get("line_end")
 
         if not path or not pattern:
             return "Error: path and pattern parameters are required"
@@ -671,18 +681,46 @@ class FilesystemTools:
             except re.error as e:
                 return f"Error: Invalid regex pattern: {e}"
 
-            matches = []
+            # Read all lines to support negative indices
             with open(path_obj, encoding="utf-8", errors="replace") as f:
-                for line_num, line in enumerate(f, 1):
-                    if regex.search(line):
-                        matches.append(f"{line_num}: {line.rstrip()}")
-                        if len(matches) >= max_results:
-                            break
+                all_lines = f.readlines()
+
+            total_lines = len(all_lines)
+
+            # Resolve line range (1-based, negative counts from end)
+            if line_start is not None:
+                if line_start < 0:
+                    start_idx = max(0, total_lines + line_start)
+                else:
+                    start_idx = max(0, line_start - 1)
+            else:
+                start_idx = 0
+
+            if line_end is not None:
+                if line_end < 0:
+                    end_idx = max(0, total_lines + line_end + 1)
+                else:
+                    end_idx = min(total_lines, line_end)
+            else:
+                end_idx = total_lines
+
+            # Search within range
+            matches = []
+            for idx in range(start_idx, end_idx):
+                line = all_lines[idx]
+                if regex.search(line):
+                    matches.append(f"{idx + 1}: {line.rstrip()}")
+                    if len(matches) >= max_results:
+                        break
+
+            range_info = ""
+            if line_start is not None or line_end is not None:
+                range_info = f" (lines {start_idx + 1}-{end_idx} of {total_lines})"
 
             if not matches:
-                return f"No matches found for pattern: {pattern}"
+                return f"No matches found for pattern: {pattern}{range_info}"
 
-            result = f"Found {len(matches)} match(es) for pattern '{pattern}':\n\n"
+            result = f"Found {len(matches)} match(es) for pattern '{pattern}'{range_info}:\n\n"
             result += "\n".join(matches)
 
             if len(matches) >= max_results:
