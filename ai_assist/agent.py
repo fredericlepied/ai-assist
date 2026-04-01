@@ -305,17 +305,13 @@ class AiAssistAgent:
             self.knowledge_tools.agent = self
             self.kg_query_tools = KGQueryTools(self.knowledge_graph)
             EmbeddingModel.preload()
-            embedded = self.knowledge_graph.conn.execute(
-                """SELECT COUNT(*) FROM entities e
+            embedded = self.knowledge_graph.conn.execute("""SELECT COUNT(*) FROM entities e
                    JOIN vec_embeddings v ON e.id = v.entity_id
-                   WHERE e.tx_to IS NULL AND e.entity_type != 'tool_result'"""
-            ).fetchone()[0]
-            not_embedded = self.knowledge_graph.conn.execute(
-                """SELECT COUNT(*) FROM entities e
+                   WHERE e.tx_to IS NULL AND e.entity_type != 'tool_result'""").fetchone()[0]
+            not_embedded = self.knowledge_graph.conn.execute("""SELECT COUNT(*) FROM entities e
                    LEFT JOIN vec_embeddings v ON e.id = v.entity_id
                    WHERE e.tx_to IS NULL AND e.entity_type != 'tool_result'
-                   AND v.entity_id IS NULL"""
-            ).fetchone()[0]
+                   AND v.entity_id IS NULL""").fetchone()[0]
             if not_embedded == 0:
                 print(f"✓ Vector search enabled ({embedded} entities)")
             else:

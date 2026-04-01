@@ -139,15 +139,13 @@ async def test_reload_mcp_servers_add_server(tmp_path):
 
     # Create mcp_servers.yaml with a new server
     mcp_file = tmp_path / "mcp_servers.yaml"
-    mcp_file.write_text(
-        """
+    mcp_file.write_text("""
 servers:
   test-server:
     command: echo
     args: ["hello"]
     enabled: true
-"""
-    )
+""")
 
     # Mock the _run_server method to avoid actually starting a server
     agent._run_server = AsyncMock()
@@ -193,11 +191,9 @@ async def test_reload_mcp_servers_remove_server(tmp_path):
 
     # Create empty mcp_servers.yaml
     mcp_file = tmp_path / "mcp_servers.yaml"
-    mcp_file.write_text(
-        """
+    mcp_file.write_text("""
 servers: {}
-"""
-    )
+""")
 
     # Reload MCP servers with the new config directory
     with patch("ai_assist.config.get_config_dir", return_value=tmp_path):

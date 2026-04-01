@@ -228,5 +228,5 @@ ai-assist /setup-identity
 ## See Also
 
 - [Configuration Guide](../README.md#configuration)
-- [MCP Servers Setup](../README.md#mcp-servers)
-- [Identity Management](../README.md#identity-management)
+- [MCP Server Tools](../README.md#mcp-server-tools)
+- [Interactive Mode](../README.md#interactive-mode)

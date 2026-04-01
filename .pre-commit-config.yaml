@@ -4,7 +4,7 @@
 repos:
   # Standard pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -19,7 +19,7 @@ repos:
 
   # Python code formatting with black
   - repo: https://github.com/psf/black
-    rev: 24.1.1
+    rev: 26.3.1
     hooks:
       - id: black
         language_version: python3
@@ -34,18 +34,29 @@ repos:
 
   # Python linting with ruff (includes isort, flake8, pyupgrade)
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.2.1
+    rev: v0.15.8
     hooks:
       - id: ruff
         args: ['--fix', '--line-length=120']
 
   # Security linting with bandit
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.10
+    rev: 1.9.4
     hooks:
       - id: bandit
         args: ['-c', 'pyproject.toml']
         additional_dependencies: ['bandit[toml]']
+
+  # Check local links in markdown files
+  - repo: local
+    hooks:
+      - id: check-markdown-links
+        name: check-markdown-links
+        entry: uv run python scripts/check_markdown_links.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true
 
   # Type checking with mypy
   - repo: local

@@ -19,15 +19,13 @@ def temp_skill_dir(tmp_path):
 
     # Create SKILL.md
     skill_md = skill_dir / "SKILL.md"
-    skill_md.write_text(
-        """---
+    skill_md.write_text("""---
 name: test-skill
 description: Test skill for script execution
 allowed-tools: "internal__execute_skill_script"
 ---
 Test skill with scripts.
-"""
-    )
+""")
 
     # Create scripts directory
     scripts_dir = skill_dir / "scripts"
@@ -35,58 +33,46 @@ Test skill with scripts.
 
     # Create a simple test script
     hello_script = scripts_dir / "hello.sh"
-    hello_script.write_text(
-        """#!/bin/bash
+    hello_script.write_text("""#!/bin/bash
 echo "Hello from script!"
-"""
-    )
+""")
     hello_script.chmod(0o755)
 
     # Create a script that uses env vars
     env_script = scripts_dir / "print_env.sh"
-    env_script.write_text(
-        """#!/bin/bash
+    env_script.write_text("""#!/bin/bash
 env | sort
-"""
-    )
+""")
     env_script.chmod(0o755)
 
     # Create a script that sleeps
     sleep_script = scripts_dir / "sleep.sh"
-    sleep_script.write_text(
-        """#!/bin/bash
+    sleep_script.write_text("""#!/bin/bash
 sleep 60
-"""
-    )
+""")
     sleep_script.chmod(0o755)
 
     # Create a script with large output
     large_output_script = scripts_dir / "large_output.sh"
-    large_output_script.write_text(
-        """#!/bin/bash
+    large_output_script.write_text("""#!/bin/bash
 python3 -c "print('x' * 30000)"
-"""
-    )
+""")
     large_output_script.chmod(0o755)
 
     # Create a Python script with args
     args_script = scripts_dir / "echo_args.py"
-    args_script.write_text(
-        """#!/usr/bin/env python3
+    args_script.write_text("""#!/usr/bin/env python3
 import sys
 print(' '.join(sys.argv[1:]))
-"""
-    )
+""")
     args_script.chmod(0o755)
 
     # Create a script that outputs UTF-8 text
     utf8_script = scripts_dir / "utf8_output.py"
-    utf8_script.write_text(
-        """#!/usr/bin/env python3
+    utf8_script.write_text("""#!/usr/bin/env python3
 import sys
 sys.stdout.buffer.write("Résultats: café, naïve, Ωmega, 日本語\\n".encode("utf-8"))
-"""
-    )
+""")
     utf8_script.chmod(0o755)
 
     return skill_dir
@@ -234,14 +220,12 @@ async def test_permission_enforcement_no_allowed_tools(temp_skill_dir):
     skill_dir.mkdir()
 
     skill_md = skill_dir / "SKILL.md"
-    skill_md.write_text(
-        """---
+    skill_md.write_text("""---
 name: no-permission-skill
 description: Skill without explicit script execution permission
 ---
 This skill has scripts but no allowed-tools declaration.
-"""
-    )
+""")
 
     scripts_dir = skill_dir / "scripts"
     scripts_dir.mkdir()
@@ -274,15 +258,13 @@ async def test_permission_enforcement_explicit_denial(temp_skill_dir):
     skill_dir.mkdir()
 
     skill_md = skill_dir / "SKILL.md"
-    skill_md.write_text(
-        """---
+    skill_md.write_text("""---
 name: explicit-denial-skill
 description: Skill that explicitly denies script execution
 allowed-tools: "some_other_tool"
 ---
 This skill explicitly sets allowed-tools without script execution.
-"""
-    )
+""")
 
     scripts_dir = skill_dir / "scripts"
     scripts_dir.mkdir()
@@ -392,12 +374,10 @@ async def test_script_exit_code_nonzero(skills_manager_with_skill, temp_skill_di
     # Create a script that fails
     scripts_dir = temp_skill_dir / "scripts"
     fail_script = scripts_dir / "fail.sh"
-    fail_script.write_text(
-        """#!/bin/bash
+    fail_script.write_text("""#!/bin/bash
 echo "Error message" >&2
 exit 1
-"""
-    )
+""")
     fail_script.chmod(0o755)
 
     # Reload skill to pick up new script
