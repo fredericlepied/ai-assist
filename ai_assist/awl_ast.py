@@ -53,4 +53,12 @@ class FailNode:
     message: str
 
 
-ASTNode = WorkflowNode | TaskNode | SetNode | IfNode | LoopNode | ReturnNode | FailNode
+@dataclass
+class GoalNode:
+    goal_id: str
+    success_criteria: str
+    max_actions: int = 5
+    body: list[Any] = field(default_factory=list)
+
+
+ASTNode = WorkflowNode | TaskNode | SetNode | IfNode | LoopNode | ReturnNode | FailNode | GoalNode

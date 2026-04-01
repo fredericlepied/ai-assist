@@ -41,9 +41,11 @@ class TaskRunner:
         timestamp = datetime.now()
 
         try:
-            # Detect and execute built-in, MCP prompts, or natural language
+            # Detect and execute built-in, AWL goals, MCP prompts, or natural language
             if self.task_def.prompt == "__builtin__:kg_synthesis":
                 output = await self.agent._run_synthesis_from_kg()
+            elif self.task_def.prompt.endswith(".awl"):
+                output = await self._run_awl_goal()
             elif self.task_def.is_mcp_prompt:
                 server_name, prompt_name = self.task_def.parse_mcp_prompt()
                 output = await self.agent.execute_mcp_prompt(
@@ -129,6 +131,36 @@ class TaskRunner:
                 await self._send_notification(result)
 
             return result
+
+    async def _run_awl_goal(self) -> str:
+        """Execute an AWL goal script with state persistence"""
+        from pathlib import Path
+
+        from .config import get_config_dir
+        from .goal_runner import GoalRunner
+        from .goal_state import GoalStateManager
+
+        # Resolve AWL path (relative to goals dir or absolute)
+        awl_path = Path(self.task_def.prompt)
+        if not awl_path.is_absolute():
+            awl_path = get_config_dir() / self.task_def.prompt
+
+        if not awl_path.exists():
+            return f"Error: AWL script not found: {awl_path}"
+
+        state_manager = GoalStateManager(get_config_dir() / "state")
+        runner = GoalRunner(awl_path, self.agent, state_manager)
+        runner.load()
+
+        await runner.run_cycle()
+
+        # Format output
+        lines = [f"Goal '{runner.goal_id}' cycle completed."]
+        state = state_manager.load(runner.goal_id)
+        lines.append(f"Status: {state.status} | Cycles: {state.cycle_count}")
+        if state.success_reason:
+            lines.append(f"Success: {state.success_reason}")
+        return "\n".join(lines)
 
     def get_last_run(self) -> datetime | None:
         """Get timestamp of last successful run"""

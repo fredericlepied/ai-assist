@@ -18,7 +18,6 @@ from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.spinner import Spinner
 from rich.table import Table
 
 from .agent import AiAssistAgent
@@ -137,6 +136,8 @@ async def query_with_feedback(
     Returns:
         The assistant's response text
     """
+    from ai_assist.output import RichRenderer
+
     identity = get_identity()
     start_time = time.time()
 
@@ -147,55 +148,23 @@ async def query_with_feedback(
     context_summary: list[str] = []
     if kg_context and not no_kg:
         prompt, context_summary = kg_context.enrich_prompt(prompt)
-    # State to track progress
-    feedback_state = {"status": "Starting...", "turn": 0, "max_turns": 50, "tool": None, "streaming": False}
-    live_running = False  # Tracks whether the Rich Live display is currently active
+
+    # Create renderer and wire it up
+    renderer = RichRenderer(console, assistant_name=identity.assistant.nickname)
+    agent.renderer = renderer
+    agent.on_inner_execution = renderer.on_inner_execution
+    agent._active_live = None  # Renderer manages its own Live
+
+    last_turn = 0
 
     def progress_callback(status: str, turn: int, max_turns: int, tool_name: str | None):
-        """Update feedback state and refresh the spinner display"""
-        nonlocal live_running
-        feedback_state["turn"] = turn
-        feedback_state["max_turns"] = max_turns
-        feedback_state["tool"] = tool_name
+        nonlocal last_turn
+        last_turn = turn
+        detail = format_tool_display_name(tool_name or "") if tool_name else ""
+        renderer.show_progress(status, detail)
 
-        if status == "thinking":
-            feedback_state["status"] = "🤔 Analyzing your question..."
-            feedback_state["streaming"] = False
-        elif status == "calling_claude":
-            feedback_state["status"] = "💭 Thinking..."
-            feedback_state["streaming"] = False
-        elif status == "executing_tool":
-            display_name = format_tool_display_name(tool_name or "")
-            feedback_state["status"] = f"🔧 Using tool: {display_name}"
-            feedback_state["streaming"] = False
-        elif status == "complete":
-            feedback_state["status"] = "✨ Complete!"
-            feedback_state["streaming"] = False
-
-        # Push updated spinner to the Live widget (only before response streaming starts).
-        # Only restart Live when Claude is thinking — not when a tool is about to execute.
-        # "executing_tool" fires just before tool execution begins; restarting Live there
-        # would conflict with tools that print directly to stdout (e.g. AWL runtime).
-        if not response_started:
-            if not live_running and status in ("thinking", "calling_claude"):
-                live.start()
-                live_running = True
-            if live_running:
-                live.update(create_feedback_display())
-
-    def create_feedback_display():
-        """Create the feedback display"""
-        spinner = Spinner("dots", text=str(feedback_state["status"]), style="cyan")
-        return spinner
-
-    # Show spinner initially
-    live = Live(create_feedback_display(), console=console, refresh_per_second=10)
-    agent._active_live = live
-    live.start()
-    live_running = True
-
+    renderer.start()
     full_response = ""
-    response_started = False
 
     try:
         # Show knowledge graph context if any was added
@@ -205,26 +174,19 @@ async def query_with_feedback(
 
         # Build messages list with conversation history
         if conversation_memory:
-            # Get conversation history and add current prompt
             messages = conversation_memory.to_messages()
             messages.append({"role": "user", "content": prompt})
 
-            # Truncate large individual messages to prevent context overflow
-            # Tool results can be huge (e.g., search_in_file with max_results=200)
             from ai_assist.message_utils import truncate_large_messages
 
-            # Get adaptive limits from agent
             limits = agent.get_truncation_limits()
             truncate_large_messages(messages, limits["max_message_chars"])
 
-            # Show context indicator if we have history
             if len(conversation_memory) > 0:
                 console.print(f"[dim]💬 Using context from {len(conversation_memory)} previous exchange(s)[/dim]")
         else:
-            # No conversation memory - just use prompt
             messages = None
 
-        # Use streaming query with conversation context and cancellation support
         cancel_event = threading.Event()
         escape_watcher = EscapeWatcher(cancel_event)
         agent._active_escape_watcher = escape_watcher
@@ -235,85 +197,32 @@ async def query_with_feedback(
                 progress_callback=progress_callback,
                 cancel_event=cancel_event,
             ):
-                # Handle text chunks
                 if isinstance(chunk, str):
-                    # First text chunk - switch Live from spinner to Markdown display
-                    if not response_started:
-                        console.print()
-                        console.print(f"[bold cyan]{identity.assistant.nickname}:[/bold cyan]")
-                        response_started = True
-
+                    renderer.show_text_delta(chunk)
                     full_response += chunk
-                    live.update(Markdown(full_response))
 
-                # Handle tool use notifications
                 elif isinstance(chunk, dict):
                     if chunk.get("type") == "tool_use":
-                        # Stop Live before printing to avoid display corruption
-                        if live_running:
-                            live.stop()
-                            live_running = False
-                        display_name = format_tool_display_name(chunk["name"])
-                        console.print(f"\n[dim]🔧 {display_name}[/dim]")
-
-                        # Display arguments if present
-                        if chunk.get("input"):
-                            if chunk["name"] == "internal__think":
-                                # Show full thought without truncation
-                                thought = chunk["input"].get("thought", "")
-                                for line in thought.splitlines():
-                                    console.print(f"[dim]   {line}[/dim]")
-                            else:
-                                console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
-
-                        # For tools that write directly to stdout (e.g. AWL runtime uses
-                        # print() for task progress), do NOT restart Live — it would
-                        # conflict and produce repeated spinner lines. Live will restart
-                        # automatically via progress_callback when Claude resumes thinking.
-                        # For all other tools, restart Live immediately for feedback.
-                        prints_to_stdout = chunk["name"] == "introspection__execute_awl_script"
-                        if not prints_to_stdout:
-                            if response_started:
-                                # Restart Live with current Markdown content
-                                live = Live(Markdown(full_response), console=console, refresh_per_second=10)
-                                agent._active_live = live
-                            else:
-                                live.update(create_feedback_display())
-                            live.start()
-                            live_running = True
+                        renderer.show_tool_call(chunk["name"], chunk.get("input", {}))
 
                     elif chunk.get("type") == "cancelled":
-                        if live_running:
-                            live.stop()
-                            live_running = False
+                        renderer.stop()
                         console.print("\n[yellow]Query cancelled[/yellow]")
                         break
 
                     elif chunk.get("type") == "done":
-                        # Query complete
-                        if live_running:
-                            live.stop()
-                            live_running = False
+                        renderer.show_text_done()
                         break
 
                     elif chunk.get("type") == "error":
-                        if live_running:
-                            live.stop()
-                            live_running = False
-                        console.print(f"\n[red]{chunk.get('message')}[/red]")
+                        renderer.show_error(chunk.get("message", ""))
                         break
 
     except Exception as e:
-        # Handle any streaming errors
-        if live_running:
-            live.stop()
-            live_running = False
-        console.print(f"\n[red]Error: {e}[/red]")
+        renderer.show_error(str(e))
 
     finally:
-        if live_running:
-            live.stop()
-            live_running = False
+        renderer.stop()
         agent._active_live = None
         agent._active_escape_watcher = None
 
@@ -328,7 +237,7 @@ async def query_with_feedback(
         try:
             from .eval import TraceStore
 
-            turn: int = feedback_state["turn"]  # type: ignore[assignment]
+            turn: int = last_turn
             trace = agent.capture_trace(prompt, full_response, start_time, turn)
             TraceStore().append(trace)
         except Exception:
@@ -677,35 +586,8 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     notification_watcher = NotificationWatcher(console)
     await notification_watcher.start()
 
-    # Hook inner execution callback for MCP prompt visibility
-    def on_inner_execution(chunk):
-        # Stop Live spinner before printing to avoid display corruption
-        live = agent._active_live
-        live_was_running = live and live._started
-        if live_was_running:
-            live.stop()
-
-        if isinstance(chunk, str):
-            console.print(chunk, end="", markup=False)
-        elif isinstance(chunk, dict):
-            if chunk.get("type") == "tool_use":
-                display_name = format_tool_display_name(chunk["name"])
-                console.print(f"\n[dim]  🔧 {display_name}[/dim]")
-                if chunk.get("input"):
-                    if chunk["name"] == "internal__think":
-                        thought = chunk["input"].get("thought", "")
-                        for line in thought.splitlines():
-                            console.print(f"[dim]     {line}[/dim]")
-                    else:
-                        console.print(f"[dim]     {format_tool_args(chunk['input'])}[/dim]")
-            elif chunk.get("type") == "error":
-                console.print(f"\n[red]  {chunk.get('message')}[/red]")
-
-        # Restart spinner
-        if live_was_running:
-            live.start()
-
-    agent.on_inner_execution = on_inner_execution
+    # Inner execution uses the agent's renderer (set by query_with_feedback)
+    agent.on_inner_execution = agent.renderer.on_inner_execution
 
     # Set up security confirmation callbacks for filesystem tools
     async def _prompt_user_approval(message: str, detail: str) -> str:

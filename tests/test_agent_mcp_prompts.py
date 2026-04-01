@@ -301,8 +301,8 @@ async def test_execute_mcp_prompt_no_callback(agent):
 
     agent.query_streaming = mock_streaming
 
-    # No callback set (default None)
-    assert agent.on_inner_execution is None
+    # Default callback is the renderer's on_inner_execution (not None)
+    assert agent.on_inner_execution is not None
 
     # Should work without errors
     result = await agent.execute_mcp_prompt("dci", "rca", None)

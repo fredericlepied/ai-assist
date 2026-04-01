@@ -186,3 +186,41 @@ class TestValidateExpression:
     def test_invalid_comparison_missing_left(self, evaluator):
         with pytest.raises(ValueError):
             evaluator.validate_expression("> 0")
+
+
+class TestJsonStringHandling:
+    """Test that JSON strings are parsed for len() and loop operations"""
+
+    def test_len_json_string_array(self, evaluator):
+        """len() on a JSON string array returns item count, not char count"""
+        result = evaluator.evaluate("len(items)", {"items": '[{"id": 1}, {"id": 2}, {"id": 3}]'})
+        assert result == 3
+
+    def test_len_json_string_empty_array(self, evaluator):
+        result = evaluator.evaluate("len(items)", {"items": "[]"})
+        assert result == 0
+
+    def test_len_json_string_comparison(self, evaluator):
+        """len(items) > 0 works with JSON string arrays"""
+        result = evaluator.evaluate("len(items) > 0", {"items": '[{"id": 1}]'})
+        assert result is True
+
+    def test_len_plain_string_returns_char_count(self, evaluator):
+        """len() on a non-JSON string still returns character count"""
+        result = evaluator.evaluate("len(name)", {"name": "hello"})
+        assert result == 5
+
+    def test_len_real_list(self, evaluator):
+        """len() on a real Python list works as before"""
+        result = evaluator.evaluate("len(items)", {"items": [1, 2, 3]})
+        assert result == 3
+
+    def test_len_python_repr_string(self, evaluator):
+        """len() on a Python-repr string with single quotes"""
+        result = evaluator.evaluate("len(items)", {"items": "[{'id': 'a'}, {'id': 'b'}]"})
+        assert result == 2
+
+    def test_len_single_dict_string(self, evaluator):
+        """len() on a single dict string returns key count"""
+        result = evaluator.evaluate("len(item)", {"item": "{'id': 'abc', 'name': 'test'}"})
+        assert result == 2

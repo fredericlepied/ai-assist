@@ -6,6 +6,7 @@ import pytest
 
 from ai_assist.awl_ast import (
     FailNode,
+    GoalNode,
     IfNode,
     LoopNode,
     ReturnNode,
@@ -374,3 +375,181 @@ async def test_if_with_out_of_range_index_no_crash(mock_agent, runtime):
     result = await runtime.execute(workflow, variables={"handlers": ["a"]})
     assert result.success is True
     assert mock_agent.query.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_loop_with_json_string_variable(mock_agent, runtime):
+    """Test that @loop parses JSON string variables into lists"""
+    mock_agent.query = AsyncMock(return_value='{"summary": "done"}')
+    workflow = WorkflowNode(
+        body=[
+            LoopNode(
+                collection="jobs",
+                item_var="job",
+                body=[TaskNode(task_id="process", goal="Process ${job}.", expose=["summary"])],
+            ),
+        ]
+    )
+    # Pass jobs as a JSON string (as agent might expose it)
+    result = await runtime.execute(workflow, variables={"jobs": '[{"id": "a"}, {"id": "b"}]'})
+    assert result.success is True
+    assert mock_agent.query.call_count == 2  # 2 items in the JSON array
+
+
+@pytest.mark.asyncio
+async def test_loop_with_single_dict_wraps_in_list(mock_agent, runtime):
+    """Test that @loop wraps a single dict in a list"""
+    mock_agent.query = AsyncMock(return_value='{"summary": "done"}')
+    workflow = WorkflowNode(
+        body=[
+            LoopNode(
+                collection="job",
+                item_var="j",
+                body=[TaskNode(task_id="process", goal="Process ${j}.", expose=["summary"])],
+            ),
+        ]
+    )
+    result = await runtime.execute(workflow, variables={"job": {"id": "abc", "name": "test"}})
+    assert result.success is True
+    assert mock_agent.query.call_count == 1  # Single dict wrapped in list = 1 iteration
+
+
+@pytest.mark.asyncio
+async def test_loop_with_python_repr_string(mock_agent, runtime):
+    """Test that @loop parses Python-repr strings (single quotes)"""
+    mock_agent.query = AsyncMock(return_value='{"summary": "done"}')
+    workflow = WorkflowNode(
+        body=[
+            LoopNode(
+                collection="jobs",
+                item_var="job",
+                body=[TaskNode(task_id="process", goal="Process ${job}.", expose=["summary"])],
+            ),
+        ]
+    )
+    result = await runtime.execute(workflow, variables={"jobs": "[{'id': 'a'}, {'id': 'b'}]"})
+    assert result.success is True
+    assert mock_agent.query.call_count == 2
+
+
+# ── @goal directive runtime tests ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_execute_goal_runs_body(mock_agent, runtime):
+    """Test that @goal executes its body tasks"""
+    call_count = 0
+
+    async def mock_query(prompt, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return '```json\n{"failure_rate": 5}\n```'
+        # Success evaluation
+        return '```json\n{"success_met": false, "reason": "still monitoring"}\n```'
+
+    mock_agent.query = AsyncMock(side_effect=mock_query)
+    workflow = WorkflowNode(
+        body=[
+            GoalNode(
+                goal_id="test_goal",
+                success_criteria="Failure rate below 10%",
+                body=[
+                    TaskNode(task_id="check", goal="Check rate.", expose=["failure_rate"]),
+                ],
+            ),
+        ]
+    )
+    result = await runtime.execute(workflow)
+    assert result.success is True
+    assert result.variables["failure_rate"] == 5
+    assert result.variables.get("_goal_success_met") is False
+
+
+@pytest.mark.asyncio
+async def test_execute_goal_success_met(mock_agent, runtime):
+    """Test that success evaluation sets _goal_success_met"""
+    call_count = 0
+
+    async def mock_query(prompt, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return '```json\n{"failure_rate": 2}\n```'
+        # Success evaluation
+        return '```json\n{"success_met": true, "reason": "Rate is 2%, well below 10%"}\n```'
+
+    mock_agent.query = AsyncMock(side_effect=mock_query)
+    workflow = WorkflowNode(
+        body=[
+            GoalNode(
+                goal_id="test_goal",
+                success_criteria="Failure rate below 10%",
+                body=[
+                    TaskNode(task_id="check", goal="Check rate.", expose=["failure_rate"]),
+                ],
+            ),
+        ]
+    )
+    result = await runtime.execute(workflow)
+    assert result.variables["_goal_success_met"] is True
+    assert "2%" in result.variables["_goal_success_reason"]
+
+
+@pytest.mark.asyncio
+async def test_execute_goal_max_actions_limit(mock_agent):
+    """Test that max_actions limits tool calls within the goal body"""
+    runtime = AWLRuntime(mock_agent, limits=RuntimeLimits(max_tool_calls=100))
+    mock_agent.query = AsyncMock(return_value='```json\n{"r": "ok"}\n```')
+
+    workflow = WorkflowNode(
+        body=[
+            GoalNode(
+                goal_id="limited",
+                success_criteria="Done",
+                max_actions=2,
+                body=[
+                    TaskNode(task_id="t1", goal="Task 1.", expose=["r"]),
+                ],
+            ),
+        ]
+    )
+    r = await runtime.execute(workflow)
+    # Task should execute with max_turns=2 (from max_actions)
+    assert r.success is True
+
+
+@pytest.mark.asyncio
+async def test_execute_goal_with_conditional_body(mock_agent, runtime):
+    """Test @goal with @if inside body"""
+    call_count = 0
+
+    async def mock_query(prompt, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return '```json\n{"failure_rate": 15}\n```'
+        elif call_count == 2:
+            return "Alert created."
+        # Success evaluation
+        return '```json\n{"success_met": false, "reason": "rate still high"}\n```'
+
+    mock_agent.query = AsyncMock(side_effect=mock_query)
+    workflow = WorkflowNode(
+        body=[
+            GoalNode(
+                goal_id="test_cond",
+                success_criteria="Failure rate below 10%",
+                body=[
+                    TaskNode(task_id="check", goal="Check rate.", expose=["failure_rate"]),
+                    IfNode(
+                        expression="failure_rate > 10",
+                        then_body=[TaskNode(task_id="alert", goal="Create alert.")],
+                    ),
+                ],
+            ),
+        ]
+    )
+    await runtime.execute(workflow, variables={"failure_rate": 0})
+    # Both tasks should have executed (check + alert)
+    assert mock_agent.query.call_count == 3  # check + alert + success eval

@@ -81,6 +81,7 @@ AWL defines the following directives.
 | @else | alternate branch |
 | @loop | iterate collection |
 | @return | return workflow result |
+| @goal | autonomous goal pursuit |
 
 ---
 
@@ -492,6 +493,71 @@ Example configuration:
 max_steps = 12
 max_tool_calls = 20
 timeout = 30s
+
+---
+
+# Goals
+
+Goals enable **autonomous agent behavior** by scheduling periodic execution of an AWL body.
+
+Syntax:
+
+@goal <goal_id> [max_actions=<N>]
+  Success: <natural language criterion>
+  <body>
+@end
+
+Parameters:
+
+| Parameter | Required | Description |
+|---|---|---|
+| max_actions | no | Max tool calls per cycle (default: 5) |
+
+Scheduling is independent from the goal definition. Goals can be run:
+
+- From the CLI: `ai-assist /run goal.awl`
+- Via `schedules.json`: `{"prompt": "goals/track_failures.awl", "interval": "30m"}`
+- As a one-shot scheduled action
+
+The `Success:` field is mandatory. After each cycle, Claude evaluates whether the criterion is met. When met, the goal status is set to "completed" and scheduling stops.
+
+## Variable Persistence
+
+Variables exposed by tasks inside the goal body persist between cycles via a JSON sidecar file. This allows the goal to track state across executions.
+
+## Example
+
+@start
+
+@goal track_failures max_actions=5
+  Success: Failure rate stays below 10%
+
+  @task check_status @no-history
+  Goal: Check DCI failure rate for OCP 4.19.
+  Expose: failure_rate, failures
+  @end
+
+  @if failure_rate > 10
+    @task create_alert
+    Goal: Write a failure report about ${failures}.
+    @end
+  @end
+
+@end
+
+@end
+
+## Goal Files
+
+Goal AWL scripts live in `~/.ai-assist/goals/`. The monitor mode scans this directory and schedules active goals. State is persisted in `~/.ai-assist/state/goal_<id>.json`.
+
+## Goal Management
+
+The agent can create, list, and update goals via built-in tools:
+
+- `goal__create` -- generates a `.awl` file
+- `goal__list` -- scans the goals directory
+- `goal__update` -- changes goal status (pause, resume, cancel)
 
 ---
 
