@@ -79,7 +79,7 @@ class AWLParser:
         nodes: list[ASTNode] = []
         while True:
             line = self._current_line()
-            if line is None or line == "@end" or line == "@else":
+            if line is None or line in {"@end", "@else"}:
                 break
             if line.startswith("@task"):
                 nodes.append(self._parse_task())

@@ -159,8 +159,7 @@ class KnowledgeGraph:
         cursor = self.conn.cursor()
 
         # Entities table
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS entities (
                 id TEXT PRIMARY KEY,
                 entity_type TEXT NOT NULL,
@@ -170,32 +169,24 @@ class KnowledgeGraph:
                 tx_to TIMESTAMP,
                 data JSON NOT NULL
             )
-        """
-        )
+        """)
 
         # Indexes for temporal queries
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_entities_type
             ON entities(entity_type)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_entities_valid_time
             ON entities(valid_from, valid_to)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_entities_tx_time
             ON entities(tx_from, tx_to)
-        """
-        )
+        """)
 
         # Relationships table
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS relationships (
                 id TEXT PRIMARY KEY,
                 rel_type TEXT NOT NULL,
@@ -209,49 +200,36 @@ class KnowledgeGraph:
                 FOREIGN KEY (source_id) REFERENCES entities(id),
                 FOREIGN KEY (target_id) REFERENCES entities(id)
             )
-        """
-        )
+        """)
 
         # Indexes for relationship queries
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_relationships_type
             ON relationships(rel_type)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_relationships_source
             ON relationships(source_id)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_relationships_target
             ON relationships(target_id)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_relationships_valid_time
             ON relationships(valid_from, valid_to)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_relationships_tx_time
             ON relationships(tx_from, tx_to)
-        """
-        )
+        """)
 
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
                 entity_id TEXT PRIMARY KEY,
                 embedding float[384]
             )
-        """
-        )
+        """)
 
         self.conn.commit()
 
@@ -850,14 +828,12 @@ class KnowledgeGraph:
         cursor = self.conn.cursor()
 
         # Count entities by type
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT entity_type, COUNT(*)
             FROM entities
             WHERE tx_to IS NULL
             GROUP BY entity_type
-        """
-        )
+        """)
         entity_counts = dict(cursor.fetchall())
 
         # Total entities
@@ -865,14 +841,12 @@ class KnowledgeGraph:
         total_entities = cursor.fetchone()[0]
 
         # Count relationships by type
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT rel_type, COUNT(*)
             FROM relationships
             WHERE tx_to IS NULL
             GROUP BY rel_type
-        """
-        )
+        """)
         relationship_counts = dict(cursor.fetchall())
 
         # Total relationships
@@ -1054,15 +1028,13 @@ class KnowledgeGraph:
         Returns:
             Number of entities backfilled.
         """
-        cursor = self.conn.execute(
-            """
+        cursor = self.conn.execute("""
             SELECT e.id, e.entity_type, e.data
             FROM entities e
             LEFT JOIN vec_embeddings v ON e.id = v.entity_id
             WHERE e.tx_to IS NULL AND v.entity_id IS NULL
             AND e.entity_type != 'tool_result'
-            """
-        )
+            """)
         count = 0
         for row in cursor.fetchall():
             entity_id, entity_type, data_json = row

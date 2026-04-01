@@ -256,7 +256,7 @@ async def test_execute_mcp_prompt_calls_callback(agent):
 
     # Set up callback to collect received chunks
     received_chunks = []
-    agent.on_inner_execution = lambda chunk: received_chunks.append(chunk)
+    agent.on_inner_execution = received_chunks.append
 
     # Execute
     result = await agent.execute_mcp_prompt("dci", "rca", None)
@@ -340,7 +340,7 @@ async def test_execute_mcp_prompt_error_callback(agent):
     agent.query_streaming = mock_streaming
 
     received_chunks = []
-    agent.on_inner_execution = lambda chunk: received_chunks.append(chunk)
+    agent.on_inner_execution = received_chunks.append
 
     result = await agent.execute_mcp_prompt("dci", "rca", None)
 
@@ -386,7 +386,7 @@ async def test_execute_mcp_prompt_forwards_cancel_event(agent):
     agent.query_streaming = mock_streaming
 
     received_chunks = []
-    agent.on_inner_execution = lambda chunk: received_chunks.append(chunk)
+    agent.on_inner_execution = received_chunks.append
 
     result = await agent.execute_mcp_prompt("dci", "rca", None)
 

@@ -265,4 +265,4 @@ You can add this to a cron job for automatic cleanup:
 ## Related
 
 - [Configuration](../README.md#configuration) - General configuration options
-- [Troubleshooting](../README.md#troubleshooting) - Common issues and solutions
+- [Quick Start](../README.md#quick-start) - Getting started guide

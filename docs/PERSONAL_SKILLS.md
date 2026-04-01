@@ -499,7 +499,7 @@ Include your workflows and patterns:
 2. Write tests first
 3. Implement feature
 4. Run `npm test && npm run lint`
-5. Create PR with [template](../pr-template.md)
+5. Create PR with description
 ```
 
 ### 4. Use Examples

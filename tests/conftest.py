@@ -23,8 +23,7 @@ def setup_skill_test_fixtures():
 
     # Create SKILL.md for hello skill
     skill_md = test_skills_dir / "SKILL.md"
-    skill_md.write_text(
-        """---
+    skill_md.write_text("""---
 name: hello
 description: A test skill that greets users
 license: MIT
@@ -42,8 +41,7 @@ When greeting users, be warmly and enthusiastically welcoming.
 
 **User**: Hello!
 **Assistant**: Hello! How can I help you today?
-"""
-    )
+""")
 
     yield
 
