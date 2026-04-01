@@ -6,7 +6,6 @@ import logging
 import os
 import sys
 from datetime import datetime
-from typing import Any
 
 from .agent import AiAssistAgent
 from .awl_parser import AWLParser
@@ -20,7 +19,6 @@ from .monitors import MonitoringScheduler
 from .prompt_utils import extract_prompt_messages
 from .service import SUBCOMMANDS, install_service, remove_service, service_logs, service_status, service_systemctl
 from .state import StateManager
-from .tui import format_tool_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -197,16 +195,8 @@ async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManag
         conversation_context = saved["messages"]
         print(f"Restored {len(conversation_context)} exchange(s) from previous session")
 
-    # Hook inner execution callback for MCP prompt visibility
-    def on_inner_execution(chunk: Any) -> None:
-        if isinstance(chunk, str):
-            print(chunk, end="", flush=True)
-        elif isinstance(chunk, dict):
-            if chunk.get("type") == "tool_use":
-                display_name = format_tool_display_name(chunk["name"])
-                print(f"\n  🔧 {display_name}")
-
-    agent.on_inner_execution = on_inner_execution
+    # Use the agent's renderer for inner execution visibility
+    agent.on_inner_execution = agent.renderer.on_inner_execution
 
     while True:
         try:

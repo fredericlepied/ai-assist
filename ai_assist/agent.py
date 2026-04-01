@@ -276,8 +276,14 @@ class AiAssistAgent:
         # Track tool calls for KG storage
         self.last_tool_calls: list[dict] = []
 
+        # Output renderer for tool calls, progress, inner execution
+        from ai_assist.output import PlainRenderer
+
+        self.renderer: Any = PlainRenderer()
+
         # Callback for inner execution visibility (e.g., during execute_mcp_prompt)
-        self.on_inner_execution: Any = None
+        # Defaults to renderer.on_inner_execution, can be overridden by TUI
+        self.on_inner_execution: Any = self.renderer.on_inner_execution
 
         # Active cancel event (set by query_streaming, used by execute_mcp_prompt)
         self._cancel_event: Any = None

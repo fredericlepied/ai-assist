@@ -116,10 +116,13 @@ class AWLRuntime:
         print(f"  > task '{task.task_id}' ...", flush=True)
         try:
             callback = self._progress_callback if self._verbose else None
-            # Set on_inner_execution for nested MCP prompt/AWL visibility
+            # During AWL tasks, use renderer for inner execution (no noisy text)
             prev_inner = getattr(self._agent, "on_inner_execution", None)
-            if self._verbose:
-                self._agent.on_inner_execution = self._inner_execution_callback
+            renderer = getattr(self._agent, "renderer", None)
+            if self._verbose and renderer:
+                self._agent.on_inner_execution = renderer.on_inner_execution
+            else:
+                self._agent.on_inner_execution = None
             try:
                 response = await self._agent.query(
                     prompt, max_turns=self._limits.max_tool_calls, progress_callback=callback
@@ -247,13 +250,6 @@ class AWLRuntime:
             print(f"    [{turn}/{max_turns}] calling {tool_name}", flush=True)
         elif status == "calling_claude":
             print(f"    [{turn}/{max_turns}] thinking...", flush=True)
-
-    def _inner_execution_callback(self, chunk: Any):
-        """Print nested execution progress (MCP prompts, inner AWL scripts)."""
-        if isinstance(chunk, dict):
-            if chunk.get("type") == "tool_use":
-                print(f"      >> {chunk.get('name', '?')}", flush=True)
-        # Skip text chunks to avoid flooding output
 
     def _coerce_to_list(self, value: Any, var_name: str) -> Any:
         """Try to coerce a value to a list for @loop iteration.

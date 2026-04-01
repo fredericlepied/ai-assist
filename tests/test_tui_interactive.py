@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from ai_assist.agent import AiAssistAgent
+from ai_assist.output import PlainRenderer
 from ai_assist.state import StateManager
 from ai_assist.tui_interactive import (
     handle_clear_cache_command,
@@ -54,6 +55,12 @@ def mock_agent():
             "usable_tokens": 150000,
         }
     )
+
+    # Mock renderer
+    from ai_assist.output import PlainRenderer
+
+    agent.renderer = PlainRenderer()
+    agent.on_inner_execution = agent.renderer.on_inner_execution
 
     return agent
 
@@ -182,6 +189,8 @@ async def test_multiline_input_handling(mock_state_manager):
     agent.skills_manager.installed_skills = []
     agent.filesystem_tools = MagicMock()
     agent.filesystem_tools.confirmation_callback = None
+    agent.renderer = PlainRenderer()
+    agent.on_inner_execution = agent.renderer.on_inner_execution
 
     with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         # Simulate multi-line input then exit
@@ -236,6 +245,8 @@ async def test_conversation_tracking(mock_state_manager):
             "usable_tokens": 150000,
         }
     )
+    agent.renderer = PlainRenderer()
+    agent.on_inner_execution = agent.renderer.on_inner_execution
 
     with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
@@ -354,6 +365,8 @@ async def test_feedback_with_tool_calls(mock_state_manager):
             "usable_tokens": 150000,
         }
     )
+    agent.renderer = PlainRenderer()
+    agent.on_inner_execution = agent.renderer.on_inner_execution
 
     with patch("ai_assist.tui_interactive.PromptSession") as mock_session_class:
         mock_session = AsyncMock()
