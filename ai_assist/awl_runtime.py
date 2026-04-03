@@ -31,6 +31,12 @@ class _ReturnSignal(Exception):
         self.value = value
 
 
+class _TaskFailedError(Exception):
+    """Internal signal: top-level task failed, stop workflow."""
+
+    pass
+
+
 @dataclass
 class TaskOutcome:
     status: str
@@ -60,6 +66,7 @@ class AWLRuntime:
         self._variables: dict[str, Any] = {}
         self._expr = AWLExpressionEvaluator()
         self._steps = 0
+        self._loop_depth = 0
         self._task_outcomes: list[TaskOutcome] = []
         self._verbose = verbose
 
@@ -69,10 +76,15 @@ class AWLRuntime:
         self._task_outcomes = []
         return_value = None
 
+        if workflow.max_steps is not None:
+            self._limits.max_steps = workflow.max_steps
+
         try:
             await self._execute_body(workflow.body)
         except _ReturnSignal as ret:
             return_value = ret.value
+        except _TaskFailedError:
+            pass  # outcome already recorded; fall through to result
 
         all_succeeded = all(o.status == "success" for o in self._task_outcomes)
         return WorkflowResult(
@@ -87,9 +99,13 @@ class AWLRuntime:
             await self._execute_node(node)
 
     async def _execute_node(self, node: ASTNode):
-        self._steps += 1
-        if self._steps > self._limits.max_steps:
-            raise AWLRuntimeError(f"Exceeded max_steps ({self._limits.max_steps})")
+        # Only count LLM-calling nodes (task, goal) outside loops as steps.
+        # Loop iterations are naturally bounded by the collection size
+        # (and optionally by limit=N), so they don't need step limits.
+        if isinstance(node, TaskNode | GoalNode) and self._loop_depth == 0:
+            self._steps += 1
+            if self._steps > self._limits.max_steps:
+                raise AWLRuntimeError(f"Exceeded max_steps ({self._limits.max_steps})")
 
         if isinstance(node, TaskNode):
             await self._execute_task(node)
@@ -162,6 +178,8 @@ class AWLRuntime:
             self._task_outcomes.append(outcome)
             logger.error("AWL task '%s' failed: %s", task.task_id, e)
             print(f"    [-] failed: {e}")
+            if self._loop_depth == 0 and "continue-on-failure" not in task.hints:
+                raise _TaskFailedError(f"Task '{task.task_id}' failed: {e}") from e
 
     def _execute_set(self, node: SetNode):
         self._variables[node.variable] = self._expr.interpolate(node.value, self._variables)
@@ -196,41 +214,47 @@ class AWLRuntime:
         )
 
         collected: list[dict[str, Any]] = []
+        self._loop_depth += 1
 
-        for i, item in enumerate(items, 1):
-            item_full = str(item)
-            item_short = item_full[:100] + "..." if len(item_full) > 100 else item_full
-            print(f"  loop {node.collection} [{i}/{len(items)}]: {node.item_var} = {item_short}")
-            logger.info("AWL @loop iteration %d/%d: %s = %s", i, len(items), node.item_var, item_full)
-            self._variables[node.item_var] = item
-            outcomes_before = len(self._task_outcomes)
-            await self._execute_body(node.body)
+        try:
+            for i, item in enumerate(items, 1):
+                item_full = str(item)
+                item_short = item_full[:100] + "..." if len(item_full) > 100 else item_full
+                print(f"  loop {node.collection} [{i}/{len(items)}]: {node.item_var} = {item_short}")
+                logger.info("AWL @loop iteration %d/%d: %s = %s", i, len(items), node.item_var, item_full)
+                self._variables[node.item_var] = item
+                outcomes_before = len(self._task_outcomes)
+                await self._execute_body(node.body)
 
-            if node.collect is not None:
-                new_outcomes = self._task_outcomes[outcomes_before:]
-                all_succeeded = all(o.status == "success" for o in new_outcomes)
-                if not new_outcomes:
-                    logger.warning("AWL @loop collect: iteration %d produced no outcomes", i)
-                elif not all_succeeded:
-                    failed = [o for o in new_outcomes if o.status != "success"]
-                    logger.warning("AWL @loop collect: iteration %d had %d failed task(s), skipping", i, len(failed))
-                    print(f"    [!] iteration {i} failed, skipping collect")
-                else:
-                    iteration_exposed: dict[str, Any] = {}
-                    for outcome in new_outcomes:
-                        iteration_exposed.update(outcome.exposed)
-                    if not iteration_exposed:
-                        # Task succeeded but no vars extracted -- still include with item context
+                if node.collect is not None:
+                    new_outcomes = self._task_outcomes[outcomes_before:]
+                    all_succeeded = all(o.status == "success" for o in new_outcomes)
+                    if not new_outcomes:
+                        logger.warning("AWL @loop collect: iteration %d produced no outcomes", i)
+                    elif not all_succeeded:
+                        failed = [o for o in new_outcomes if o.status != "success"]
                         logger.warning(
-                            "AWL @loop collect: iteration %d succeeded but no exposed vars extracted, "
-                            "including with _item only",
-                            i,
+                            "AWL @loop collect: iteration %d had %d failed task(s), skipping", i, len(failed)
                         )
-                        print(f"    [!] iteration {i}: no exposed vars, including with _item")
-                        iteration_exposed = {"_item": item}
-                    if node.collect_fields:
-                        iteration_exposed = {k: v for k, v in iteration_exposed.items() if k in node.collect_fields}
-                    collected.append(iteration_exposed)
+                        print(f"    [!] iteration {i} failed, skipping collect")
+                    else:
+                        iteration_exposed: dict[str, Any] = {}
+                        for outcome in new_outcomes:
+                            iteration_exposed.update(outcome.exposed)
+                        if not iteration_exposed:
+                            # Task succeeded but no vars extracted -- still include with item context
+                            logger.warning(
+                                "AWL @loop collect: iteration %d succeeded but no exposed vars extracted, "
+                                "including with _item only",
+                                i,
+                            )
+                            print(f"    [!] iteration {i}: no exposed vars, including with _item")
+                            iteration_exposed = {"_item": item}
+                        if node.collect_fields:
+                            iteration_exposed = {k: v for k, v in iteration_exposed.items() if k in node.collect_fields}
+                        collected.append(iteration_exposed)
+        finally:
+            self._loop_depth -= 1
 
         if node.collect is not None:
             self._variables[node.collect] = collected
