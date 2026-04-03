@@ -16,6 +16,14 @@ def isolate_config_dir(tmp_path):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def preload_embedding_model():
+    """Preload the embedding model once per worker so individual tests don't pay the cost."""
+    from ai_assist.embedding import EmbeddingModel
+
+    EmbeddingModel.get()._load()
+
+
+@pytest.fixture(scope="session", autouse=True)
 def setup_skill_test_fixtures():
     """Create test skill fixtures for skills tests"""
     test_skills_dir = Path("/tmp/test-skills/hello")
