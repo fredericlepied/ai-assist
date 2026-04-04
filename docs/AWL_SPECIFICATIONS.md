@@ -131,6 +131,22 @@ Goal: Determine how the system initializes using only source code evidence.
 
 ---
 
+## @continue-on-failure
+
+By default, if a top-level task (outside a loop) fails, the workflow **stops immediately** and returns `success: false`. This prevents cascading errors from missing variables.
+
+Tasks inside loops are not affected — loop iterations that fail are skipped, and the loop continues to the next item.
+
+The `@continue-on-failure` hint overrides the default fail-fast behavior, allowing the workflow to continue even if the task fails.
+
+Example:
+
+@task optional_cleanup @continue-on-failure
+Goal: Clean up temporary files. Not critical if this fails.
+@end
+
+---
+
 # Tasks
 
 Tasks represent **objectives for the agent**.

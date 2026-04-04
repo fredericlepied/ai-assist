@@ -22,7 +22,7 @@ class ParseError(Exception):
         super().__init__(f"Line {line}: {message}")
 
 
-VALID_HINTS = {"no-history", "no-kg"}
+VALID_HINTS = {"no-history", "no-kg", "continue-on-failure"}
 
 
 class AWLParser:
@@ -34,13 +34,20 @@ class AWLParser:
 
     def parse(self) -> WorkflowNode:
         self._skip_blank()
-        self._expect("@start")
+        line = self._require_line()
+        if not line.startswith("@start"):
+            raise ParseError(self._pos + 1, f"Expected '@start', got '{line}'")
+        max_steps = None
+        max_steps_match = re.search(r"max_steps=(\d+)", line)
+        if max_steps_match:
+            max_steps = int(max_steps_match.group(1))
+        self._advance()
         body = self._parse_body()
         self._expect("@end")
         trailing = self._current_line()
         if trailing is not None:
             raise ParseError(self._pos + 1, f"Unexpected content after final @end: '{trailing}'")
-        return WorkflowNode(body=body)
+        return WorkflowNode(body=body, max_steps=max_steps)
 
     def _current_line(self) -> str | None:
         while self._pos < len(self._lines):

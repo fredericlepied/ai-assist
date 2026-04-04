@@ -553,3 +553,57 @@ async def test_execute_goal_with_conditional_body(mock_agent, runtime):
     await runtime.execute(workflow, variables={"failure_rate": 0})
     # Both tasks should have executed (check + alert)
     assert mock_agent.query.call_count == 3  # check + alert + success eval
+
+
+# ── Task failure behavior tests ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_task_failure_stops_workflow_outside_loop(mock_agent, runtime):
+    """Top-level task failure should stop the workflow; second task never runs."""
+    call_count = 0
+
+    async def mock_query(prompt, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("First task failed")
+        return '{"result": "ok"}'
+
+    mock_agent.query = AsyncMock(side_effect=mock_query)
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(task_id="t1", goal="Fail.", expose=["result"]),
+            TaskNode(task_id="t2", goal="Should not run.", expose=["result"]),
+        ],
+    )
+    result = await runtime.execute(workflow)
+    assert result.success is False
+    assert len(result.task_outcomes) == 1
+    assert result.task_outcomes[0].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_continue_on_failure_hint(mock_agent, runtime):
+    """Task with @continue-on-failure hint should not stop the workflow."""
+    call_count = 0
+
+    async def mock_query(prompt, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("First task failed")
+        return '{"result": "ok"}'
+
+    mock_agent.query = AsyncMock(side_effect=mock_query)
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(task_id="t1", hints=["continue-on-failure"], goal="Fail.", expose=["result"]),
+            TaskNode(task_id="t2", goal="Should still run.", expose=["result"]),
+        ],
+    )
+    result = await runtime.execute(workflow)
+    assert result.success is False
+    assert len(result.task_outcomes) == 2
+    assert result.task_outcomes[0].status == "failed"
+    assert result.task_outcomes[1].status == "success"
