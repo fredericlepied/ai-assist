@@ -292,11 +292,10 @@ This skill explicitly sets allowed-tools without script execution.
 
 @pytest.mark.asyncio
 async def test_timeout_enforcement(skills_manager_with_skill):
-    """Test scripts timeout after 30s"""
+    """Test scripts timeout after configured timeout"""
     config = AiAssistConfig(anthropic_api_key="test", allow_skill_script_execution=True)
-    tools = ScriptExecutionTools(skills_manager_with_skill, config)
+    tools = ScriptExecutionTools(skills_manager_with_skill, config, timeout=3)
 
-    # This test would take 60 seconds, but should timeout at 30
     result = await tools.execute_tool("execute_skill_script", {"skill_name": "test-skill", "script_name": "sleep.sh"})
 
     assert "Error" in result

@@ -21,15 +21,17 @@ class ScriptExecutionTools:
     - Resource limits (timeout, output size)
     """
 
-    def __init__(self, skills_manager, config):
+    def __init__(self, skills_manager, config, timeout: int = 30):
         """Initialize script execution tools
 
         Args:
             skills_manager: SkillsManager instance
             config: AiAssistConfig instance
+            timeout: Script execution timeout in seconds (default 30)
         """
         self.skills_manager = skills_manager
         self.enabled = config.allow_skill_script_execution
+        self.timeout = timeout
 
     def get_tool_definitions(self) -> list[dict]:
         """Return tool definitions if enabled
@@ -197,7 +199,7 @@ class ScriptExecutionTools:
                 capture_output=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=30,  # 30 second default
+                timeout=self.timeout,
                 check=False,
             )
 
