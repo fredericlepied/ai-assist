@@ -2197,8 +2197,6 @@ class AiAssistAgent:
                     "create_directory",
                     "list_directory",
                     "execute_command",
-                    "get_today_date",
-                    "get_current_time",
                 ]
 
                 script_tools = ["execute_skill_script"]

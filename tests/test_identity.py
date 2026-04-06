@@ -1,7 +1,10 @@
 """Tests for identity management"""
 
+import re
 import tempfile
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from ai_assist.identity import AssistantIdentity, CommunicationPreferences, Identity, UserIdentity, get_identity
 
@@ -274,6 +277,35 @@ def test_no_timezone_no_locale_in_prompt():
     identity = Identity(user=UserIdentity(name="Fred"))
     prompt = identity.get_system_prompt()
     assert "timezone" not in prompt.lower()
+
+
+def test_datetime_in_system_prompt():
+    """Test that current date and time are included in system prompt"""
+    identity = Identity(user=UserIdentity(name="Fred", timezone="Europe/Paris"))
+    prompt = identity.get_system_prompt()
+    assert re.search(r"Today is \w+, \d{4}-\d{2}-\d{2}", prompt)
+    assert re.search(r"current time is \d{2}:\d{2}", prompt)
+
+
+def test_datetime_without_timezone():
+    """Test that date/time is injected even when no timezone is set"""
+    identity = Identity(user=UserIdentity(name="Fred"))
+    prompt = identity.get_system_prompt()
+    assert re.search(r"Today is \w+, \d{4}-\d{2}-\d{2}", prompt)
+    assert re.search(r"current time is \d{2}:\d{2}", prompt)
+
+
+def test_datetime_uses_user_timezone():
+    """Test that date/time respects user timezone"""
+    import zoneinfo
+
+    fixed_utc = datetime(2026, 4, 6, 10, 30, 0, tzinfo=zoneinfo.ZoneInfo("UTC"))
+    with patch("ai_assist.identity.datetime") as mock_dt:
+        mock_dt.now.return_value = fixed_utc
+        identity = Identity(user=UserIdentity(name="Fred", timezone="UTC"))
+        prompt = identity.get_system_prompt()
+    assert "Today is Monday, 2026-04-06" in prompt
+    assert "current time is 10:30" in prompt
 
 
 def test_combined_enhanced_features():
