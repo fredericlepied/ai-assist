@@ -37,7 +37,6 @@ class TestQueryTrace:
             timestamp="2026-02-23T10:00:00",
             tool_calls=[{"tool_name": "today", "arguments": {}}],
             turn_count=1,
-            grounding_nudge_fired=True,
             response_text="Today is Monday.",
             total_input_tokens=500,
             total_output_tokens=100,
@@ -50,7 +49,6 @@ class TestQueryTrace:
 
         assert restored.query_text == original.query_text
         assert restored.turn_count == original.turn_count
-        assert restored.grounding_nudge_fired is True
         assert restored.tools_available_count == 15
         assert restored.duration_seconds == 2.1
 
@@ -69,7 +67,6 @@ class TestQueryTrace:
         trace = QueryTrace(query_text="test", timestamp="2026-02-23T10:00:00")
         assert trace.tool_calls == []
         assert trace.turn_count == 0
-        assert trace.grounding_nudge_fired is False
         assert trace.response_text == ""
         assert trace.total_input_tokens == 0
         assert trace.model == ""
@@ -205,7 +202,6 @@ class TestEvaluateTraces:
         assert metrics.total_queries == 0
         assert metrics.avg_citation_ratio == 0.0
         assert metrics.tool_usage_rate == 0.0
-        assert metrics.nudge_rate == 0.0
 
     def test_single_trace(self):
         """Single trace produces correct metrics"""
@@ -214,7 +210,6 @@ class TestEvaluateTraces:
             timestamp="2026-02-23T10:00:00",
             tool_calls=[{"tool_name": "search", "arguments": {}}],
             turn_count=2,
-            grounding_nudge_fired=False,
             response_text="Result (source: search). Done.",
             total_input_tokens=1000,
             total_output_tokens=200,
@@ -228,7 +223,6 @@ class TestEvaluateTraces:
         assert metrics.avg_turns == 2.0
         assert metrics.avg_total_tokens == 1200
         assert metrics.avg_duration_seconds == 3.5
-        assert metrics.nudge_rate == 0.0
 
     def test_multiple_traces(self):
         """Multiple traces produce correct averages"""
@@ -238,7 +232,6 @@ class TestEvaluateTraces:
                 timestamp="2026-02-23T10:00:00",
                 tool_calls=[{"tool_name": "t1", "arguments": {}}],
                 turn_count=2,
-                grounding_nudge_fired=True,
                 total_input_tokens=1000,
                 total_output_tokens=200,
                 duration_seconds=3.0,
@@ -248,7 +241,6 @@ class TestEvaluateTraces:
                 timestamp="2026-02-23T10:01:00",
                 tool_calls=[],
                 turn_count=1,
-                grounding_nudge_fired=False,
                 total_input_tokens=500,
                 total_output_tokens=100,
                 duration_seconds=1.0,
@@ -262,7 +254,6 @@ class TestEvaluateTraces:
         assert metrics.avg_turns == 1.5  # (2+1)/2
         assert metrics.avg_total_tokens == 900  # (1200+600)/2
         assert metrics.avg_duration_seconds == 2.0  # (3+1)/2
-        assert metrics.nudge_rate == 0.5  # 1 of 2 nudged
 
     def test_metrics_is_dataclass(self):
         """EvalMetrics is a proper dataclass"""
@@ -275,12 +266,10 @@ class TestEvaluateTraces:
             avg_turns=3.0,
             avg_total_tokens=5000,
             avg_duration_seconds=4.2,
-            nudge_rate=0.1,
             avg_duplicate_tool_calls=0.5,
             queries_with_duplicates=3,
         )
         assert metrics.total_queries == 10
-        assert metrics.nudge_rate == 0.1
         assert metrics.avg_duplicate_tool_calls == 0.5
         assert metrics.queries_with_duplicates == 3
 
@@ -329,7 +318,6 @@ class TestCaptureTrace:
         agent.last_tool_calls = [
             {"tool_name": "search_dci_jobs", "arguments": {"query": "status=failure"}, "result": "big result"}
         ]
-        agent._grounding_nudge_fired = True
         agent._turn_token_usage = [{"input_tokens": 500, "output_tokens": 100}]
 
         import time
@@ -341,7 +329,6 @@ class TestCaptureTrace:
         assert trace.query_text == "What failed?"
         assert trace.response_text == "Two jobs failed."
         assert trace.turn_count == 3
-        assert trace.grounding_nudge_fired is True
         assert trace.total_input_tokens == 500
         assert trace.total_output_tokens == 100
         assert trace.duration_seconds >= 1.5  # At least 1.5s
@@ -357,7 +344,6 @@ class TestCaptureTrace:
         agent = __import__("ai_assist.agent", fromlist=["AiAssistAgent"]).AiAssistAgent(config)
 
         agent.last_tool_calls = []
-        agent._grounding_nudge_fired = False
         agent._turn_token_usage = []
         agent._last_turn_count = 15
 

@@ -1231,7 +1231,6 @@ async def handle_eval_stats_command(console: Console):
     table.add_row("Avg turns", f"{metrics.avg_turns:.1f}")
     table.add_row("Avg total tokens", f"{metrics.avg_total_tokens:,}")
     table.add_row("Avg duration", f"{metrics.avg_duration_seconds:.1f}s")
-    table.add_row("Grounding nudge rate", f"{metrics.nudge_rate:.1%}")
     table.add_row("Avg duplicate tool calls", f"{metrics.avg_duplicate_tool_calls:.1f}")
     table.add_row("Queries with duplicates", str(metrics.queries_with_duplicates))
 

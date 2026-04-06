@@ -262,8 +262,6 @@ class AiAssistAgent:
 
         # Track whether extended context is currently active (per-query)
         self._extended_context_active = False
-        # Track whether grounding nudge fired during current query
-        self._grounding_nudge_fired = False
 
         self.sessions: dict[str, ClientSession] = {}
         self.available_tools: list[dict] = []
@@ -879,7 +877,6 @@ class AiAssistAgent:
             timestamp=datetime.fromtimestamp(start_time).isoformat(),
             tool_calls=tool_calls,
             turn_count=turn_count,
-            grounding_nudge_fired=self._grounding_nudge_fired,
             response_text=response_text,
             token_usage=token_usage,
             total_input_tokens=total_input,
@@ -1280,12 +1277,10 @@ class AiAssistAgent:
         self._recent_tool_calls_for_loop: list[str] = []
         no_progress_count = 0  # Count turns with no text response
         max_no_progress = 10  # Allow 10 turns without text before declaring stuck
-        self._grounding_nudge_fired = False
         self._wrapup_nudge_fired = False
         self._tool_result_cache: dict[str, str] = {}  # Per-query dedup cache
         self._duplicate_tool_call_count = 0
         self._last_turn_count = 0
-        any_tools_called = False  # Track if any tools were called during the entire query
 
         if progress_callback:
             progress_callback("thinking", 0, max_turns, None)
@@ -1476,24 +1471,6 @@ class AiAssistAgent:
 
                 # Check if we got actual content
                 if final_text.strip():
-                    # Grounding nudge: if tools are available but none were called
-                    # during the entire query, ask the model to verify (once only).
-                    # Skip if tools were already used — the answer is already grounded.
-                    if api_tools and not any_tools_called and not self._grounding_nudge_fired:
-                        self._grounding_nudge_fired = True
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": (
-                                    "Before I accept this answer: you have tools available but did not call any. "
-                                    "Please verify any specific factual claims (dates, statuses, counts, versions) "
-                                    "by calling the appropriate tool. If your answer is based purely on general "
-                                    "knowledge and no tool is relevant, confirm that explicitly."
-                                ),
-                            }
-                        )
-                        continue
-
                     if progress_callback:
                         progress_callback("complete", turn + 1, max_turns, None)
                     self._last_turn_count = turn + 1
@@ -1509,7 +1486,6 @@ class AiAssistAgent:
 
             # We have tool results - reset no-progress counter (agent is actively working)
             no_progress_count = 0
-            any_tools_called = True
 
             messages.append({"role": "user", "content": tool_results})
 
@@ -1603,7 +1579,6 @@ class AiAssistAgent:
             self._tool_result_cache = {}
             self._duplicate_tool_call_count = 0
             self._last_turn_count = 0
-            any_tools_called = False
 
             # Build tools with progressive disclosure (truncated descriptions)
             api_tools = self._build_api_tools()
@@ -1611,7 +1586,6 @@ class AiAssistAgent:
             # Reset token tracking and extended context for this query
             self._turn_token_usage = []
             self._extended_context_active = False
-            self._grounding_nudge_fired = False
             self._wrapup_nudge_fired = False
 
             # Store messages for introspection tools to access
@@ -1762,31 +1736,8 @@ class AiAssistAgent:
                             }
                             return
 
-                        # If no tool calls, check for grounding nudge
+                        # If no tool calls, we're done
                         if not tool_results:
-                            # Grounding nudge: if tools are available but none were called
-                            # during the entire query, ask the model to verify (once only).
-                            # Skip if tools were already used — the answer is already grounded.
-                            if (
-                                api_tools
-                                and not any_tools_called
-                                and not self._grounding_nudge_fired
-                                and current_text.strip()
-                            ):
-                                self._grounding_nudge_fired = True
-                                messages.append(
-                                    {
-                                        "role": "user",
-                                        "content": (
-                                            "Before I accept this answer: you have tools available but did not call any. "
-                                            "Please verify any specific factual claims (dates, statuses, counts, versions) "
-                                            "by calling the appropriate tool. If your answer is based purely on general "
-                                            "knowledge and no tool is relevant, confirm that explicitly."
-                                        ),
-                                    }
-                                )
-                                continue
-
                             if progress_callback:
                                 progress_callback("complete", turn + 1, max_turns, None)
 
@@ -1795,7 +1746,6 @@ class AiAssistAgent:
                             return
 
                         # Continue with tool results
-                        any_tools_called = True
                         messages.append({"role": "user", "content": tool_results})
 
                         # Wrap-up nudge: when approaching the turn limit, ask the agent to synthesize
