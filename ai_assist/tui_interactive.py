@@ -600,6 +600,14 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         if live_was_running:
             live.stop()
 
+        # Also stop the renderer's spinner if it's running
+        _renderer = getattr(agent, "renderer", None)
+        renderer_was_running = _renderer is not None and getattr(_renderer, "_live_running", False)
+        if renderer_was_running:
+            assert _renderer is not None
+            _renderer._live.stop()
+            _renderer._live_running = False
+
         watcher = agent._active_escape_watcher
         watcher_was_running = watcher is not None and watcher._thread is not None
         if watcher_was_running:
@@ -687,6 +695,8 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
             watcher.start()
         if live_was_running:
             live.start()
+        if renderer_was_running and _renderer is not None:
+            _renderer._restart_spinner()
 
         return choice
 
