@@ -224,9 +224,24 @@ def test_custom_personality_override():
     )
     prompt = identity.get_system_prompt()
 
-    # Should use custom personality
+    # Should use custom personality and include nickname
     assert "technical advisor" in prompt
     assert "CI/CD and distributed systems" in prompt
+    assert "Nexus" in prompt
+
+
+def test_custom_personality_includes_nickname():
+    """Test that nickname is included even when personality doesn't mention it"""
+    identity = Identity(
+        user=UserIdentity(name="Alice"),
+        assistant=AssistantIdentity(
+            nickname="Bolt",
+            personality="You are a personal fitness coach.",
+        ),
+    )
+    prompt = identity.get_system_prompt()
+    assert "Bolt" in prompt
+    assert "fitness coach" in prompt
 
 
 def test_verbosity_preferences():

@@ -99,7 +99,7 @@ class Identity(BaseModel):
         """
         # If custom personality is provided, use it as the base
         if self.assistant.personality:
-            prompt = self.assistant.personality
+            prompt = f"Your name is {self.assistant.nickname}. {self.assistant.personality}"
         else:
             # Generate default personality
             parts = [f"You are {self.assistant.nickname}, an AI assistant"]
