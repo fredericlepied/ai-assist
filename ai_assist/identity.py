@@ -1,6 +1,8 @@
 """Identity management for ai-assist"""
 
 import logging
+import zoneinfo
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -97,7 +99,7 @@ class Identity(BaseModel):
         """
         # If custom personality is provided, use it as the base
         if self.assistant.personality:
-            prompt = self.assistant.personality
+            prompt = f"Your name is {self.assistant.nickname}. {self.assistant.personality}"
         else:
             # Generate default personality
             parts = [f"You are {self.assistant.nickname}, an AI assistant"]
@@ -147,6 +149,16 @@ class Identity(BaseModel):
             prompt += " Use emojis occasionally to enhance communication."
         elif self.preferences.emoji_usage == "liberal":
             prompt += " Feel free to use emojis to make communication more engaging."
+
+        # Add current date and time
+        now = datetime.now()
+        if self.user.timezone:
+            try:
+                tz = zoneinfo.ZoneInfo(self.user.timezone)
+                now = datetime.now(tz)
+            except Exception:
+                pass
+        prompt += f"\n\nToday is {now.strftime('%A')}, {now.strftime('%Y-%m-%d')}. The current time is {now.strftime('%H:%M')}."
 
         return prompt
 

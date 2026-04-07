@@ -583,7 +583,6 @@ def eval_stats_command():
     print(f"  Avg turns:              {metrics.avg_turns:.1f}")
     print(f"  Avg total tokens:       {metrics.avg_total_tokens:,}")
     print(f"  Avg duration:           {metrics.avg_duration_seconds:.1f}s")
-    print(f"  Grounding nudge rate:   {metrics.nudge_rate:.1%}")
     print(f"  Avg duplicate calls:    {metrics.avg_duplicate_tool_calls:.1f}")
     print(f"  Queries with duplicates:{metrics.queries_with_duplicates}")
     print()

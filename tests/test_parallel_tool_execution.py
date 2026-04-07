@@ -100,8 +100,8 @@ class TestExecuteToolsConcurrently:
         agent._tool_result_cache = {}
 
         blocks = [
-            FakeBlock("tool_use", name="internal__get_today_date", block_id="1", block_input={}),
-            FakeBlock("tool_use", name="internal__get_today_date", block_id="2", block_input={}),
+            FakeBlock("tool_use", name="internal__list_directory", block_id="1", block_input={}),
+            FakeBlock("tool_use", name="internal__list_directory", block_id="2", block_input={}),
         ]
         results, _ = await agent._execute_tools_concurrently(blocks)
 

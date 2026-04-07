@@ -39,7 +39,6 @@ class QueryTrace:
     # Execution
     tool_calls: list[dict] = field(default_factory=list)  # [{tool_name, arguments}] - no results
     turn_count: int = 0
-    grounding_nudge_fired: bool = False
 
     # Output
     response_text: str = ""
@@ -129,9 +128,6 @@ class EvalMetrics:
     avg_total_tokens: int
     avg_duration_seconds: float
 
-    # Grounding nudge
-    nudge_rate: float
-
     # Dedup
     avg_duplicate_tool_calls: float
     queries_with_duplicates: int
@@ -175,7 +171,6 @@ class QueryEvaluator:
                 avg_turns=0.0,
                 avg_total_tokens=0,
                 avg_duration_seconds=0.0,
-                nudge_rate=0.0,
                 avg_duplicate_tool_calls=0.0,
                 queries_with_duplicates=0,
             )
@@ -185,7 +180,6 @@ class QueryEvaluator:
         citation_ratios = [cls.citation_ratio(t.response_text) for t in traces]
         queries_with_tools = sum(1 for t in traces if t.tool_calls)
         total_tool_calls = sum(len(t.tool_calls) for t in traces)
-        nudge_count = sum(1 for t in traces if t.grounding_nudge_fired)
         total_duplicates = sum(t.duplicate_tool_calls for t in traces)
         queries_with_dupes = sum(1 for t in traces if t.duplicate_tool_calls > 0)
 
@@ -198,7 +192,6 @@ class QueryEvaluator:
             avg_turns=sum(t.turn_count for t in traces) / n,
             avg_total_tokens=int(sum(t.total_input_tokens + t.total_output_tokens for t in traces) / n),
             avg_duration_seconds=round(sum(t.duration_seconds for t in traces) / n, 1),
-            nudge_rate=nudge_count / n,
             avg_duplicate_tool_calls=total_duplicates / n,
             queries_with_duplicates=queries_with_dupes,
         )
