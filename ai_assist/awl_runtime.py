@@ -18,6 +18,7 @@ from .awl_ast import (
     WorkflowNode,
 )
 from .awl_expressions import AWLExpressionEvaluator
+from .filesystem_tools import extract_command_names
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,42 @@ class RuntimeLimits:
     timeout: float = 300.0
 
 
+def _extract_commands_from_workflow(workflow: WorkflowNode) -> set[str]:
+    """Extract command names from commands in AWL task/goal text.
+
+    Looks for commands in two forms:
+    - Backtick-enclosed: `git fetch origin`
+    - Indented command lines: lines starting with whitespace followed by a command
+
+    Commands explicitly written in AWL scripts are trusted and should be
+    auto-authorized during workflow execution.
+    """
+    commands: set[str] = set()
+
+    def _extract_from_text(text: str):
+        for match in re.findall(r"`([^`]+)`", text):
+            commands.update(extract_command_names(match))
+
+    def _visit(nodes: list[ASTNode]):
+        for node in nodes:
+            if isinstance(node, TaskNode):
+                _extract_from_text(node.goal)
+                if node.context:
+                    _extract_from_text(node.context)
+            elif isinstance(node, GoalNode):
+                _extract_from_text(node.success_criteria)
+                _visit(node.body)
+            elif isinstance(node, IfNode):
+                _visit(node.then_body)
+                _visit(node.else_body)
+            elif isinstance(node, LoopNode):
+                _visit(node.body)
+
+    _visit(workflow.body)
+    # Filter out markers like <shell-expansion>
+    return {cmd for cmd in commands if not cmd.startswith("<")}
+
+
 class AWLRuntime:
     def __init__(self, agent: Any, limits: RuntimeLimits | None = None, verbose: bool = False):
         self._agent = agent
@@ -79,12 +116,34 @@ class AWLRuntime:
         if workflow.max_steps is not None:
             self._limits.max_steps = workflow.max_steps
 
+        # Auto-authorize commands explicitly mentioned in the AWL script
+        awl_commands = _extract_commands_from_workflow(workflow)
+        added_commands: list[str] = []
+        fs_tools = getattr(self._agent, "filesystem_tools", None)
+        if fs_tools and awl_commands:
+            for cmd in awl_commands:
+                if cmd not in fs_tools.allowed_commands:
+                    fs_tools.allowed_commands.append(cmd)
+                    added_commands.append(cmd)
+            fs_tools.awl_authorized_commands |= awl_commands
+            if added_commands:
+                logger.info("AWL auto-authorized commands: %s", added_commands)
+
         try:
             await self._execute_body(workflow.body)
         except _ReturnSignal as ret:
             return_value = ret.value
         except _TaskFailedError:
             pass  # outcome already recorded; fall through to result
+        finally:
+            # Remove temporarily added commands
+            if fs_tools and added_commands:
+                for cmd in added_commands:
+                    try:
+                        fs_tools.allowed_commands.remove(cmd)
+                    except ValueError:
+                        pass
+                fs_tools.awl_authorized_commands -= awl_commands
 
         all_succeeded = all(o.status == "success" for o in self._task_outcomes)
         return WorkflowResult(
@@ -140,9 +199,8 @@ class AWLRuntime:
             else:
                 self._agent.on_inner_execution = None
             try:
-                response = await self._agent.query(
-                    prompt, max_turns=self._limits.max_tool_calls, progress_callback=callback
-                )
+                max_turns = task.max_tool_calls or self._limits.max_tool_calls
+                response = await self._agent.query(prompt, max_turns=max_turns, progress_callback=callback)
             finally:
                 self._agent.on_inner_execution = prev_inner
             exposed = self._extract_exposed(response, task.expose)

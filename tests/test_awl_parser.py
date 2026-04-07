@@ -435,6 +435,23 @@ def test_valid_hints_accepted():
     assert task.hints == ["no-history", "no-kg"]
 
 
+def test_parse_task_with_max_tool_calls():
+    script = "@start\n@task t1 @no-kg max_tool_calls=200\nGoal: Do heavy analysis.\n@end\n@end"
+    result = AWLParser(script).parse()
+    task = result.body[0]
+    assert isinstance(task, TaskNode)
+    assert task.max_tool_calls == 200
+    assert task.hints == ["no-kg"]
+
+
+def test_parse_task_without_max_tool_calls():
+    script = "@start\n@task t1\nGoal: Simple task.\n@end\n@end"
+    result = AWLParser(script).parse()
+    task = result.body[0]
+    assert isinstance(task, TaskNode)
+    assert task.max_tool_calls is None
+
+
 def test_parse_fail_basic():
     script = "@start\n@fail Jira is down\n@end\n"
     result = AWLParser(script).parse()

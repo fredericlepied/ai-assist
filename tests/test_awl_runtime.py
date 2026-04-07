@@ -14,7 +14,7 @@ from ai_assist.awl_ast import (
     TaskNode,
     WorkflowNode,
 )
-from ai_assist.awl_runtime import AWLRuntime, AWLRuntimeError, RuntimeLimits
+from ai_assist.awl_runtime import AWLRuntime, AWLRuntimeError, RuntimeLimits, _extract_commands_from_workflow
 
 
 @pytest.fixture
@@ -607,3 +607,164 @@ async def test_continue_on_failure_hint(mock_agent, runtime):
     assert len(result.task_outcomes) == 2
     assert result.task_outcomes[0].status == "failed"
     assert result.task_outcomes[1].status == "success"
+
+
+# ── AWL command auto-authorization tests ─────────────────────────
+
+
+def test_extract_commands_from_workflow_backticks():
+    """Commands in backticks in task goals should be extracted."""
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(
+                task_id="t1",
+                goal="Run `git -C /tmp/repo fetch origin master` to get latest.",
+            ),
+            TaskNode(
+                task_id="t2",
+                goal='Run `python3 -c "print(1)"` to compute.',
+            ),
+        ]
+    )
+    commands = _extract_commands_from_workflow(workflow)
+    assert "git" in commands
+    assert "python3" in commands
+
+
+def test_extract_commands_from_workflow_full_path():
+    """Full path commands in backticks should extract the basename."""
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(
+                task_id="t1",
+                goal="Run `/home/user/scripts/process.sh arg1`.",
+            ),
+        ]
+    )
+    commands = _extract_commands_from_workflow(workflow)
+    assert "process.sh" in commands
+
+
+def test_extract_commands_from_nested_structures():
+    """Commands in loops and conditionals should be extracted."""
+    workflow = WorkflowNode(
+        body=[
+            LoopNode(
+                collection="items",
+                item_var="item",
+                body=[
+                    IfNode(
+                        expression="item",
+                        then_body=[
+                            TaskNode(task_id="t1", goal="Run `gh pr create`."),
+                        ],
+                    ),
+                ],
+            ),
+        ]
+    )
+    commands = _extract_commands_from_workflow(workflow)
+    assert "gh" in commands
+
+
+def test_extract_commands_from_context():
+    """Commands in task context should also be extracted."""
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(
+                task_id="t1",
+                goal="Do something.",
+                context="Use `make build` to compile.",
+            ),
+        ]
+    )
+    commands = _extract_commands_from_workflow(workflow)
+    assert "make" in commands
+
+
+def test_extract_commands_empty_workflow():
+    """Empty workflow should return no commands."""
+    workflow = WorkflowNode(body=[])
+    commands = _extract_commands_from_workflow(workflow)
+    assert commands == set()
+
+
+@pytest.mark.asyncio
+async def test_task_max_tool_calls_override(mock_agent):
+    """Task with max_tool_calls should override the default limit."""
+    mock_agent.query.return_value = '{"result": "ok"}'
+
+    runtime = AWLRuntime(mock_agent, limits=RuntimeLimits(max_tool_calls=100))
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(task_id="t1", goal="Heavy task.", max_tool_calls=200, expose=["result"]),
+        ]
+    )
+    await runtime.execute(workflow)
+    # Check that query was called with max_turns=200
+    assert (
+        mock_agent.query.call_args[1].get(
+            "max_turns", mock_agent.query.call_args[0][1] if len(mock_agent.query.call_args[0]) > 1 else None
+        )
+        == 200
+    )
+
+
+@pytest.mark.asyncio
+async def test_task_default_tool_calls(mock_agent):
+    """Task without max_tool_calls should use the runtime default."""
+    mock_agent.query.return_value = '{"result": "ok"}'
+
+    runtime = AWLRuntime(mock_agent, limits=RuntimeLimits(max_tool_calls=100))
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(task_id="t1", goal="Normal task.", expose=["result"]),
+        ]
+    )
+    await runtime.execute(workflow)
+    _, kwargs = mock_agent.query.call_args
+    assert kwargs.get("max_turns") == 100
+
+
+@pytest.mark.asyncio
+async def test_awl_auto_authorizes_commands(mock_agent):
+    """AWL runtime should temporarily add script commands to allowed list."""
+    # Set up filesystem_tools mock
+    fs_tools = MagicMock()
+    fs_tools.allowed_commands = ["grep", "find"]
+    fs_tools.awl_authorized_commands = set()
+    mock_agent.filesystem_tools = fs_tools
+    mock_agent.query.return_value = '{"result": "ok"}'
+
+    runtime = AWLRuntime(mock_agent)
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(task_id="t1", goal="Run `python3 -c 'print(1)'`.", expose=["result"]),
+        ]
+    )
+    await runtime.execute(workflow)
+
+    # After execution, temporarily added commands should be cleaned up
+    assert "python3" not in fs_tools.allowed_commands
+    assert len(fs_tools.awl_authorized_commands) == 0
+
+
+@pytest.mark.asyncio
+async def test_awl_auto_authorize_cleanup_on_failure(mock_agent):
+    """Cleanup should happen even if the workflow fails."""
+    fs_tools = MagicMock()
+    fs_tools.allowed_commands = ["grep"]
+    fs_tools.awl_authorized_commands = set()
+    mock_agent.filesystem_tools = fs_tools
+    mock_agent.query.side_effect = Exception("fail")
+
+    runtime = AWLRuntime(mock_agent)
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(task_id="t1", goal="Run `custom_tool arg`."),
+        ]
+    )
+    await runtime.execute(workflow)
+
+    assert "custom_tool" not in fs_tools.allowed_commands
+    assert len(fs_tools.awl_authorized_commands) == 0

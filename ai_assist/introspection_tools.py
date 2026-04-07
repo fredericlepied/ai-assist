@@ -320,7 +320,7 @@ Every script starts with @start and ends with @end:
 
 ## Directives
 
-  @task <id> [hints]     — agent task block
+  @task <id> [hints] [max_tool_calls=N] — agent task block
   Goal: <text>           — what to achieve (required)
   Context: <text>        — additional context (optional)
   Constraints: <text>    — limitations (optional)
@@ -344,10 +344,24 @@ Every script starts with @start and ends with @end:
   @fail <message>        — abort the workflow immediately with an error message
                            (combine with @if to abort conditionally)
 
+## Shell Commands in Tasks
+
+When a task requires running a specific shell command, always enclose it in backticks:
+
+  Goal: Fetch latest changes using `git -C /path/to/repo fetch origin master`.
+
+Commands in backticks are auto-authorized by the runtime during workflow execution.
+Commands without backticks will prompt for user confirmation each time.
+
 ## Task Hints (placed after task id)
 
-  @no-history    agent ignores prior conversation history
-  @no-kg         agent does not consult the knowledge graph
+  @no-history          agent ignores prior conversation history
+  @no-kg               agent does not consult the knowledge graph
+  @continue-on-failure workflow continues even if this task fails
+
+## Task Parameters (placed after task id and hints)
+
+  max_tool_calls=N     override the default tool call budget (100) for this task
 
 ## Variables
 
