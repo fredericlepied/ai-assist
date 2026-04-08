@@ -85,7 +85,7 @@ class MonitoringScheduler:
 
             return runners
         except Exception as e:
-            logger.error("Error loading monitors from %s: %s", self.schedule_file, e)
+            logger.exception("Error loading monitors from %s: %s", self.schedule_file, e)
             return []
 
     def _load_user_tasks(self) -> list[TaskRunner]:
@@ -110,7 +110,7 @@ class MonitoringScheduler:
 
             return runners
         except Exception as e:
-            logger.error("Error loading tasks from %s: %s", self.schedule_file, e)
+            logger.exception("Error loading tasks from %s: %s", self.schedule_file, e)
             return []
 
     async def reload_schedules(self):
@@ -170,7 +170,7 @@ class MonitoringScheduler:
             print("=" * 60 + "\n")
 
         except Exception as e:
-            logger.error("Failed to reload schedules: %s; keeping existing schedules", e)
+            logger.exception("Failed to reload schedules: %s; keeping existing schedules", e)
             print("=" * 60 + "\n")
 
     async def start(self):
@@ -386,7 +386,7 @@ class MonitoringScheduler:
             try:
                 await runner.run()
             except Exception as e:
-                logger.error("Error running missed task %s at startup: %s", runner.task_def.name, e)
+                logger.exception("Error running missed task %s at startup: %s", runner.task_def.name, e)
 
     async def _handle_wake_event(self, wall_jump_seconds: float, now: datetime | None = None) -> None:
         """Handle system wake event after suspension.

@@ -1,13 +1,17 @@
 """Execute user-defined tasks and track state"""
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from .agent import AiAssistAgent
 from .conditions import ActionExecutor, ConditionEvaluator
+from .notification_dispatcher import Notification, NotificationDispatcher
 from .state import StateManager
 from .tasks import TaskDefinition
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -102,6 +106,7 @@ class TaskRunner:
             return result
 
         except Exception as e:
+            logger.exception("Task '%s' failed", self.task_def.name)
             error_msg = str(e)
             self.state_manager.update_monitor(
                 self.state_key,
@@ -126,7 +131,10 @@ class TaskRunner:
                 task_name=self.task_def.name, success=False, output=error_msg, timestamp=timestamp, metadata={}
             )
 
-            # Dispatch notification if configured
+            # Always notify on failure so errors are never silently swallowed
+            await self._send_failure_notification(result)
+
+            # Also dispatch to configured channels if notify is enabled
             if self.task_def.notify:
                 await self._send_notification(result)
 
@@ -171,10 +179,28 @@ class TaskRunner:
         """Get historical execution results"""
         return self.state_manager.get_history(self.state_key, limit=limit)
 
+    async def _send_failure_notification(self, result: TaskResult):
+        """Always send a notification on task failure, regardless of notify setting.
+
+        Uses desktop and console channels so failures are never silently swallowed.
+        """
+        error_summary = result.output[:500] if result.output else "Unknown error"
+        notification = Notification(
+            id=f"task-error-{self.task_def.name}-{int(result.timestamp.timestamp() * 1000)}",
+            action_id=self.task_def.name,
+            title=f"Task failed: {self.task_def.name}",
+            message=error_summary,
+            level="error",
+            timestamp=result.timestamp,
+            channels=["desktop", "console"],
+            delivered={},
+        )
+
+        dispatcher = NotificationDispatcher()
+        await dispatcher.dispatch(notification)
+
     async def _send_notification(self, result: TaskResult):
         """Send notification for task completion"""
-        from ai_assist.notification_dispatcher import Notification, NotificationDispatcher
-
         # Determine notification level
         level = "success" if result.success else "error"
 

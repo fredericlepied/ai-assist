@@ -55,8 +55,10 @@ async def test_suspension_triggers_missed_run(mock_agent, temp_schedule_file):
         monitor = scheduler.monitors[0]
 
         # Mock the monitor's run method to track execution
-        original_run = monitor.run
-        monitor.run = AsyncMock(wraps=original_run)
+        monitor.run = AsyncMock(return_value=MagicMock(success=True, output="ok"))
+        # Mock user tasks too (kg-synthesis is auto-injected)
+        for task in scheduler.user_tasks:
+            task.run = AsyncMock(return_value=MagicMock(success=True, output="ok"))
         scheduler._wait_for_network = AsyncMock(return_value=True)
 
         # Simulate wake event: Friday 10 AM, suspended for 2 hours
@@ -374,6 +376,8 @@ async def test_suspend_recovery_waits_for_network(mock_agent, temp_schedule_file
 
         monitor = scheduler.monitors[0]
         monitor.run = AsyncMock(return_value=MagicMock(success=True, output="ok"))
+        for task in scheduler.user_tasks:
+            task.run = AsyncMock(return_value=MagicMock(success=True, output="ok"))
 
         now = datetime(2026, 2, 6, 10, 0, 0)
         await scheduler._handle_wake_event(2 * 3600, now=now)
@@ -396,6 +400,8 @@ async def test_suspend_recovery_skips_tasks_when_network_unavailable(mock_agent,
 
         monitor = scheduler.monitors[0]
         monitor.run = AsyncMock()
+        for task in scheduler.user_tasks:
+            task.run = AsyncMock()
 
         now = datetime(2026, 2, 6, 10, 0, 0)
         await scheduler._handle_wake_event(2 * 3600, now=now)
@@ -430,6 +436,8 @@ async def test_suspend_recovery_continues_after_task_exception(mock_agent, temp_
             assert len(scheduler.monitors) == 2
             scheduler.monitors[0].run = AsyncMock(side_effect=RuntimeError("task_a failed"))
             scheduler.monitors[1].run = AsyncMock(return_value=MagicMock(success=True, output="ok"))
+            for task in scheduler.user_tasks:
+                task.run = AsyncMock(return_value=MagicMock(success=True, output="ok"))
             scheduler._wait_for_network = AsyncMock(return_value=True)
 
             # Friday 10:00, suspended for 2h — both tasks missed at 09:00

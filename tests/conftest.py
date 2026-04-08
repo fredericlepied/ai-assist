@@ -1,7 +1,7 @@
 """Pytest configuration and fixtures"""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -13,6 +13,17 @@ def isolate_config_dir(tmp_path):
     test_config_dir.mkdir(exist_ok=True)
     with patch("ai_assist.config.get_config_dir", return_value=test_config_dir):
         yield test_config_dir
+
+
+@pytest.fixture(autouse=True)
+def no_desktop_notifications():
+    """Prevent tests from sending real desktop notifications via notify-send."""
+    with patch(
+        "ai_assist.notification_channels.DesktopNotificationChannel.send",
+        new_callable=AsyncMock,
+        return_value=True,
+    ):
+        yield
 
 
 @pytest.fixture(scope="session", autouse=True)
