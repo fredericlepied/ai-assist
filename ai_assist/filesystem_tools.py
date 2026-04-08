@@ -307,6 +307,7 @@ class FilesystemTools:
         self.confirm_tools = config.confirm_tools
         self.confirmation_callback: Callable[[str], Awaitable[bool]] | None = None
         self.path_confirmation_callback: Callable[[str], Awaitable[bool]] | None = None
+        self.awl_authorized_commands: set[str] = set()
 
     def _load_user_allowed_commands(self):
         """Load user-added allowed commands from persistent file."""
@@ -861,12 +862,17 @@ class FilesystemTools:
         non_allowed = [name for name in cmd_names if name not in SHELL_BUILTINS and name not in self.allowed_commands]
         was_auto_allowed = len(non_allowed) == 0
 
+        # Commands authorized by AWL scripts are treated as user-confirmed
+        # (skip extra confirmation for python -c, etc.)
+        awl_confirmed = any(name in self.awl_authorized_commands for name in cmd_names)
+
         error = await self._check_command_allowed(cmd_names, command)
         if error:
             return error
 
         # Validate command arguments (paths for cd/find, parameters for python)
-        arg_error = await self._validate_command_arguments(command, was_auto_allowed)
+        # AWL-authorized commands skip the extra inline-code confirmation
+        arg_error = await self._validate_command_arguments(command, was_auto_allowed and not awl_confirmed)
         if arg_error:
             return arg_error
 

@@ -21,7 +21,7 @@
     ;; Directives - match @word at start of line (with optional indentation)
     ("^[ \t]*\\(@start\\|@end\\|@task\\|@set\\|@if\\|@else\\|@loop\\|@return\\|@goal\\|@fail\\)\\b" 1 font-lock-keyword-face t)
     ;; Hints - match @hint after whitespace
-    ("[ \t]\\(@no-history\\|@no-kg\\)\\b" 1 font-lock-constant-face t)
+    ("[ \t]\\(@no-history\\|@no-kg\\|@continue-on-failure\\)\\b" 1 font-lock-constant-face t)
     ;; Task/Goal ID after @task or @goal
     ("@task[ \t]+\\(\\w+\\)" 1 font-lock-function-name-face t)
     ("@goal[ \t]+\\(\\w+\\)" 1 font-lock-function-name-face t)
@@ -32,7 +32,7 @@
     ;; @set variable name
     ("@set[ \t]+\\(\\w+\\)" 1 font-lock-variable-name-face t)
     ;; Loop options: limit=N collect=var(fields)
-    ("\\b\\(limit\\|collect\\|max_actions\\)=" 1 font-lock-builtin-face)
+    ("\\b\\(limit\\|collect\\|max_actions\\|max_tool_calls\\|max_steps\\)=" 1 font-lock-builtin-face)
     ;; Loop variable: as <var>
     ("\\bas[ \t]+\\(\\w+\\)" 1 font-lock-variable-name-face)
     ;; Built-in functions

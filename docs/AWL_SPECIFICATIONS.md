@@ -131,6 +131,21 @@ Goal: Determine how the system initializes using only source code evidence.
 
 ---
 
+## max_tool_calls=N
+
+Overrides the default tool call budget (100) for a single task.
+
+Use this when a task may need many tool calls, such as running a detailed analysis before creating a ticket.
+
+Example:
+
+@task analyze_and_report max_tool_calls=200
+Goal: Run a root cause analysis on the job and create a Jira ticket.
+Expose: jira_ticket
+@end
+
+---
+
 ## @continue-on-failure
 
 By default, if a top-level task (outside a loop) fails, the workflow **stops immediately** and returns `success: false`. This prevents cascading errors from missing variables.
@@ -153,7 +168,7 @@ Tasks represent **objectives for the agent**.
 
 Syntax:
 
-@task <task_id> [hints...]
+@task <task_id> [hints...] [max_tool_calls=N]
 ...
 @end
 
@@ -179,6 +194,18 @@ Inside a task block the following fields may appear.
 | Constraints | optional limitations |
 | Success | completion criteria |
 | Expose | variables produced |
+
+## Shell Commands in Tasks
+
+When a task requires the agent to run a specific shell command, enclose it in backticks:
+
+@task update_repo
+Goal: Fetch the latest changes using `git -C /path/to/repo fetch origin master`.
+@end
+
+Commands in backticks are **auto-authorized** by the runtime: they are temporarily added to the allowed commands list for the duration of the workflow, so the user is not prompted for confirmation each time.
+
+Commands written without backticks will require manual authorization in interactive mode.
 
 ---
 

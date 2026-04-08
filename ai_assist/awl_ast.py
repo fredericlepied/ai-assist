@@ -13,6 +13,7 @@ class TaskNode:
     constraints: str | None = None
     success: str | None = None
     expose: list[str] = field(default_factory=list)
+    max_tool_calls: int | None = None
 
 
 @dataclass

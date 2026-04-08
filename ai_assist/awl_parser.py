@@ -126,6 +126,12 @@ class AWLParser:
                     f"Unknown hint '@{hint}'. Valid hints: {', '.join('@' + h for h in sorted(VALID_HINTS))}",
                 )
 
+        # Extract max_tool_calls=N (optional)
+        max_tool_calls = None
+        max_tc_match = re.search(r"max_tool_calls=(\d+)", line)
+        if max_tc_match:
+            max_tool_calls = int(max_tc_match.group(1))
+
         self._advance()
 
         goal = None
@@ -169,6 +175,7 @@ class AWLParser:
             constraints=constraints,
             success=success,
             expose=expose,
+            max_tool_calls=max_tool_calls,
         )
 
     def _parse_field_value(self, prefix: str, all_fields: set[str]) -> str:
