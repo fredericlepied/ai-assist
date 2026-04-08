@@ -173,6 +173,29 @@ class MonitoringScheduler:
             logger.exception("Failed to reload schedules: %s; keeping existing schedules", e)
             print("=" * 60 + "\n")
 
+    async def _wait_for_mcp_servers(self, timeout_seconds: float = 30.0) -> bool:
+        """Wait until all configured MCP servers are connected.
+
+        Returns True if all servers connected, False if timed out.
+        """
+        expected = set(self.agent.config.mcp_servers.keys())
+        if not expected:
+            return True
+
+        deadline = asyncio.get_event_loop().time() + timeout_seconds
+        while asyncio.get_event_loop().time() < deadline:
+            connected = set(self.agent.sessions.keys())
+            if expected <= connected:
+                print(f"All {len(expected)} MCP servers connected")
+                return True
+            await asyncio.sleep(1.0)
+
+        connected = set(self.agent.sessions.keys())
+        missing = expected - connected
+        logger.warning("Timed out waiting for MCP servers: %s not connected", ", ".join(missing))
+        print(f"⚠️  {len(missing)} MCP server(s) not connected after {timeout_seconds}s: {', '.join(missing)}")
+        return len(connected) > 0  # Proceed if at least some are connected
+
     async def start(self):
         """Start the monitoring loop"""
         self.running = True
@@ -182,6 +205,9 @@ class MonitoringScheduler:
         removed = self.state_manager.cleanup_expired_cache()
         if removed:
             print(f"Cleaned up {removed} expired cache entries")
+
+        # Wait for MCP servers before running any tasks
+        await self._wait_for_mcp_servers()
 
         await self._run_missed_tasks_at_startup()
 

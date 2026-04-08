@@ -19,6 +19,9 @@ def mock_agent():
     """Create a mock agent for testing."""
     agent = MagicMock(spec=AiAssistAgent)
     agent.send_message = AsyncMock(return_value="Mock response")
+    agent.config = MagicMock()
+    agent.config.mcp_servers = {}
+    agent.sessions = {}
     return agent
 
 
