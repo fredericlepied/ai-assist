@@ -196,6 +196,36 @@ Example:
                 "_server": "internal",
                 "_original_name": "trigger_synthesis",
             },
+            {
+                "name": "internal__run_kg_synthesis",
+                "description": """Run knowledge graph synthesis now.
+
+Processes recent conversations stored in the knowledge graph and extracts
+learnings (preferences, lessons, context). Also discovers connections
+between entities. This is the same synthesis that runs as a nightly task.
+
+Use this when the user explicitly asks to run KG synthesis manually.
+
+Args:
+    hours: How many hours back to look for conversations (default: 24)
+
+Returns:
+    Summary of synthesis results
+""",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "hours": {
+                            "type": "integer",
+                            "description": "How many hours back to look for conversations",
+                            "default": 24,
+                        }
+                    },
+                    "required": [],
+                },
+                "_server": "internal",
+                "_original_name": "run_kg_synthesis",
+            },
         ]
 
     async def execute_tool(self, tool_name: str, arguments: dict) -> str:
@@ -218,6 +248,8 @@ Example:
             )
         elif tool_name == "trigger_synthesis":
             return await self.trigger_synthesis(focus=arguments.get("focus", "all"))
+        elif tool_name == "run_kg_synthesis":
+            return await self.run_kg_synthesis(hours=arguments.get("hours", 24))
         else:
             raise ValueError(f"Unknown knowledge tool: {tool_name}")
 
@@ -298,3 +330,10 @@ Example:
         self.agent._pending_synthesis = {"focus": focus, "triggered_at": datetime.now()}
 
         return f"✓ Synthesis scheduled (focus: {focus}). Will run after this response completes."
+
+    async def run_kg_synthesis(self, hours: int = 24) -> str:
+        """Run KG synthesis immediately, processing conversations stored in the knowledge graph"""
+        if self.agent is None:
+            return "Error: Agent not set on KnowledgeTools"
+
+        return await self.agent._run_synthesis_from_kg(hours=hours)

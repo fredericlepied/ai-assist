@@ -2152,7 +2152,7 @@ class AiAssistAgent:
                 script_tools = ["execute_skill_script"]
                 think_tools = ["think"]
                 schedule_action_tools = ["schedule_action"]
-                knowledge_tools = ["save_knowledge", "search_knowledge", "trigger_synthesis"]
+                knowledge_tools = ["save_knowledge", "search_knowledge", "trigger_synthesis", "run_kg_synthesis"]
                 kg_query_tool_names = [
                     "kg_recent_changes",
                     "kg_late_discoveries",
@@ -2423,7 +2423,7 @@ class AiAssistAgent:
         except json.JSONDecodeError as e:
             logger.warning("Synthesis failed - invalid JSON: %s", e)
         except Exception as e:
-            logger.warning("Synthesis failed: %s", e)
+            logger.exception("Synthesis failed: %s", e)
 
     async def _run_synthesis_from_kg(self, hours: int = 24) -> str:
         """Review recent conversation entities from KG and extract knowledge,
@@ -2462,6 +2462,7 @@ class AiAssistAgent:
             return "No new conversations or reports to synthesize"
 
         synthesis_summary = ""
+        synthesis_succeeded = True
 
         if not conversations:
             print("💭 No new conversations to synthesize")
@@ -2483,7 +2484,7 @@ class AiAssistAgent:
             try:
                 response = self.anthropic.messages.create(
                     model=self.config.model,
-                    max_tokens=2000,
+                    max_tokens=4096,
                     messages=[{"role": "user", "content": synthesis_prompt}],
                 )
 
@@ -2527,27 +2528,30 @@ class AiAssistAgent:
             except json.JSONDecodeError as e:
                 logger.warning("Synthesis failed - invalid JSON: %s", e)
                 synthesis_summary = f"Synthesis failed - invalid JSON: {e}"
+                synthesis_succeeded = False
             except Exception as e:
-                logger.warning("Synthesis failed: %s", e)
+                logger.exception("Synthesis failed: %s", e)
                 synthesis_summary = f"Synthesis failed: {e}"
+                synthesis_succeeded = False
 
         # Run connection discovery before recording marker
         try:
             connection_result = await self._run_connection_discovery(previous_reports_processed)
         except Exception as e:
             connection_result = f"Connection discovery error: {e}"
-            logger.warning("%s", connection_result)
+            logger.exception("%s", connection_result)
 
-        # Record synthesis marker after connection discovery so it captures
-        # which reports were processed and won't re-process them next time
-        self.knowledge_graph.insert_entity(
-            entity_type="synthesis_marker",
-            data={
-                "synthesized_conversations": len(conversations),
-                "reports_processed": reports_processed,
-            },
-            valid_from=now,
-        )
+        # Only record synthesis marker if synthesis succeeded, so failed
+        # conversations will be retried on the next run
+        if synthesis_succeeded:
+            self.knowledge_graph.insert_entity(
+                entity_type="synthesis_marker",
+                data={
+                    "synthesized_conversations": len(conversations),
+                    "reports_processed": reports_processed,
+                },
+                valid_from=now,
+            )
 
         return f"{synthesis_summary}; {connection_result}"
 
@@ -2746,7 +2750,7 @@ class AiAssistAgent:
             logger.warning("Connection discovery failed - invalid JSON: %s", e)
             return f"Connection discovery failed - invalid JSON: {e}"
         except Exception as e:
-            logger.warning("Connection discovery failed: %s", e)
+            logger.exception("Connection discovery failed: %s", e)
             return f"Connection discovery failed: {e}"
 
     async def check_and_run_synthesis(self, conversation_memory: "ConversationMemory"):

@@ -58,8 +58,10 @@ async def test_task_runner_failure(mock_agent, state_manager, sample_task):
     """Test task execution with error"""
     mock_agent.query.side_effect = Exception("API Error")
 
-    runner = TaskRunner(sample_task, mock_agent, state_manager)
-    result = await runner.run()
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_cls:
+        mock_cls.return_value.dispatch = AsyncMock()
+        runner = TaskRunner(sample_task, mock_agent, state_manager)
+        result = await runner.run()
 
     assert result.success is False
     assert result.task_name == "Test Task"
@@ -203,8 +205,10 @@ async def test_run_mcp_prompt_invalid_server(mock_agent, state_manager):
 
     mock_agent.execute_mcp_prompt = AsyncMock(side_effect=ValueError("MCP server 'invalid' not connected"))
 
-    runner = TaskRunner(task, mock_agent, state_manager)
-    result = await runner.run()
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_cls:
+        mock_cls.return_value.dispatch = AsyncMock()
+        runner = TaskRunner(task, mock_agent, state_manager)
+        result = await runner.run()
 
     assert result.success is False
     assert "MCP server 'invalid' not connected" in result.output
@@ -219,8 +223,10 @@ async def test_run_mcp_prompt_invalid_arguments(mock_agent, state_manager):
 
     mock_agent.execute_mcp_prompt = AsyncMock(side_effect=ValueError("Required argument 'days' missing"))
 
-    runner = TaskRunner(task, mock_agent, state_manager)
-    result = await runner.run()
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_cls:
+        mock_cls.return_value.dispatch = AsyncMock()
+        runner = TaskRunner(task, mock_agent, state_manager)
+        result = await runner.run()
 
     assert result.success is False
     assert "Required argument 'days' missing" in result.output
@@ -256,7 +262,7 @@ async def test_notification_truncates_at_500_chars(mock_agent, state_manager):
 
     mock_agent.query.return_value = long_output
 
-    with patch("ai_assist.notification_dispatcher.NotificationDispatcher") as mock_dispatcher_class:
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_dispatcher_class:
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch = AsyncMock(return_value={"console": True})
         mock_dispatcher_class.return_value = mock_dispatcher
@@ -265,6 +271,51 @@ async def test_notification_truncates_at_500_chars(mock_agent, state_manager):
         await runner.run()
 
         # Notification should be truncated to 500 chars
+        notification = mock_dispatcher.dispatch.call_args[0][0]
+        assert len(notification.message) == 500
+
+
+@pytest.mark.asyncio
+async def test_failure_always_notifies(mock_agent, state_manager):
+    """Task failures should always send a desktop+console notification, even without notify=True"""
+    task_def = TaskDefinition(name="failing-task", interval="5m", prompt="test", notify=False)
+
+    mock_agent.query.side_effect = Exception("Connection timeout")
+
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_dispatcher_class:
+        mock_dispatcher = MagicMock()
+        mock_dispatcher.dispatch = AsyncMock(return_value={"desktop": True, "console": True})
+        mock_dispatcher_class.return_value = mock_dispatcher
+
+        runner = TaskRunner(task_def, mock_agent, state_manager)
+        result = await runner.run()
+
+        assert result.success is False
+        # Should have dispatched a failure notification even though notify=False
+        mock_dispatcher.dispatch.assert_called_once()
+        notification = mock_dispatcher.dispatch.call_args[0][0]
+        assert notification.level == "error"
+        assert "failing-task" in notification.title
+        assert "Connection timeout" in notification.message
+        assert "desktop" in notification.channels
+        assert "console" in notification.channels
+
+
+@pytest.mark.asyncio
+async def test_failure_notification_truncates_long_errors(mock_agent, state_manager):
+    """Failure notification should truncate long error messages at 500 chars"""
+    task_def = TaskDefinition(name="long-error-task", interval="5m", prompt="test")
+
+    mock_agent.query.side_effect = Exception("E" * 1000)
+
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_dispatcher_class:
+        mock_dispatcher = MagicMock()
+        mock_dispatcher.dispatch = AsyncMock(return_value={"desktop": True, "console": True})
+        mock_dispatcher_class.return_value = mock_dispatcher
+
+        runner = TaskRunner(task_def, mock_agent, state_manager)
+        await runner.run()
+
         notification = mock_dispatcher.dispatch.call_args[0][0]
         assert len(notification.message) == 500
 

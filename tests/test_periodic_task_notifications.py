@@ -27,7 +27,7 @@ async def test_task_with_notify_sends_notification(tmp_path):
     mock_state = MagicMock()
 
     # Patch NotificationDispatcher to verify it's called
-    with patch("ai_assist.notification_dispatcher.NotificationDispatcher") as mock_dispatcher_class:
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_dispatcher_class:
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch = AsyncMock(return_value={"console": True, "file": True})
         mock_dispatcher_class.return_value = mock_dispatcher
@@ -66,7 +66,7 @@ async def test_task_without_notify_no_notification(tmp_path):
 
     mock_state = MagicMock()
 
-    with patch("ai_assist.notification_dispatcher.NotificationDispatcher") as mock_dispatcher_class:
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_dispatcher_class:
         runner = TaskRunner(task_def, mock_agent, mock_state)
         result = await runner.run()
 
@@ -94,7 +94,7 @@ async def test_task_failure_sends_error_notification(tmp_path):
 
     mock_state = MagicMock()
 
-    with patch("ai_assist.notification_dispatcher.NotificationDispatcher") as mock_dispatcher_class:
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_dispatcher_class:
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch = AsyncMock(return_value={"console": True})
         mock_dispatcher_class.return_value = mock_dispatcher
@@ -106,11 +106,16 @@ async def test_task_failure_sends_error_notification(tmp_path):
         assert result.success is False
         assert "Task failed" in result.output
 
-        # Verify error notification was sent
-        mock_dispatcher.dispatch.assert_called_once()
-        notification = mock_dispatcher.dispatch.call_args[0][0]
-        assert notification.level == "error"
-        assert notification.title == "Task: failing-task"
+        # Verify error notifications were sent (failure notification + configured notification)
+        assert mock_dispatcher.dispatch.call_count == 2
+        # First call: automatic failure notification
+        failure_notification = mock_dispatcher.dispatch.call_args_list[0][0][0]
+        assert failure_notification.level == "error"
+        assert failure_notification.title == "Task failed: failing-task"
+        # Second call: configured notification
+        configured_notification = mock_dispatcher.dispatch.call_args_list[1][0][0]
+        assert configured_notification.level == "error"
+        assert configured_notification.title == "Task: failing-task"
 
 
 @pytest.mark.asyncio
@@ -130,7 +135,7 @@ async def test_monitor_with_notify_sends_notification(tmp_path):
 
     mock_state = MagicMock()
 
-    with patch("ai_assist.notification_dispatcher.NotificationDispatcher") as mock_dispatcher_class:
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_dispatcher_class:
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch = AsyncMock(return_value={"desktop": True, "file": True})
         mock_dispatcher_class.return_value = mock_dispatcher
@@ -167,7 +172,7 @@ async def test_notification_truncates_long_output(tmp_path):
 
     mock_state = MagicMock()
 
-    with patch("ai_assist.notification_dispatcher.NotificationDispatcher") as mock_dispatcher_class:
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_dispatcher_class:
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch = AsyncMock(return_value={"console": True})
         mock_dispatcher_class.return_value = mock_dispatcher
@@ -197,7 +202,7 @@ async def test_default_notification_channels(tmp_path):
 
     mock_state = MagicMock()
 
-    with patch("ai_assist.notification_dispatcher.NotificationDispatcher") as mock_dispatcher_class:
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_dispatcher_class:
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch = AsyncMock(return_value={"console": True})
         mock_dispatcher_class.return_value = mock_dispatcher

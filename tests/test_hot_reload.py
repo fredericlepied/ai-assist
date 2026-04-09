@@ -24,6 +24,8 @@ def mock_agent():
     """Create mock agent"""
     agent = MagicMock()
     agent.query = AsyncMock(return_value="Test result")
+    agent.config.mcp_servers = {}
+    agent.sessions = {}
     return agent
 
 
