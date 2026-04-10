@@ -359,6 +359,22 @@ if not config.anthropic_api_key:
     sys.exit(1)
 ```
 
+**Logging Exceptions**
+
+Always use `logger.exception()` in `except` blocks — never `logger.debug()` or
+`logger.warning()` with `%s, e`. `logger.exception()` captures the full
+traceback, which is essential for debugging.
+
+```python
+# Good
+except Exception:
+    logger.exception("AWL @notify dispatch failed")
+
+# Bad — loses the traceback
+except Exception as e:
+    logger.debug("AWL @notify dispatch failed: %s", e)
+```
+
 #### Async/Await Patterns
 
 ```python

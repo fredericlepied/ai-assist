@@ -82,6 +82,15 @@ class AWLExpressionEvaluator:
 
         return self._resolve_value(expression, variables)
 
+    @staticmethod
+    def _strip_quotes(val: Any) -> Any:
+        """Strip surrounding quotes from string values produced by agents."""
+        if isinstance(val, str):
+            stripped = val.strip()
+            if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in ("'", '"'):
+                return stripped[1:-1]
+        return val
+
     def _resolve_value(self, expr: str, variables: dict[str, Any]) -> Any:
         expr = expr.strip()
 
@@ -119,7 +128,7 @@ class AWLExpressionEvaluator:
                 return val.get(parts[1])
             return None
 
-        return variables.get(expr)
+        return self._strip_quotes(variables.get(expr))
 
     # Valid token: variable, len(var), var[N], var.prop, or numeric literal
     _TOKEN_RE = re.compile(r"^(len\(\w+\)|\w+\[\d+\]|\w+\.\w+|\w+|\d+(\.\d+)?)$")

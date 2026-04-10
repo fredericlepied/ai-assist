@@ -1,5 +1,6 @@
 """AWL runtime engine - executes AWL ASTs via agent reasoning"""
 
+import asyncio
 import json
 import logging
 import re
@@ -12,9 +13,12 @@ from .awl_ast import (
     GoalNode,
     IfNode,
     LoopNode,
+    NotifyNode,
     ReturnNode,
     SetNode,
     TaskNode,
+    WaitNode,
+    WhileNode,
     WorkflowNode,
 )
 from .awl_expressions import AWLExpressionEvaluator
@@ -90,6 +94,8 @@ def _extract_commands_from_workflow(workflow: WorkflowNode) -> set[str]:
                 _visit(node.else_body)
             elif isinstance(node, LoopNode):
                 _visit(node.body)
+            elif isinstance(node, WhileNode):
+                _visit(node.body)
 
     _visit(workflow.body)
     # Filter out markers like <shell-expansion>
@@ -140,6 +146,11 @@ def _compute_input_variables(workflow: WorkflowNode) -> set[str]:
                 _collect_from_expr(node.expression)
             elif isinstance(node, GoalNode):
                 _walk(node.body)
+            elif isinstance(node, WhileNode):
+                _collect_from_expr(node.expression)
+                _walk(node.body)
+            elif isinstance(node, NotifyNode):
+                _collect_from_text(node.message)
 
     _walk(workflow.body)
     return used - defined
@@ -212,6 +223,11 @@ def validate_workflow_variables(workflow: WorkflowNode, initial_variables: set[s
                 _check_expr(node.expression, "@return")
             elif isinstance(node, GoalNode):
                 _walk(node.body)
+            elif isinstance(node, WhileNode):
+                _check_expr(node.expression, "@while")
+                _walk(node.body)
+            elif isinstance(node, NotifyNode):
+                _check_used(node.message, "@notify")
 
     _walk(workflow.body)
     return warnings
@@ -305,6 +321,12 @@ class AWLRuntime:
             self._execute_return(node)
         elif isinstance(node, GoalNode):
             await self._execute_goal(node)
+        elif isinstance(node, WaitNode):
+            await self._execute_wait(node)
+        elif isinstance(node, WhileNode):
+            await self._execute_while(node)
+        elif isinstance(node, NotifyNode):
+            await self._execute_notify(node)
         elif isinstance(node, FailNode):
             raise AWLRuntimeError(node.message)
 
@@ -354,7 +376,11 @@ class AWLRuntime:
                     if len(val_str) > 200:
                         val_str = val_str[:200] + "..."
                     print(f"    [+] {key} = {val_str}")
-                logger.info("AWL task '%s' succeeded, exposed: %s", task.task_id, list(exposed.keys()))
+                logger.info(
+                    "AWL task '%s' succeeded, exposed: %s",
+                    task.task_id,
+                    {k: repr(v)[:100] for k, v in exposed.items()},
+                )
             else:
                 print("    [+] success")
                 logger.info("AWL task '%s' succeeded (no exposed vars)", task.task_id)
@@ -474,6 +500,73 @@ class AWLRuntime:
                     len(collected),
                     len(items),
                 )
+
+    async def _execute_wait(self, node: WaitNode):
+        if node.duration_seconds >= 3600:
+            label = f"{node.duration_seconds // 3600}h"
+        elif node.duration_seconds >= 60:
+            label = f"{node.duration_seconds // 60}m"
+        else:
+            label = f"{node.duration_seconds}s"
+        logger.info("AWL @wait %s (%d seconds)", label, node.duration_seconds)
+        print(f"  > waiting {label} ...", flush=True)
+        await asyncio.sleep(node.duration_seconds)
+
+    async def _execute_while(self, node: WhileNode):
+        self._check_undefined_variables(node.expression, "@while")
+        iteration = 0
+        self._loop_depth += 1
+        try:
+            while iteration < node.max_iterations:
+                value = self._expr.evaluate(node.expression, self._variables)
+                truthy = self._expr.is_truthy(value)
+                if not truthy:
+                    break
+                iteration += 1
+                logger.info(
+                    "AWL @while iteration %d/%d: '%s' = %s",
+                    iteration,
+                    node.max_iterations,
+                    node.expression,
+                    value,
+                )
+                print(
+                    f"  while [{iteration}/{node.max_iterations}]: {node.expression} = {value}",
+                    flush=True,
+                )
+                await self._execute_body(node.body)
+        finally:
+            self._loop_depth -= 1
+
+        if iteration >= node.max_iterations:
+            logger.warning("AWL @while reached max_iterations (%d)", node.max_iterations)
+            print(f"  [!] @while reached max_iterations ({node.max_iterations})")
+
+        logger.info("AWL @while exited after %d iteration(s)", iteration)
+
+    async def _execute_notify(self, node: NotifyNode):
+        message = self._expr.interpolate(node.message, self._variables)
+        self._check_unresolved_interpolations("notify", message)
+        logger.info("AWL @notify: %s", message)
+        print(f"  [*] {message}", flush=True)
+
+        # Send via notification dispatcher (desktop)
+        from datetime import datetime
+
+        from .notification_dispatcher import Notification, NotificationDispatcher
+
+        dispatcher = NotificationDispatcher()
+        notification = Notification(
+            id=f"awl-notify-{datetime.now().timestamp()}",
+            action_id="awl-workflow",
+            title="AWL Notification",
+            message=message,
+            level="info",
+            timestamp=datetime.now(),
+            channels=["desktop"],
+        )
+        result = await dispatcher.dispatch(notification)
+        logger.info("AWL @notify dispatch result: %s", result)
 
     def _progress_callback(self, status: str, turn: int, max_turns: int, tool_name: str | None):
         """Print agent progress during task execution (verbose mode)."""

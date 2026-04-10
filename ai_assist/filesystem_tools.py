@@ -420,7 +420,10 @@ class FilesystemTools:
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Absolute path to the file to read"},
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file to read (~ is expanded automatically)",
+                        },
                         "line_start": {
                             "type": "integer",
                             "description": "Starting line number (1-indexed). If specified, reads from this line.",
@@ -448,7 +451,10 @@ class FilesystemTools:
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Absolute path to the file to search"},
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file to search (~ is expanded automatically)",
+                        },
                         "pattern": {"type": "string", "description": "Regex pattern to search for"},
                         "max_results": {
                             "type": "integer",
@@ -475,7 +481,10 @@ class FilesystemTools:
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Absolute path to the directory to create"}
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the directory to create (~ is expanded automatically)",
+                        }
                     },
                     "required": ["path"],
                 },
@@ -488,7 +497,10 @@ class FilesystemTools:
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Absolute path to the directory to list"},
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the directory to list (~ is expanded automatically)",
+                        },
                         "pattern": {
                             "type": "string",
                             "description": "Optional glob pattern to filter results (e.g., '*.log')",

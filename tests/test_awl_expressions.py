@@ -220,6 +220,31 @@ class TestExtractVariables:
         assert evaluator.extract_variables("5 > 3") == set()
 
 
+class TestStripQuotes:
+    """Test that agent-produced quoted values are handled correctly"""
+
+    def test_single_quoted_number(self, evaluator):
+        result = evaluator.evaluate("count > 0", {"count": "'5'"})
+        assert result is True
+
+    def test_single_quoted_zero(self, evaluator):
+        result = evaluator.evaluate("count > 0", {"count": "'0'"})
+        assert result is False
+
+    def test_double_quoted_number(self, evaluator):
+        result = evaluator.evaluate("count > 0", {"count": '"5"'})
+        assert result is True
+
+    def test_unquoted_string_number(self, evaluator):
+        result = evaluator.evaluate("count > 0", {"count": "5"})
+        assert result is True
+
+    def test_plain_string_not_stripped(self, evaluator):
+        """Non-quoted strings should not be altered."""
+        result = evaluator.evaluate("status", {"status": "running"})
+        assert result == "running"
+
+
 class TestJsonStringHandling:
     """Test that JSON strings are parsed for len() and loop operations"""
 

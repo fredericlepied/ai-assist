@@ -409,11 +409,104 @@ Expose: handler_summary
 
 ---
 
+# Conditional Loop
+
+`@while` repeats its body while an expression is truthy.
+
+Syntax:
+
+@while <expression> [max_iterations=N]
+...
+@end
+
+The optional `max_iterations=N` parameter limits the number of iterations (default: 100)
+as a safety guard against infinite loops.
+
+Example:
+
+@while running_count > 0 max_iterations=24
+
+@task check_status @no-history @no-kg
+Goal: Count running DCI jobs. Do NOT fetch details.
+Expose: running_count
+@end
+
+@end
+
+Tasks inside `@while` do **not** count against the workflow's `max_steps` limit,
+since iteration count is already bounded by `max_iterations`.
+
+---
+
+# Wait
+
+`@wait` pauses execution for a specified duration.
+
+Syntax:
+
+@wait <N>s|m|h
+
+Examples:
+
+@wait 30s
+@wait 5m
+@wait 1h
+
+Useful for rate-limiting API calls or spacing out polling iterations.
+
+---
+
+# Notify
+
+`@notify` emits a user-facing message with variable interpolation.
+No agent call is made — this is a pure runtime operation.
+
+Syntax:
+
+@notify <message>
+
+Example:
+
+@notify ${running_count} jobs still running
+@notify All daily DCI jobs have completed
+
+---
+
 # Return
 
 Workflows can return a result.
 
 @return handlers
+
+---
+
+# Polling Example
+
+This workflow polls for running DCI jobs, notifies progress, and exits when done:
+
+@start
+
+@task check_jobs @no-history @no-kg
+Goal: Search for daily DCI jobs still running. Count them.
+Expose: running_count
+@end
+
+@while running_count > 0 max_iterations=24
+
+@notify ${running_count} DCI jobs still running
+
+@wait 1h
+
+@task recheck_jobs @no-history @no-kg @continue-on-failure
+Goal: Search for daily DCI jobs still running. Count them.
+Expose: running_count
+@end
+
+@end
+
+@notify All daily DCI jobs have completed
+
+@end
 
 ---
 

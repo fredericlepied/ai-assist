@@ -19,7 +19,7 @@
     ("^[ \t]*\\(#.*\\)" 1 font-lock-comment-face t)
     ("\\( #.*\\)" 1 font-lock-comment-face t)
     ;; Directives - match @word at start of line (with optional indentation)
-    ("^[ \t]*\\(@start\\|@end\\|@task\\|@set\\|@if\\|@else\\|@loop\\|@return\\|@goal\\|@fail\\)\\b" 1 font-lock-keyword-face t)
+    ("^[ \t]*\\(@start\\|@end\\|@task\\|@set\\|@if\\|@else\\|@loop\\|@return\\|@goal\\|@fail\\|@wait\\|@while\\|@notify\\)\\b" 1 font-lock-keyword-face t)
     ;; Hints - match @hint after whitespace
     ("[ \t]\\(@no-history\\|@no-kg\\|@continue-on-failure\\)\\b" 1 font-lock-constant-face t)
     ;; Task/Goal ID after @task or @goal
