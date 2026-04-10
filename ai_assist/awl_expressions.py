@@ -152,6 +152,59 @@ class AWLExpressionEvaluator:
 
         self._validate_token(expression)
 
+    def extract_variables(self, expression: str) -> set[str]:
+        """Extract variable names referenced in an expression."""
+        expression = expression.strip()
+        variables: set[str] = set()
+
+        if expression.startswith("not "):
+            return self.extract_variables(expression[4:].strip())
+
+        for op in [">=", "<=", "!=", "==", ">", "<"]:
+            if op in expression:
+                left, right = expression.split(op, 1)
+                variables |= self._extract_token_variable(left.strip())
+                variables |= self._extract_token_variable(right.strip())
+                return variables
+
+        variables |= self._extract_token_variable(expression)
+        return variables
+
+    def _extract_token_variable(self, token: str) -> set[str]:
+        """Extract the variable name from a single token."""
+        token = token.strip()
+
+        # len(var)
+        len_match = re.match(r"len\((\w+)\)", token)
+        if len_match:
+            return {len_match.group(1)}
+
+        # Numeric literal — not a variable
+        try:
+            int(token)
+            return set()
+        except ValueError:
+            pass
+        try:
+            float(token)
+            return set()
+        except ValueError:
+            pass
+
+        # var[N] or var.prop
+        index_match = re.match(r"(\w+)\[\d+\]", token)
+        if index_match:
+            return {index_match.group(1)}
+
+        if "." in token:
+            return {token.split(".", 1)[0]}
+
+        # Plain variable name
+        if re.match(r"^\w+$", token):
+            return {token}
+
+        return set()
+
     def interpolate(self, text: str, variables: dict[str, Any]) -> str:
         def replacer(match: re.Match) -> str:
             expr = match.group(1)

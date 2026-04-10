@@ -240,6 +240,31 @@ ai-assist /run workflow.awl target="HTTP server" days=7
 
 Injected variables are available from the first node, just like `@set` variables.
 
+## Variable Validation
+
+AWL performs static analysis before execution to detect variables that are used
+before they are defined.  This catches common mistakes such as:
+
+- Typos in variable names (e.g., `@if failure_count > 0` when only `failed_jobs` was exposed)
+- Referencing a `collect` variable inside the loop that produces it (the `collect` variable is only available **after** the loop)
+- Using `${var}` in a task goal when no prior task exposed that variable
+
+Validation warnings are reported in three places:
+
+1. **`inspect_awl_script`** — included as `variable_warnings` in the result
+2. **`execute_awl_script`** — blocks execution and returns an error
+3. **Runtime** — printed to the console before execution starts
+
+### Scoping rules
+
+| Source | Available where |
+|---|---|
+| `@set` | All subsequent nodes |
+| `Expose:` | All subsequent nodes |
+| `@loop ... as item` | Inside the loop body |
+| `collect=var` | **After** the loop (not inside the body) |
+| Initial variables | Everywhere |
+
 ---
 
 # Failure Handling
@@ -364,6 +389,10 @@ This produces:
 ]
 
 Failed iterations are skipped and do not appear in the collected list.
+
+**Important:** The `collect` variable is only available **after** the loop completes.
+Referencing it inside the loop body (e.g., `${summaries}` in a task goal) will
+trigger a validation error, because the variable has not been populated yet.
 
 ## Basic Loop
 

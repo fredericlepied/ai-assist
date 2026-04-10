@@ -6,7 +6,7 @@ enabling intelligent decisions about when to use cached data vs fresh API calls.
 
 import json
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from .agent import AiAssistAgent
@@ -1106,18 +1106,22 @@ Do NOT compact if you still need the old tool results for your current task.
         except Exception as e:
             return json.dumps({"error": f"Error reading script: {e}"})
 
-        input_vars = sorted(self._awl_input_variables(workflow))
-        return json.dumps(
-            {
-                "script": path_obj.name,
-                "input_variables": input_vars,
-                "next_step": (
-                    "Resolve all input_variables from context (identity, user message), "
-                    "then call introspection__execute_awl_script with them as 'variables'."
-                ),
-            },
-            indent=2,
-        )
+        from .awl_runtime import _compute_input_variables, validate_workflow_variables
+
+        input_var_set = _compute_input_variables(workflow)
+        input_vars = sorted(input_var_set)
+        var_warnings = validate_workflow_variables(workflow, input_var_set)
+        result: dict[str, Any] = {
+            "script": path_obj.name,
+            "input_variables": input_vars,
+            "next_step": (
+                "Resolve all input_variables from context (identity, user message), "
+                "then call introspection__execute_awl_script with them as 'variables'."
+            ),
+        }
+        if var_warnings:
+            result["variable_warnings"] = var_warnings
+        return json.dumps(result, indent=2)
 
     @staticmethod
     def _awl_input_variables(workflow) -> set[str]:
@@ -1168,20 +1172,25 @@ Do NOT compact if you still need the old tool results for your current task.
         return {v for v in required if v not in variables}
 
     def _validate_awl_script(self, arguments: dict) -> str:
-        """Parse an AWL script and report syntax errors"""
+        """Parse an AWL script and report syntax and variable errors"""
         from .awl_parser import AWLParser, ParseError
+        from .awl_runtime import _compute_input_variables, validate_workflow_variables
 
         awl_code = arguments.get("awl_code", "")
         if not awl_code.strip():
             return "Error: awl_code is required"
 
         try:
-            AWLParser(awl_code).parse()
-            return "Valid AWL script."
+            workflow = AWLParser(awl_code).parse()
         except ParseError as e:
             return f"Parse Error: {e}"
         except Exception as e:
             return f"Error: {e}"
+
+        warnings = validate_workflow_variables(workflow, _compute_input_variables(workflow))
+        if warnings:
+            return "AWL script parsed OK but has variable warnings:\n" + "\n".join(f"  - {w}" for w in warnings)
+        return "Valid AWL script."
 
     async def _execute_awl_script(self, arguments: dict) -> str:
         """Execute an AWL script with optional variable injection"""
@@ -1214,22 +1223,30 @@ Do NOT compact if you still need the old tool results for your current task.
         except Exception as e:
             return f"Error reading script: {e}"
 
-        # Validate that all required input variables are provided
+        # Validate input variables and variable scoping
+        from .awl_runtime import validate_workflow_variables
+
         missing = self._get_missing_awl_variables(workflow, variables)
-        if missing:
-            return json.dumps(
-                {
-                    "error": "Missing required input variables",
-                    "missing": sorted(missing),
-                    "provided": sorted(variables.keys()),
-                    "next_step": (
-                        "Call introspection__inspect_awl_script to see all required variables, "
-                        "resolve them from context (identity, user message), "
-                        "then retry introspection__execute_awl_script with all variables provided."
-                    ),
-                },
-                indent=2,
-            )
+        var_warnings = validate_workflow_variables(workflow, set(variables.keys()) if variables else None)
+        if missing or var_warnings:
+            error: dict[str, Any] = {}
+            if missing:
+                error["error"] = "Missing required input variables"
+                error["missing"] = sorted(missing)
+                error["provided"] = sorted(variables.keys())
+                error["next_step"] = (
+                    "Call introspection__inspect_awl_script to see all required variables, "
+                    "resolve them from context (identity, user message), "
+                    "then retry introspection__execute_awl_script with all variables provided."
+                )
+            elif var_warnings:
+                error["error"] = "AWL script has variable errors"
+                error["warnings"] = var_warnings
+                error["action"] = (
+                    "Report these variable errors to the user. "
+                    "The script needs to be fixed before it can run correctly."
+                )
+            return json.dumps(error, indent=2)
 
         try:
             runtime = AWLRuntime(self.agent)

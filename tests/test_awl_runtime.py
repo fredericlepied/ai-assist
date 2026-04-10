@@ -14,7 +14,14 @@ from ai_assist.awl_ast import (
     TaskNode,
     WorkflowNode,
 )
-from ai_assist.awl_runtime import AWLRuntime, AWLRuntimeError, RuntimeLimits, _extract_commands_from_workflow
+from ai_assist.awl_runtime import (
+    AWLRuntime,
+    AWLRuntimeError,
+    RuntimeLimits,
+    _compute_input_variables,
+    _extract_commands_from_workflow,
+    validate_workflow_variables,
+)
 
 
 @pytest.fixture
@@ -304,8 +311,8 @@ async def test_no_kg_hint(mock_agent, runtime):
 
 
 @pytest.mark.asyncio
-async def test_if_with_none_comparison_no_crash(mock_agent, runtime):
-    """@if count > 0 should not crash when count is undefined (None)."""
+async def test_if_with_none_comparison_no_crash(mock_agent, runtime, caplog):
+    """@if count > 0 should not crash when count is undefined (None), but should warn."""
     mock_agent.query.return_value = '{"r": "ok"}'
     workflow = WorkflowNode(
         body=[
@@ -318,6 +325,7 @@ async def test_if_with_none_comparison_no_crash(mock_agent, runtime):
     result = await runtime.execute(workflow)
     assert result.success is True
     assert mock_agent.query.call_count == 0
+    assert "undefined variable(s): count" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -375,6 +383,75 @@ async def test_if_with_out_of_range_index_no_crash(mock_agent, runtime):
     result = await runtime.execute(workflow, variables={"handlers": ["a"]})
     assert result.success is True
     assert mock_agent.query.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_loop_undefined_collection_warns(mock_agent, runtime, caplog):
+    """@loop on undefined collection should warn."""
+    workflow = WorkflowNode(
+        body=[
+            LoopNode(
+                collection="missing_var",
+                item_var="item",
+                body=[TaskNode(task_id="t1", goal="Do.", expose=["r"])],
+            ),
+        ]
+    )
+    result = await runtime.execute(workflow)
+    assert result.success is True
+    assert mock_agent.query.call_count == 0  # Empty collection, no iterations
+    assert "collection variable 'missing_var' is not defined" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_if_defined_variable_no_warning(mock_agent, runtime, caplog):
+    """@if with a defined variable should not produce undefined variable warnings."""
+    mock_agent.query.return_value = '{"r": "ok"}'
+    workflow = WorkflowNode(
+        body=[
+            IfNode(
+                expression="len(items) > 0",
+                then_body=[TaskNode(task_id="t1", goal="Do.", expose=["r"])],
+            ),
+        ]
+    )
+    await runtime.execute(workflow, variables={"items": ["a"]})
+    assert "undefined variable" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_task_unresolved_interpolation_warns(mock_agent, runtime, caplog):
+    """Task goal with ${var} referencing undefined variable should warn."""
+    mock_agent.query.return_value = '{"new_issues": "none"}'
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(
+                task_id="check",
+                goal="Analyze ${results} for issues.",
+                expose=["new_issues"],
+            ),
+        ]
+    )
+    await runtime.execute(workflow)
+    assert "unresolved variable(s)" in caplog.text
+    assert "results" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_task_resolved_interpolation_no_warning(mock_agent, runtime, caplog):
+    """Task goal with ${var} referencing a defined variable should not warn."""
+    mock_agent.query.return_value = '{"summary": "ok"}'
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(
+                task_id="check",
+                goal="Analyze ${data} for issues.",
+                expose=["summary"],
+            ),
+        ]
+    )
+    await runtime.execute(workflow, variables={"data": [1, 2, 3]})
+    assert "unresolved variable" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -768,3 +845,177 @@ async def test_awl_auto_authorize_cleanup_on_failure(mock_agent):
 
     assert "custom_tool" not in fs_tools.allowed_commands
     assert len(fs_tools.awl_authorized_commands) == 0
+
+
+# ── Static variable validation tests ─────────────────────────────
+
+
+class TestValidateWorkflowVariables:
+    def test_no_warnings_for_valid_workflow(self):
+        """Well-formed workflow produces no warnings."""
+        workflow = WorkflowNode(
+            body=[
+                TaskNode(task_id="t1", goal="Find items.", expose=["items"]),
+                IfNode(
+                    expression="len(items) > 0",
+                    then_body=[TaskNode(task_id="t2", goal="Process ${items}.")],
+                ),
+            ]
+        )
+        assert validate_workflow_variables(workflow) == []
+
+    def test_undefined_variable_in_if(self):
+        """@if referencing undefined variable produces a warning."""
+        workflow = WorkflowNode(
+            body=[
+                IfNode(
+                    expression="count > 0",
+                    then_body=[TaskNode(task_id="t1", goal="Do.")],
+                ),
+            ]
+        )
+        warnings = validate_workflow_variables(workflow)
+        assert len(warnings) == 1
+        assert "count" in warnings[0]
+
+    def test_undefined_variable_in_task_goal(self):
+        """Task goal referencing undefined ${var} produces a warning."""
+        workflow = WorkflowNode(
+            body=[
+                TaskNode(task_id="t1", goal="Analyze ${results}."),
+            ]
+        )
+        warnings = validate_workflow_variables(workflow)
+        assert len(warnings) == 1
+        assert "results" in warnings[0]
+
+    def test_loop_collect_not_available_inside_body(self):
+        """collect variable should NOT be available inside the loop body."""
+        workflow = WorkflowNode(
+            body=[
+                TaskNode(task_id="t1", goal="Find jobs.", expose=["jobs"]),
+                LoopNode(
+                    collection="jobs",
+                    item_var="job",
+                    collect="analyses",
+                    body=[
+                        TaskNode(task_id="t2", goal="Analyze ${job}.", expose=["result"]),
+                        TaskNode(task_id="t3", goal="Check ${analyses}."),
+                    ],
+                ),
+            ]
+        )
+        warnings = validate_workflow_variables(workflow)
+        assert any("analyses" in w for w in warnings)
+
+    def test_loop_collect_available_after_loop(self):
+        """collect variable should be available after the loop."""
+        workflow = WorkflowNode(
+            body=[
+                TaskNode(task_id="t1", goal="Find jobs.", expose=["jobs"]),
+                LoopNode(
+                    collection="jobs",
+                    item_var="job",
+                    collect="analyses",
+                    body=[TaskNode(task_id="t2", goal="Analyze ${job}.", expose=["result"])],
+                ),
+                TaskNode(task_id="t3", goal="Report on ${analyses}."),
+            ]
+        )
+        assert validate_workflow_variables(workflow) == []
+
+    def test_undefined_loop_collection(self):
+        """@loop referencing undefined collection produces a warning."""
+        workflow = WorkflowNode(
+            body=[
+                LoopNode(
+                    collection="missing",
+                    item_var="item",
+                    body=[TaskNode(task_id="t1", goal="Do.")],
+                ),
+            ]
+        )
+        warnings = validate_workflow_variables(workflow)
+        assert any("missing" in w for w in warnings)
+
+    def test_initial_variables_suppress_warnings(self):
+        """Variables passed as initial should not trigger warnings."""
+        workflow = WorkflowNode(
+            body=[
+                TaskNode(task_id="t1", goal="Use ${name}."),
+            ]
+        )
+        assert validate_workflow_variables(workflow, {"name"}) == []
+
+    def test_set_defines_variable(self):
+        """@set should define variable for subsequent nodes."""
+        workflow = WorkflowNode(
+            body=[
+                SetNode(variable="target", value="server"),
+                TaskNode(task_id="t1", goal="Find ${target}."),
+            ]
+        )
+        assert validate_workflow_variables(workflow) == []
+
+    def test_expose_defines_variable(self):
+        """Expose: from a task should define variables for subsequent nodes."""
+        workflow = WorkflowNode(
+            body=[
+                TaskNode(task_id="t1", goal="Find.", expose=["server_file"]),
+                TaskNode(task_id="t2", goal="Read ${server_file}."),
+            ]
+        )
+        assert validate_workflow_variables(workflow) == []
+
+    def test_input_variables_excluded_when_passed(self):
+        """Input variables (used but never produced) should not warn when passed as initial."""
+        workflow = WorkflowNode(
+            body=[
+                TaskNode(task_id="t1", goal="Process ${subject} for ${quarter}."),
+            ]
+        )
+        # Without initial_variables, these are flagged
+        warnings = validate_workflow_variables(workflow)
+        assert len(warnings) == 2
+
+        # With computed input variables, no warnings
+        input_vars = _compute_input_variables(workflow)
+        assert input_vars == {"subject", "quarter"}
+        assert validate_workflow_variables(workflow, input_vars) == []
+
+    def test_scoping_bug_still_caught_with_input_vars(self):
+        """Scoping bugs (collect used inside loop) should still be caught even with input var exclusion."""
+        workflow = WorkflowNode(
+            body=[
+                TaskNode(task_id="t1", goal="Find ${subject}.", expose=["jobs"]),
+                LoopNode(
+                    collection="jobs",
+                    item_var="job",
+                    collect="analyses",
+                    body=[
+                        TaskNode(task_id="t2", goal="Analyze ${job}.", expose=["result"]),
+                        TaskNode(task_id="t3", goal="Check ${analyses}."),
+                    ],
+                ),
+            ]
+        )
+        input_vars = _compute_input_variables(workflow)
+        warnings = validate_workflow_variables(workflow, input_vars)
+        # subject is an input var and should NOT be flagged
+        assert not any("subject" in w for w in warnings)
+        # analyses is a scoping bug and SHOULD be flagged
+        assert any("analyses" in w for w in warnings)
+
+    def test_loop_item_var_available_in_body(self):
+        """@loop item variable should be available inside the body."""
+        workflow = WorkflowNode(
+            body=[
+                SetNode(variable="items", value="list"),
+                LoopNode(
+                    collection="items",
+                    item_var="item",
+                    body=[TaskNode(task_id="t1", goal="Process ${item}.")],
+                ),
+            ]
+        )
+        assert validate_workflow_variables(workflow) == []
