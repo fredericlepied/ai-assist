@@ -188,6 +188,38 @@ class TestValidateExpression:
             evaluator.validate_expression("> 0")
 
 
+class TestExtractVariables:
+    def test_simple_variable(self, evaluator):
+        assert evaluator.extract_variables("handlers") == {"handlers"}
+
+    def test_len_function(self, evaluator):
+        assert evaluator.extract_variables("len(items)") == {"items"}
+
+    def test_comparison(self, evaluator):
+        assert evaluator.extract_variables("count > 0") == {"count"}
+
+    def test_comparison_two_variables(self, evaluator):
+        assert evaluator.extract_variables("left == right") == {"left", "right"}
+
+    def test_len_comparison(self, evaluator):
+        assert evaluator.extract_variables("len(jobs) > 0") == {"jobs"}
+
+    def test_not_expression(self, evaluator):
+        assert evaluator.extract_variables("not done") == {"done"}
+
+    def test_property_access(self, evaluator):
+        assert evaluator.extract_variables("config.key") == {"config"}
+
+    def test_index_access(self, evaluator):
+        assert evaluator.extract_variables("items[0]") == {"items"}
+
+    def test_numeric_literal_not_variable(self, evaluator):
+        assert evaluator.extract_variables("len(items) > 0") == {"items"}
+
+    def test_no_variables_in_numeric_comparison(self, evaluator):
+        assert evaluator.extract_variables("5 > 3") == set()
+
+
 class TestJsonStringHandling:
     """Test that JSON strings are parsed for len() and loop operations"""
 

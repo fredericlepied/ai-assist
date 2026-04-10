@@ -96,6 +96,127 @@ def _extract_commands_from_workflow(workflow: WorkflowNode) -> set[str]:
     return {cmd for cmd in commands if not cmd.startswith("<")}
 
 
+def _compute_input_variables(workflow: WorkflowNode) -> set[str]:
+    """Compute variables that are expected as external inputs.
+
+    These are variables referenced in the workflow but never produced
+    internally (via Expose:, @set, or @loop item_var/collect).
+    They are expected to be injected at runtime via CLI or the variables dict.
+    """
+    interpolation_re = re.compile(r"\$\{(\w+)\}")
+    from .awl_expressions import AWLExpressionEvaluator
+
+    expr_eval = AWLExpressionEvaluator()
+    used: set[str] = set()
+    defined: set[str] = set()
+
+    def _collect_from_text(text: str | None) -> None:
+        if text:
+            used.update(interpolation_re.findall(text))
+
+    def _collect_from_expr(expression: str) -> None:
+        used.update(expr_eval.extract_variables(expression))
+
+    def _walk(nodes: list[ASTNode]) -> None:
+        for node in nodes:
+            if isinstance(node, TaskNode):
+                for text in (node.goal, node.context, node.constraints, node.success):
+                    _collect_from_text(text)
+                defined.update(node.expose)
+            elif isinstance(node, SetNode):
+                _collect_from_text(node.value)
+                defined.add(node.variable)
+            elif isinstance(node, IfNode):
+                _collect_from_expr(node.expression)
+                _walk(node.then_body)
+                _walk(node.else_body)
+            elif isinstance(node, LoopNode):
+                used.add(node.collection)
+                defined.add(node.item_var)
+                if node.collect:
+                    defined.add(node.collect)
+                _walk(node.body)
+            elif isinstance(node, ReturnNode):
+                _collect_from_expr(node.expression)
+            elif isinstance(node, GoalNode):
+                _walk(node.body)
+
+    _walk(workflow.body)
+    return used - defined
+
+
+def validate_workflow_variables(workflow: WorkflowNode, initial_variables: set[str] | None = None) -> list[str]:
+    """Static analysis: detect variables used before they are defined.
+
+    Walks the AST in execution order, tracking which variables have been
+    defined at each point.  Returns a list of warning strings for any
+    variable that is referenced before it could have been set.
+
+    When ``initial_variables`` is not provided, the function automatically
+    identifies expected input variables (those referenced but never produced
+    internally) and excludes them from warnings.
+
+    Key rules:
+    - ``@set`` and ``Expose:`` define variables for subsequent nodes.
+    - ``@loop collection as item collect=result`` makes ``item`` available
+      inside the body, but ``result`` is only available *after* the loop.
+    - ``@if`` branches may or may not run, so variables defined inside are
+      treated as *possibly* defined (warnings are still emitted if a variable
+      is used only after an @if branch that might not execute, but that level
+      of analysis is deferred — we optimistically add them).
+    """
+    interpolation_re = re.compile(r"\$\{(\w+)")
+    from .awl_expressions import AWLExpressionEvaluator
+
+    expr_eval = AWLExpressionEvaluator()
+
+    defined: set[str] = set(initial_variables) if initial_variables else set()
+    warnings: list[str] = []
+
+    def _check_used(text: str | None, context: str) -> None:
+        if not text:
+            return
+        for var in interpolation_re.findall(text):
+            if var not in defined:
+                warnings.append(f"{context}: variable '{var}' used before definition")
+
+    def _check_expr(expression: str, context: str) -> None:
+        for var in expr_eval.extract_variables(expression):
+            if var not in defined:
+                warnings.append(f"{context}: variable '{var}' used before definition")
+
+    def _walk(nodes: list[ASTNode]) -> None:
+        for node in nodes:
+            if isinstance(node, TaskNode):
+                for text in (node.goal, node.context, node.constraints, node.success):
+                    _check_used(text, f"@task '{node.task_id}'")
+                defined.update(node.expose)
+            elif isinstance(node, SetNode):
+                _check_used(node.value, f"@set '{node.variable}'")
+                defined.add(node.variable)
+            elif isinstance(node, IfNode):
+                _check_expr(node.expression, "@if")
+                _walk(node.then_body)
+                _walk(node.else_body)
+            elif isinstance(node, LoopNode):
+                if node.collection not in defined:
+                    warnings.append(f"@loop: collection variable '{node.collection}' used before definition")
+                # item_var is available inside the body
+                defined.add(node.item_var)
+                # collect is NOT available inside the body
+                _walk(node.body)
+                # collect becomes available after the loop
+                if node.collect:
+                    defined.add(node.collect)
+            elif isinstance(node, ReturnNode):
+                _check_expr(node.expression, "@return")
+            elif isinstance(node, GoalNode):
+                _walk(node.body)
+
+    _walk(workflow.body)
+    return warnings
+
+
 class AWLRuntime:
     def __init__(self, agent: Any, limits: RuntimeLimits | None = None, verbose: bool = False):
         self._agent = agent
@@ -112,6 +233,12 @@ class AWLRuntime:
         self._steps = 0
         self._task_outcomes = []
         return_value = None
+
+        # Static validation: warn about variables used before definition
+        var_warnings = validate_workflow_variables(workflow, set(self._variables.keys()))
+        for w in var_warnings:
+            logger.warning("AWL validation: %s", w)
+            print(f"  [!] {w}")
 
         if workflow.max_steps is not None:
             self._limits.max_steps = workflow.max_steps
@@ -242,7 +369,22 @@ class AWLRuntime:
     def _execute_set(self, node: SetNode):
         self._variables[node.variable] = self._expr.interpolate(node.value, self._variables)
 
+    def _check_undefined_variables(self, expression: str, directive: str) -> None:
+        """Warn about variables referenced in an expression that are not defined."""
+        referenced = self._expr.extract_variables(expression)
+        undefined = referenced - set(self._variables.keys())
+        if undefined:
+            names = ", ".join(sorted(undefined))
+            logger.warning(
+                "AWL %s '%s': undefined variable(s): %s",
+                directive,
+                expression,
+                names,
+            )
+            print(f"  [!] {directive} '{expression}': undefined variable(s): {names}")
+
     async def _execute_if(self, node: IfNode):
+        self._check_undefined_variables(node.expression, "@if")
         value = self._expr.evaluate(node.expression, self._variables)
         truthy = self._expr.is_truthy(value)
         logger.info("AWL @if '%s' evaluated to %s (raw: %s)", node.expression, truthy, value)
@@ -252,6 +394,13 @@ class AWLRuntime:
             await self._execute_body(node.else_body)
 
     async def _execute_loop(self, node: LoopNode):
+        if node.collection not in self._variables:
+            logger.warning(
+                "AWL @loop '%s': collection variable '%s' is not defined",
+                node.collection,
+                node.collection,
+            )
+            print(f"  [!] @loop '{node.collection}': collection variable is not defined")
         collection = self._variables.get(node.collection, [])
         collection = self._coerce_to_list(collection, node.collection)
         if not isinstance(collection, list | tuple):
@@ -414,6 +563,18 @@ class AWLRuntime:
         self._variables["_goal_success_met"] = result.get("success_met", False)
         self._variables["_goal_success_reason"] = result.get("reason", "")
 
+    def _check_unresolved_interpolations(self, task_id: str, text: str) -> None:
+        """Warn about ${var} references that were not resolved during interpolation."""
+        unresolved = re.findall(r"\$\{(\w+)(?:\.\w+)*\}", text)
+        if unresolved:
+            names = ", ".join(dict.fromkeys(unresolved))  # unique, preserving order
+            logger.warning(
+                "AWL task '%s': unresolved variable(s) in prompt: %s",
+                task_id,
+                names,
+            )
+            print(f"  [!] task '{task_id}': unresolved variable(s): {names}")
+
     def _build_task_prompt(self, task: TaskNode) -> str:
         interp = self._expr.interpolate
         v = self._variables
@@ -445,7 +606,9 @@ class AWLRuntime:
                 "call the introspection__execute_mcp_prompt tool with the server and prompt name."
             )
 
-        return "\n".join(parts)
+        prompt = "\n".join(parts)
+        self._check_unresolved_interpolations(task.task_id, prompt)
+        return prompt
 
     def _extract_exposed(self, response: str, expose_vars: list[str]) -> dict[str, Any]:
         if not expose_vars:
