@@ -349,7 +349,12 @@ class AWLRuntime:
                 self._agent.on_inner_execution = None
             try:
                 max_turns = task.max_tool_calls or self._limits.max_tool_calls
-                response = await self._agent.query(prompt, max_turns=max_turns, progress_callback=callback)
+                response = await self._agent.query(
+                    prompt,
+                    max_turns=max_turns,
+                    progress_callback=callback,
+                    max_time_seconds=task.max_time,
+                )
             finally:
                 self._agent.on_inner_execution = prev_inner
             exposed = self._extract_exposed(response, task.expose)

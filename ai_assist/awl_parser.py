@@ -141,6 +141,12 @@ class AWLParser:
         if max_tc_match:
             max_tool_calls = int(max_tc_match.group(1))
 
+        # Extract max_time=N (optional, in seconds)
+        max_time = None
+        max_time_match = re.search(r"max_time=(\d+)", line)
+        if max_time_match:
+            max_time = int(max_time_match.group(1))
+
         self._advance()
 
         goal = None
@@ -185,6 +191,7 @@ class AWLParser:
             success=success,
             expose=expose,
             max_tool_calls=max_tool_calls,
+            max_time=max_time,
         )
 
     def _parse_field_value(self, prefix: str, all_fields: set[str]) -> str:

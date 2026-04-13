@@ -447,6 +447,23 @@ def test_parse_task_with_max_tool_calls():
     assert task.hints == ["no-kg"]
 
 
+def test_parse_task_with_max_time():
+    script = "@start\n@task t1 max_time=1800\nGoal: Long running task.\n@end\n@end"
+    result = AWLParser(script).parse()
+    task = result.body[0]
+    assert isinstance(task, TaskNode)
+    assert task.max_time == 1800
+
+
+def test_parse_task_with_max_tool_calls_and_max_time():
+    script = "@start\n@task t1 @no-kg max_tool_calls=200 max_time=1200\nGoal: Do.\n@end\n@end"
+    result = AWLParser(script).parse()
+    task = result.body[0]
+    assert task.max_tool_calls == 200
+    assert task.max_time == 1200
+    assert task.hints == ["no-kg"]
+
+
 def test_parse_task_without_max_tool_calls():
     script = "@start\n@task t1\nGoal: Simple task.\n@end\n@end"
     result = AWLParser(script).parse()

@@ -1181,6 +1181,7 @@ class AiAssistAgent:
         messages: list[dict] | None = None,
         max_turns: int = 100,
         progress_callback=None,
+        max_time_seconds: int | None = None,
     ) -> str:
         """Query the agent with a prompt or message history
 
@@ -1190,6 +1191,7 @@ class AiAssistAgent:
                      If provided, this is used instead of prompt.
                      Format: [{"role": "user", "content": "..."}, ...]
             max_turns: Maximum number of agentic turns (safety limit, default: 100)
+            max_time_seconds: Maximum wall-clock time in seconds (default: 600)
             progress_callback: Optional callback function for progress updates
                               Called with (status: str, turn: int, max_turns: int, tool_name: str | None)
 
@@ -1208,7 +1210,7 @@ class AiAssistAgent:
         # Track nesting depth for _no_kg reset logic
         self._query_depth += 1
         try:
-            return await self._query_inner(prompt, messages, max_turns, progress_callback)
+            return await self._query_inner(prompt, messages, max_turns, progress_callback, max_time_seconds)
         finally:
             self._query_depth -= 1
 
@@ -1218,6 +1220,7 @@ class AiAssistAgent:
         messages: list[dict],
         max_turns: int,
         progress_callback,
+        max_time_seconds: int | None = None,
     ) -> str:
         # Capture current query text for KG context injection
         if prompt:
@@ -1273,7 +1276,7 @@ class AiAssistAgent:
 
         # Loop detection and dedup tracking
         start_time = time.time()
-        max_time_seconds = 600  # 10 minutes max
+        effective_max_time = max_time_seconds if max_time_seconds else 600
         self._recent_tool_calls_for_loop: list[str] = []
         no_progress_count = 0  # Count turns with no text response
         max_no_progress = 10  # Allow 10 turns without text before declaring stuck
@@ -1288,9 +1291,9 @@ class AiAssistAgent:
         for turn in range(max_turns):
             # Check time-based timeout
             elapsed = time.time() - start_time
-            if elapsed > max_time_seconds:
+            if elapsed > effective_max_time:
                 self._last_turn_count = turn + 1
-                return f"Task timeout after {int(elapsed)} seconds (max: {max_time_seconds}s)"
+                return f"Task timeout after {int(elapsed)} seconds (max: {effective_max_time}s)"
             if progress_callback:
                 progress_callback("calling_claude", turn + 1, max_turns, None)
 

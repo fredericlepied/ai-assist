@@ -131,15 +131,18 @@ Goal: Determine how the system initializes using only source code evidence.
 
 ---
 
-## max_tool_calls=N
+## max_tool_calls=N and max_time=N
 
-Overrides the default tool call budget (100) for a single task.
+`max_tool_calls` overrides the default tool call budget (100) for a single task.
+
+`max_time` overrides the default wall-clock timeout (600 seconds) for a single task.
+This is useful for tasks that involve long-running operations like RCA analysis.
 
 Use this when a task may need many tool calls, such as running a detailed analysis before creating a ticket.
 
 Example:
 
-@task analyze_and_report max_tool_calls=200
+@task analyze_and_report max_tool_calls=200 max_time=1800
 Goal: Run a root cause analysis on the job and create a Jira ticket.
 Expose: jira_ticket
 @end
@@ -168,7 +171,7 @@ Tasks represent **objectives for the agent**.
 
 Syntax:
 
-@task <task_id> [hints...] [max_tool_calls=N]
+@task <task_id> [hints...] [max_tool_calls=N] [max_time=N]
 ...
 @end
 
