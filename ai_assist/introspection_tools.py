@@ -203,7 +203,7 @@ Returns task outcomes, return value, and final variables.
                         "properties": {
                             "script_path": {
                                 "type": "string",
-                                "description": "Path to AWL script (.awl extension, relative or absolute)",
+                                "description": "Path to AWL script (.awl extension, ~ is expanded automatically)",
                             },
                             "variables": {
                                 "type": "object",
@@ -497,7 +497,7 @@ yourself between these two steps.
                     "properties": {
                         "script_path": {
                             "type": "string",
-                            "description": "Path to AWL script (.awl extension, relative or absolute)",
+                            "description": "Path to AWL script (.awl extension, ~ is expanded automatically)",
                         }
                     },
                     "required": ["script_path"],

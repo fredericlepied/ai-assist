@@ -131,15 +131,18 @@ Goal: Determine how the system initializes using only source code evidence.
 
 ---
 
-## max_tool_calls=N
+## max_tool_calls=N and max_time=N
 
-Overrides the default tool call budget (100) for a single task.
+`max_tool_calls` overrides the default tool call budget (100) for a single task.
+
+`max_time` overrides the default wall-clock timeout (600 seconds) for a single task.
+This is useful for tasks that involve long-running operations like RCA analysis.
 
 Use this when a task may need many tool calls, such as running a detailed analysis before creating a ticket.
 
 Example:
 
-@task analyze_and_report max_tool_calls=200
+@task analyze_and_report max_tool_calls=200 max_time=1800
 Goal: Run a root cause analysis on the job and create a Jira ticket.
 Expose: jira_ticket
 @end
@@ -168,7 +171,7 @@ Tasks represent **objectives for the agent**.
 
 Syntax:
 
-@task <task_id> [hints...] [max_tool_calls=N]
+@task <task_id> [hints...] [max_tool_calls=N] [max_time=N]
 ...
 @end
 
@@ -409,11 +412,104 @@ Expose: handler_summary
 
 ---
 
+# Conditional Loop
+
+`@while` repeats its body while an expression is truthy.
+
+Syntax:
+
+@while <expression> [max_iterations=N]
+...
+@end
+
+The optional `max_iterations=N` parameter limits the number of iterations (default: 100)
+as a safety guard against infinite loops.
+
+Example:
+
+@while running_count > 0 max_iterations=24
+
+@task check_status @no-history @no-kg
+Goal: Count running DCI jobs. Do NOT fetch details.
+Expose: running_count
+@end
+
+@end
+
+Tasks inside `@while` do **not** count against the workflow's `max_steps` limit,
+since iteration count is already bounded by `max_iterations`.
+
+---
+
+# Wait
+
+`@wait` pauses execution for a specified duration.
+
+Syntax:
+
+@wait <N>s|m|h
+
+Examples:
+
+@wait 30s
+@wait 5m
+@wait 1h
+
+Useful for rate-limiting API calls or spacing out polling iterations.
+
+---
+
+# Notify
+
+`@notify` emits a user-facing message with variable interpolation.
+No agent call is made — this is a pure runtime operation.
+
+Syntax:
+
+@notify <message>
+
+Example:
+
+@notify ${running_count} jobs still running
+@notify All daily DCI jobs have completed
+
+---
+
 # Return
 
 Workflows can return a result.
 
 @return handlers
+
+---
+
+# Polling Example
+
+This workflow polls for running DCI jobs, notifies progress, and exits when done:
+
+@start
+
+@task check_jobs @no-history @no-kg
+Goal: Search for daily DCI jobs still running. Count them.
+Expose: running_count
+@end
+
+@while running_count > 0 max_iterations=24
+
+@notify ${running_count} DCI jobs still running
+
+@wait 1h
+
+@task recheck_jobs @no-history @no-kg @continue-on-failure
+Goal: Search for daily DCI jobs still running. Count them.
+Expose: running_count
+@end
+
+@end
+
+@notify All daily DCI jobs have completed
+
+@end
 
 ---
 

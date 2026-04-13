@@ -104,8 +104,6 @@ class DesktopNotificationChannel:
             urgency = "normal"
             if notification.level == "error":
                 urgency = "critical"
-            elif notification.level == "info":
-                urgency = "low"
 
             # Desktop notifications have size limits, truncate if needed
             # For query results, show more context than simple reminders

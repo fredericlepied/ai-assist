@@ -1,6 +1,6 @@
 """Tests for AWL runtime engine"""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -9,9 +9,12 @@ from ai_assist.awl_ast import (
     GoalNode,
     IfNode,
     LoopNode,
+    NotifyNode,
     ReturnNode,
     SetNode,
     TaskNode,
+    WaitNode,
+    WhileNode,
     WorkflowNode,
 )
 from ai_assist.awl_runtime import (
@@ -1019,3 +1022,154 @@ class TestValidateWorkflowVariables:
             ]
         )
         assert validate_workflow_variables(workflow) == []
+
+    def test_while_undefined_variable_warns(self):
+        """@while expression with undefined variable should warn."""
+        workflow = WorkflowNode(
+            body=[
+                WhileNode(
+                    expression="missing > 0",
+                    body=[SetNode(variable="x", value="1")],
+                ),
+            ]
+        )
+        warnings = validate_workflow_variables(workflow)
+        assert any("missing" in w for w in warnings)
+
+    def test_notify_undefined_variable_warns(self):
+        """@notify with undefined ${var} should warn."""
+        workflow = WorkflowNode(
+            body=[
+                NotifyNode(message="${undefined_var} items"),
+            ]
+        )
+        warnings = validate_workflow_variables(workflow)
+        assert any("undefined_var" in w for w in warnings)
+
+
+# ── @wait runtime tests ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_wait_calls_sleep(mock_agent, runtime):
+    """@wait should call asyncio.sleep with the correct duration."""
+    workflow = WorkflowNode(body=[WaitNode(duration_seconds=300)])
+    with patch("ai_assist.awl_runtime.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        await runtime.execute(workflow)
+        mock_sleep.assert_called_once_with(300)
+
+
+# ── @while runtime tests ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_while_loops_until_false(mock_agent, runtime):
+    """@while should loop until expression is falsy."""
+    call_count = 0
+
+    async def mock_query(prompt, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        count = max(0, 3 - call_count)
+        return f'{{"running_count": {count}}}'
+
+    mock_agent.query = AsyncMock(side_effect=mock_query)
+    workflow = WorkflowNode(
+        body=[
+            SetNode(variable="running_count", value="3"),
+            WhileNode(
+                expression="running_count > 0",
+                body=[
+                    TaskNode(task_id="check", goal="Check.", expose=["running_count"]),
+                ],
+            ),
+        ]
+    )
+    result = await runtime.execute(workflow)
+    assert result.success is True
+    assert mock_agent.query.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_while_respects_max_iterations(mock_agent, runtime):
+    """@while should stop at max_iterations even if condition is still true."""
+    mock_agent.query.return_value = '{"r": "ok"}'
+    workflow = WorkflowNode(
+        body=[
+            SetNode(variable="always_true", value="yes"),
+            WhileNode(
+                expression="always_true",
+                max_iterations=3,
+                body=[
+                    TaskNode(task_id="t1", goal="Do.", expose=["r"]),
+                ],
+            ),
+        ]
+    )
+    await runtime.execute(workflow)
+    assert mock_agent.query.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_while_falsy_from_start(mock_agent, runtime):
+    """@while with falsy condition should never enter body."""
+    mock_agent.query.return_value = '{"r": "ok"}'
+    workflow = WorkflowNode(
+        body=[
+            SetNode(variable="count", value="0"),
+            WhileNode(
+                expression="count > 0",
+                body=[TaskNode(task_id="t1", goal="Do.", expose=["r"])],
+            ),
+        ]
+    )
+    await runtime.execute(workflow)
+    assert mock_agent.query.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_while_tasks_dont_count_max_steps(mock_agent):
+    """Tasks inside @while should not count against max_steps."""
+    call_count = 0
+
+    async def mock_query(prompt, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        count = max(0, 5 - call_count)
+        return f'{{"running_count": {count}}}'
+
+    mock_agent.query = AsyncMock(side_effect=mock_query)
+    runtime_obj = AWLRuntime(mock_agent, limits=RuntimeLimits(max_steps=2))
+    workflow = WorkflowNode(
+        body=[
+            SetNode(variable="running_count", value="5"),
+            WhileNode(
+                expression="running_count > 0",
+                max_iterations=10,
+                body=[
+                    TaskNode(task_id="t1", goal="Check.", expose=["running_count"]),
+                ],
+            ),
+        ]
+    )
+    # Should NOT raise max_steps error - while uses _loop_depth
+    result = await runtime_obj.execute(workflow)
+    assert result.success is True
+    assert mock_agent.query.call_count == 5
+
+
+# ── @notify runtime tests ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_notify_interpolates_and_prints(mock_agent, runtime, capsys):
+    """@notify should interpolate variables and print."""
+    workflow = WorkflowNode(
+        body=[
+            SetNode(variable="count", value="5"),
+            NotifyNode(message="${count} jobs still running"),
+        ]
+    )
+    await runtime.execute(workflow)
+    captured = capsys.readouterr()
+    assert "5 jobs still running" in captured.out

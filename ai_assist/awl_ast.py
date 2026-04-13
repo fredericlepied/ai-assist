@@ -14,6 +14,7 @@ class TaskNode:
     success: str | None = None
     expose: list[str] = field(default_factory=list)
     max_tool_calls: int | None = None
+    max_time: int | None = None
 
 
 @dataclass
@@ -63,4 +64,33 @@ class GoalNode:
     body: list[Any] = field(default_factory=list)
 
 
-ASTNode = WorkflowNode | TaskNode | SetNode | IfNode | LoopNode | ReturnNode | FailNode | GoalNode
+@dataclass
+class WaitNode:
+    duration_seconds: int
+
+
+@dataclass
+class WhileNode:
+    expression: str
+    max_iterations: int = 100
+    body: list[Any] = field(default_factory=list)
+
+
+@dataclass
+class NotifyNode:
+    message: str
+
+
+ASTNode = (
+    WorkflowNode
+    | TaskNode
+    | SetNode
+    | IfNode
+    | LoopNode
+    | ReturnNode
+    | FailNode
+    | GoalNode
+    | WaitNode
+    | WhileNode
+    | NotifyNode
+)

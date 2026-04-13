@@ -182,7 +182,9 @@ Files: `config.py`, `state.py`, `config_watcher.py`, `file_watchdog.py`
 
 **Large tool results**: All tools support `__save_to_file` parameter to save raw results to a file instead of truncating.
 
-## Development Principles (from AGENTS.md)
+## Development Principles
+
+**IMPORTANT: Read `AGENTS.md` before writing any code.** It contains detailed development guidelines, coding patterns, and examples that must be followed.
 
 ### TDD - Test-Driven Development
 Write tests before implementation. Baseline assumption: all tests are green before any change.

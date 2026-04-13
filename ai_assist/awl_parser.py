@@ -8,9 +8,12 @@ from .awl_ast import (
     GoalNode,
     IfNode,
     LoopNode,
+    NotifyNode,
     ReturnNode,
     SetNode,
     TaskNode,
+    WaitNode,
+    WhileNode,
     WorkflowNode,
 )
 from .awl_expressions import AWLExpressionEvaluator
@@ -102,6 +105,12 @@ class AWLParser:
                 nodes.append(self._parse_fail())
             elif line.startswith("@goal "):
                 nodes.append(self._parse_goal())
+            elif line.startswith("@wait "):
+                nodes.append(self._parse_wait())
+            elif line.startswith("@while "):
+                nodes.append(self._parse_while())
+            elif line.startswith("@notify "):
+                nodes.append(self._parse_notify())
             else:
                 raise ParseError(self._pos + 1, f"Unexpected: '{line}'")
         return nodes
@@ -131,6 +140,12 @@ class AWLParser:
         max_tc_match = re.search(r"max_tool_calls=(\d+)", line)
         if max_tc_match:
             max_tool_calls = int(max_tc_match.group(1))
+
+        # Extract max_time=N (optional, in seconds)
+        max_time = None
+        max_time_match = re.search(r"max_time=(\d+)", line)
+        if max_time_match:
+            max_time = int(max_time_match.group(1))
 
         self._advance()
 
@@ -176,6 +191,7 @@ class AWLParser:
             success=success,
             expose=expose,
             max_tool_calls=max_tool_calls,
+            max_time=max_time,
         )
 
     def _parse_field_value(self, prefix: str, all_fields: set[str]) -> str:
@@ -281,6 +297,47 @@ class AWLParser:
             max_actions=max_actions,
             body=body,
         )
+
+    _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600}
+
+    def _parse_wait(self) -> WaitNode:
+        line = self._require_line()
+        match = re.match(r"@wait\s+(\d+)(s|m|h)$", line)
+        if not match:
+            raise ParseError(
+                self._pos + 1,
+                "Invalid @wait syntax. Expected: @wait <N>s|m|h (e.g. @wait 5m)",
+            )
+        amount = int(match.group(1))
+        unit = match.group(2)
+        self._advance()
+        return WaitNode(duration_seconds=amount * self._DURATION_UNITS[unit])
+
+    def _parse_while(self) -> WhileNode:
+        line = self._require_line()
+        # Strip @while prefix, then extract optional max_iterations from the end
+        rest = line.removeprefix("@while").strip()
+        max_iterations = 100
+        max_iter_match = re.search(r"\s+max_iterations=(\d+)$", rest)
+        if max_iter_match:
+            max_iterations = int(max_iter_match.group(1))
+            rest = rest[: max_iter_match.start()].strip()
+        expression = rest
+        if not expression:
+            raise ParseError(self._pos + 1, "Missing expression after @while")
+        self._validate_expr(expression, "after @while")
+        self._advance()
+        body = self._parse_body()
+        self._expect("@end")
+        return WhileNode(expression=expression, max_iterations=max_iterations, body=body)
+
+    def _parse_notify(self) -> NotifyNode:
+        line = self._require_line()
+        message = line.removeprefix("@notify").strip()
+        if not message:
+            raise ParseError(self._pos + 1, "@notify requires a message")
+        self._advance()
+        return NotifyNode(message=message)
 
     def _validate_expr(self, expression: str, context: str) -> None:
         try:

@@ -7,9 +7,12 @@ from ai_assist.awl_ast import (
     GoalNode,
     IfNode,
     LoopNode,
+    NotifyNode,
     ReturnNode,
     SetNode,
     TaskNode,
+    WaitNode,
+    WhileNode,
     WorkflowNode,
 )
 from ai_assist.awl_parser import AWLParser, ParseError
@@ -444,6 +447,23 @@ def test_parse_task_with_max_tool_calls():
     assert task.hints == ["no-kg"]
 
 
+def test_parse_task_with_max_time():
+    script = "@start\n@task t1 max_time=1800\nGoal: Long running task.\n@end\n@end"
+    result = AWLParser(script).parse()
+    task = result.body[0]
+    assert isinstance(task, TaskNode)
+    assert task.max_time == 1800
+
+
+def test_parse_task_with_max_tool_calls_and_max_time():
+    script = "@start\n@task t1 @no-kg max_tool_calls=200 max_time=1200\nGoal: Do.\n@end\n@end"
+    result = AWLParser(script).parse()
+    task = result.body[0]
+    assert task.max_tool_calls == 200
+    assert task.max_time == 1200
+    assert task.hints == ["no-kg"]
+
+
 def test_parse_task_without_max_tool_calls():
     script = "@start\n@task t1\nGoal: Simple task.\n@end\n@end"
     result = AWLParser(script).parse()
@@ -565,6 +585,113 @@ def test_parse_goal_missing_success():
 @end"""
     with pytest.raises(ParseError, match="Success"):
         AWLParser(script).parse()
+
+
+# ── @wait directive tests ───────────────────────────────────────
+
+
+def test_parse_wait_seconds():
+    result = AWLParser("@start\n@wait 30s\n@end").parse()
+    assert len(result.body) == 1
+    assert isinstance(result.body[0], WaitNode)
+    assert result.body[0].duration_seconds == 30
+
+
+def test_parse_wait_minutes():
+    result = AWLParser("@start\n@wait 5m\n@end").parse()
+    node = result.body[0]
+    assert isinstance(node, WaitNode)
+    assert node.duration_seconds == 300
+
+
+def test_parse_wait_hours():
+    result = AWLParser("@start\n@wait 1h\n@end").parse()
+    node = result.body[0]
+    assert isinstance(node, WaitNode)
+    assert node.duration_seconds == 3600
+
+
+def test_parse_wait_invalid_no_unit():
+    with pytest.raises(ParseError):
+        AWLParser("@start\n@wait 30\n@end").parse()
+
+
+def test_parse_wait_invalid_format():
+    with pytest.raises(ParseError):
+        AWLParser("@start\n@wait forever\n@end").parse()
+
+
+# ── @while directive tests ──────────────────────────────────────
+
+
+def test_parse_while_basic():
+    script = "@start\n@while count > 0\n@set x = 1\n@end\n@end"
+    result = AWLParser(script).parse()
+    assert len(result.body) == 1
+    node = result.body[0]
+    assert isinstance(node, WhileNode)
+    assert node.expression == "count > 0"
+    assert node.max_iterations == 100  # default
+    assert len(node.body) == 1
+
+
+def test_parse_while_with_max_iterations():
+    script = "@start\n@while running max_iterations=24\n@set x = 1\n@end\n@end"
+    result = AWLParser(script).parse()
+    node = result.body[0]
+    assert isinstance(node, WhileNode)
+    assert node.expression == "running"
+    assert node.max_iterations == 24
+
+
+def test_parse_while_with_task():
+    script = """\
+@start
+@while len(jobs) > 0 max_iterations=10
+  @task check @no-history @no-kg
+  Goal: Check status.
+  Expose: jobs
+  @end
+@end
+@end"""
+    result = AWLParser(script).parse()
+    node = result.body[0]
+    assert isinstance(node, WhileNode)
+    assert len(node.body) == 1
+    assert isinstance(node.body[0], TaskNode)
+
+
+def test_parse_while_missing_expression():
+    with pytest.raises(ParseError):
+        AWLParser("@start\n@while\n@end\n@end").parse()
+
+
+def test_parse_while_invalid_expression():
+    with pytest.raises(ParseError):
+        AWLParser("@start\n@while !!!\n@end\n@end").parse()
+
+
+# ── @notify directive tests ─────────────────────────────────────
+
+
+def test_parse_notify_basic():
+    result = AWLParser("@start\n@notify All jobs complete\n@end").parse()
+    assert len(result.body) == 1
+    node = result.body[0]
+    assert isinstance(node, NotifyNode)
+    assert node.message == "All jobs complete"
+
+
+def test_parse_notify_with_variable():
+    result = AWLParser("@start\n@notify ${count} jobs still running\n@end").parse()
+    node = result.body[0]
+    assert isinstance(node, NotifyNode)
+    assert "${count}" in node.message
+
+
+def test_parse_notify_missing_message():
+    with pytest.raises(ParseError):
+        AWLParser("@start\n@notify\n@end").parse()
 
 
 def test_parse_goal_with_set_before():
