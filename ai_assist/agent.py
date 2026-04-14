@@ -209,7 +209,9 @@ class AiAssistAgent:
         self.report_tools = ReportTools()
 
         # Initialize internal schedule management tools
-        self.schedule_tools = ScheduleTools()
+        self.schedule_tools = ScheduleTools(
+            known_mcp_servers=set(config.mcp_servers.keys()) if config.mcp_servers else None
+        )
 
         # Initialize internal filesystem tools
         self.filesystem_tools = FilesystemTools(config)

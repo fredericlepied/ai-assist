@@ -338,3 +338,25 @@ async def test_builtin_prompt_routes_to_synthesis(mock_agent, state_manager):
     assert result.output == "Synthesized 3 insights"
     mock_agent._run_synthesis_from_kg.assert_called_once()
     mock_agent.query.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_awl_script_not_found_reports_failure(mock_agent, state_manager):
+    """AWL script that doesn't exist should report failure, not success"""
+    task = TaskDefinition(
+        name="missing-awl",
+        prompt="/nonexistent/path/script.awl",
+        interval="15:00 on weekdays",
+    )
+
+    with patch("ai_assist.task_runner.NotificationDispatcher") as mock_cls:
+        mock_cls.return_value.dispatch = AsyncMock()
+        runner = TaskRunner(task, mock_agent, state_manager)
+        result = await runner.run()
+
+    assert result.success is False
+    assert "not found" in result.output.lower() or "does not exist" in result.output.lower()
+
+    # Verify state was recorded as failure
+    state = state_manager.get_monitor_state(runner.state_key)
+    assert state.last_results["last_success"] is False

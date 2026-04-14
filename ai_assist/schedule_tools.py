@@ -10,17 +10,19 @@ from .tasks import TaskDefinition
 class ScheduleTools:
     """Internal tools for managing monitor and task schedules"""
 
-    def __init__(self, schedules_file: Path | None = None):
+    def __init__(self, schedules_file: Path | None = None, known_mcp_servers: set[str] | None = None):
         """Initialize schedule tools
 
         Args:
             schedules_file: Path to schedules JSON file (defaults to ~/.ai-assist/schedules.json)
+            known_mcp_servers: Set of configured MCP server names for validation
         """
         if schedules_file is None:
             schedules_file = get_config_dir() / "schedules.json"
 
         self.schedules_file = Path(schedules_file)
         self.schedules_file.parent.mkdir(parents=True, exist_ok=True)
+        self.known_mcp_servers = known_mcp_servers
 
     def get_tool_definitions(self) -> list[dict]:
         """Get tool definitions for the AI agent"""
@@ -37,7 +39,7 @@ class ScheduleTools:
                         },
                         "prompt": {
                             "type": "string",
-                            "description": "Monitoring prompt to execute. IMPORTANT: For MCP prompts use format 'mcp://server/prompt' (e.g., user says '/dci/rca' → use 'mcp://dci/rca'). For natural language, use plain text (e.g., 'Find failures').",
+                            "description": "Monitoring prompt to execute. Three formats supported: (1) MCP prompts: 'mcp://server/prompt' (e.g., 'mcp://dci/rca'). (2) AWL scripts: use the filesystem path ending in .awl (e.g., '/home/user/scripts/ci_duty.awl' or 'goals/my_goal.awl'). Do NOT prefix AWL paths with 'mcp://'. (3) Natural language: plain text (e.g., 'Find failures').",
                         },
                         "prompt_arguments": {
                             "type": "object",
@@ -81,7 +83,7 @@ class ScheduleTools:
                         },
                         "prompt": {
                             "type": "string",
-                            "description": "Task prompt to execute. IMPORTANT: For MCP prompts use format 'mcp://server/prompt' (e.g., user says '/dci/rca' → use 'mcp://dci/rca'). For natural language, use plain text (e.g., 'Find failures').",
+                            "description": "Task prompt to execute. Three formats supported: (1) MCP prompts: 'mcp://server/prompt' (e.g., 'mcp://dci/rca'). (2) AWL scripts: use the filesystem path ending in .awl (e.g., '/home/user/scripts/ci_duty.awl' or 'goals/my_goal.awl'). Do NOT prefix AWL paths with 'mcp://'. (3) Natural language: plain text (e.g., 'Find failures').",
                         },
                         "prompt_arguments": {
                             "type": "object",
@@ -307,6 +309,11 @@ class ScheduleTools:
         if conditions is None:
             conditions = []
 
+        # Validate prompt references (AWL paths, MCP servers)
+        prompt_error = self._validate_prompt(prompt)
+        if prompt_error:
+            return f"Error: {prompt_error}"
+
         # Validate monitor definition (now just a task with notification support)
         try:
             monitor_def = TaskDefinition(
@@ -372,6 +379,11 @@ class ScheduleTools:
         """Create a new task schedule"""
         if conditions is None:
             conditions = []
+
+        # Validate prompt references (AWL paths, MCP servers)
+        prompt_error = self._validate_prompt(prompt)
+        if prompt_error:
+            return f"Error: {prompt_error}"
 
         # Validate task definition
         try:
@@ -475,6 +487,12 @@ class ScheduleTools:
 
         if not schedule:
             return f"Error: {schedule_type.capitalize()} '{name}' not found"
+
+        # Validate prompt if being updated
+        if "prompt" in updates and updates["prompt"] is not None:
+            prompt_error = self._validate_prompt(updates["prompt"])
+            if prompt_error:
+                return f"Error: {prompt_error}"
 
         # Apply updates
         for key, value in updates.items():
@@ -589,6 +607,31 @@ class ScheduleTools:
         result.append("\n*Note: Last run information will be available when monitoring mode is running*")
 
         return "\n".join(result)
+
+    def _validate_prompt(self, prompt: str) -> str | None:
+        """Validate the prompt field and return an error message if invalid, None if valid.
+
+        Checks:
+        - AWL file paths (.awl): file must exist on disk
+        - MCP prompts (mcp://server/prompt): server must be in known_mcp_servers if provided
+        """
+        if prompt.endswith(".awl"):
+            awl_path = Path(prompt)
+            if not awl_path.is_absolute():
+                awl_path = get_config_dir() / prompt
+            if not awl_path.exists():
+                return f"AWL script does not exist: {awl_path}"
+
+        if prompt.startswith("mcp://") and self.known_mcp_servers is not None:
+            # Extract server name from mcp://server/prompt
+            ref = prompt[6:]
+            if "/" in ref:
+                server_name = ref.split("/", 1)[0]
+                if server_name not in self.known_mcp_servers:
+                    available = ", ".join(sorted(self.known_mcp_servers))
+                    return f"MCP server '{server_name}' is not configured. Available servers: {available}"
+
+        return None
 
     def _load_schedules(self) -> dict:
         """Load schedules from JSON file"""

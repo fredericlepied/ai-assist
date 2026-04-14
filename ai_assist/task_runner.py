@@ -154,7 +154,7 @@ class TaskRunner:
             awl_path = get_config_dir() / self.task_def.prompt
 
         if not awl_path.exists():
-            return f"Error: AWL script not found: {awl_path}"
+            raise FileNotFoundError(f"AWL script not found: {awl_path}")
 
         state_manager = GoalStateManager(get_config_dir() / "state")
         runner = GoalRunner(awl_path, self.agent, state_manager)

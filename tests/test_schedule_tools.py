@@ -406,3 +406,84 @@ class TestJSONPersistence:
         data = json.loads(temp_schedules.read_text())
         assert "tasks" in data
         assert len(data["tasks"]) == 1
+
+
+class TestPromptValidation:
+    """Tests for prompt validation at write time"""
+
+    @pytest.mark.asyncio
+    async def test_create_task_awl_path_not_found(self, schedule_tools):
+        """AWL path that doesn't exist should be rejected"""
+        result = await schedule_tools.execute_tool(
+            "create_task",
+            {"name": "Bad AWL", "prompt": "/nonexistent/path/script.awl", "interval": "5m"},
+        )
+        assert "Error" in result
+        assert "not found" in result.lower() or "does not exist" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_create_task_awl_path_exists(self, temp_schedules, tmp_path):
+        """AWL path that exists should be accepted"""
+        awl_file = tmp_path / "valid.awl"
+        awl_file.write_text("@start\n@task test\nGoal: test\n@end\n@end\n")
+
+        tools = ScheduleTools(schedules_file=temp_schedules)
+        result = await tools.execute_tool(
+            "create_task",
+            {"name": "Good AWL", "prompt": str(awl_file), "interval": "5m"},
+        )
+        assert "created successfully" in result
+
+    @pytest.mark.asyncio
+    async def test_create_monitor_awl_path_not_found(self, schedule_tools):
+        """AWL path that doesn't exist should be rejected for monitors too"""
+        result = await schedule_tools.execute_tool(
+            "create_monitor",
+            {"name": "Bad AWL Mon", "prompt": "/nonexistent/script.awl", "interval": "5m"},
+        )
+        assert "Error" in result
+
+    @pytest.mark.asyncio
+    async def test_create_task_mcp_unknown_server(self, schedule_tools):
+        """MCP prompt referencing unknown server should warn"""
+        tools = ScheduleTools(schedules_file=schedule_tools.schedules_file, known_mcp_servers={"dci", "tpci"})
+        result = await tools.execute_tool(
+            "create_task",
+            {"name": "Bad MCP", "prompt": "mcp://unknown_server/some_prompt", "interval": "5m"},
+        )
+        assert "Error" in result
+        assert "unknown_server" in result
+
+    @pytest.mark.asyncio
+    async def test_create_task_mcp_known_server(self, temp_schedules):
+        """MCP prompt referencing known server should be accepted"""
+        tools = ScheduleTools(schedules_file=temp_schedules, known_mcp_servers={"dci", "tpci"})
+        result = await tools.execute_tool(
+            "create_task",
+            {"name": "Good MCP", "prompt": "mcp://dci/rca", "interval": "5m"},
+        )
+        assert "created successfully" in result
+
+    @pytest.mark.asyncio
+    async def test_create_task_mcp_no_known_servers_skips_check(self, temp_schedules):
+        """When no known_mcp_servers provided, skip server name validation"""
+        tools = ScheduleTools(schedules_file=temp_schedules)
+        result = await tools.execute_tool(
+            "create_task",
+            {"name": "MCP No Check", "prompt": "mcp://anything/prompt", "interval": "5m"},
+        )
+        assert "created successfully" in result
+
+    @pytest.mark.asyncio
+    async def test_update_schedule_validates_new_awl_prompt(self, temp_schedules):
+        """Updating a task's prompt to a nonexistent AWL path should be rejected"""
+        tools = ScheduleTools(schedules_file=temp_schedules)
+        await tools.execute_tool(
+            "create_task",
+            {"name": "Update AWL", "prompt": "Check things", "interval": "5m"},
+        )
+        result = await tools.execute_tool(
+            "update_schedule",
+            {"name": "Update AWL", "schedule_type": "task", "prompt": "/nonexistent/bad.awl"},
+        )
+        assert "Error" in result
