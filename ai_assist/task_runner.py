@@ -49,7 +49,7 @@ class TaskRunner:
             if self.task_def.prompt == "__builtin__:kg_synthesis":
                 output = await self.agent._run_synthesis_from_kg()
             elif self.task_def.prompt.endswith(".awl"):
-                output = await self._run_awl_goal()
+                output = await self._run_awl_script()
             elif self.task_def.is_mcp_prompt:
                 server_name, prompt_name = self.task_def.parse_mcp_prompt()
                 output = await self.agent.execute_mcp_prompt(
@@ -140,13 +140,16 @@ class TaskRunner:
 
             return result
 
-    async def _run_awl_goal(self) -> str:
-        """Execute an AWL goal script with state persistence"""
+    async def _run_awl_script(self) -> str:
+        """Execute an AWL script with state persistence.
+
+        Supports both @goal scripts (via GoalRunner) and @start workflows (via AWLRuntime).
+        """
         from pathlib import Path
 
+        from .awl_ast import GoalNode
+        from .awl_parser import AWLParser
         from .config import get_config_dir
-        from .goal_runner import GoalRunner
-        from .goal_state import GoalStateManager
 
         # Resolve AWL path (relative to goals dir or absolute)
         awl_path = Path(self.task_def.prompt)
@@ -156,19 +159,38 @@ class TaskRunner:
         if not awl_path.exists():
             raise FileNotFoundError(f"AWL script not found: {awl_path}")
 
-        state_manager = GoalStateManager(get_config_dir() / "state")
-        runner = GoalRunner(awl_path, self.agent, state_manager)
-        runner.load()
+        # Parse to determine script type
+        source = awl_path.read_text()
+        workflow = AWLParser(source).parse()
+        has_goal = any(isinstance(n, GoalNode) for n in workflow.body)
 
-        await runner.run_cycle()
+        if has_goal:
+            # @goal script — use GoalRunner with state persistence
+            from .goal_runner import GoalRunner
+            from .goal_state import GoalStateManager
 
-        # Format output
-        lines = [f"Goal '{runner.goal_id}' cycle completed."]
-        state = state_manager.load(runner.goal_id)
-        lines.append(f"Status: {state.status} | Cycles: {state.cycle_count}")
-        if state.success_reason:
-            lines.append(f"Success: {state.success_reason}")
-        return "\n".join(lines)
+            state_manager = GoalStateManager(get_config_dir() / "state")
+            runner = GoalRunner(awl_path, self.agent, state_manager)
+            runner.load()
+            await runner.run_cycle()
+
+            lines = [f"Goal '{runner.goal_id}' cycle completed."]
+            state = state_manager.load(runner.goal_id)
+            lines.append(f"Status: {state.status} | Cycles: {state.cycle_count}")
+            if state.success_reason:
+                lines.append(f"Success: {state.success_reason}")
+            return "\n".join(lines)
+        else:
+            # @start workflow — use AWLRuntime directly
+            from .awl_runtime import AWLRuntime
+
+            runtime = AWLRuntime(self.agent)
+            result = await runtime.execute(workflow)
+            if not result.success:
+                raise RuntimeError(
+                    f"AWL workflow failed: {result.task_outcomes[-1].summary if result.task_outcomes else 'unknown error'}"
+                )
+            return result.return_value or "Workflow completed successfully."
 
     def get_last_run(self) -> datetime | None:
         """Get timestamp of last successful run"""
