@@ -698,45 +698,51 @@ Skills are \alert{untrusted code} --- defense in depth:
 \begin{column}{0.45\textwidth}
 \textbf{The Problem}
 \begin{itemize}\scriptsize
-  \item Tool results can exceed the LLM context window
-  \item Truncated data leads to \alert{incomplete analysis}
-  \item Paginated APIs require many round-trips:\\
-        \textit{fetch} $\rightarrow$ \textit{save} $\rightarrow$ \textit{fetch} $\rightarrow$ \textit{save} \ldots
-  \item Agent may resort to ad-hoc workarounds (\texttt{/tmp/}, scripts)
+  \item Tool results can exceed the context window $\rightarrow$ \alert{truncated data}
+  \item Paginated APIs require many round-trips, wasting tokens
 \end{itemize}
 
-\medskip
-\textbf{The Solution: Result Redirection}
+\smallskip
+\textbf{Result Redirection} (any tool, same call)
 \begin{itemize}\scriptsize
-  \item \textbf{Any tool} can redirect its result in the same call
-  \item Agent receives a short summary --- context stays clean
-  \item Data lands in reports (persistent, readable, appendable)
-  \item Cuts tool calls in half for paginated workflows
+  \item \texttt{\_\_save\_to\_file}, \texttt{\_\_write\_to\_report}, \texttt{\_\_append\_to\_report}
+  \item Agent gets a short summary --- data goes to report
+\end{itemize}
+
+\smallskip
+\textbf{Auto-Paginated Collection}
+\begin{itemize}\scriptsize
+  \item \texttt{\_\_collect\_to\_report}: \textbf{one call} replaces the fetch loop
+  \item Pagination config per server in \texttt{mcp\_servers.yaml}
+  \item \textbf{2.2$\times$ faster}, fraction of the token cost
 \end{itemize}
 \end{column}
 \begin{column}{0.50\textwidth}
-\textbf{Three generic parameters:}
 \begin{lstlisting}[style=code,basicstyle=\ttfamily\tiny]
-# Save raw result to a file
-search_dci_jobs(query="...",
-  __save_to_file="/tmp/batch.json")
-
-# Create/replace a report
+# Redirect result to a report
 search_jira_tickets(jql="...",
-  __write_to_report="quarterly-jira:jsonl")
+  __write_to_report="jira-data:jsonl")
 
-# Append to an existing report
-search_github_issues(query="...", offset=20,
-  __append_to_report="quarterly-prs:jsonl")
+# Auto-paginate: collect ALL items
+search_github_issues(query="...",
+  __collect_to_report="all-prs:jsonl")
+# => "Collected 110 items (6 pages)"
+
+# Limit to 50 items
+search_dci_jobs(query="...",
+  __collect_to_report="jobs:jsonl:50")
 \end{lstlisting}
 
-\medskip
-\textbf{\scriptsize Paginated collection pattern:}
-\begin{lstlisting}[style=code,basicstyle=\ttfamily\tiny]
-Batch 1: __write_to_report="data:jsonl"
-Batch 2: __append_to_report="data:jsonl"
-Batch 3: __append_to_report="data:jsonl"
-...then read the complete report
+\smallskip
+\textbf{\scriptsize Pagination config (mcp\_servers.yaml):}
+\begin{lstlisting}[style=yaml,basicstyle=\ttfamily\tiny]
+pagination:
+  total_field: _meta.count
+  data_field: auto
+  tool_overrides:
+    search_dci_jobs:
+      total_field: total
+      data_field: hits
 \end{lstlisting}
 \end{column}
 \end{columns}
