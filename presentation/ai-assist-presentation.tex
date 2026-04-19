@@ -692,6 +692,56 @@ Skills are \alert{untrusted code} --- defense in depth:
 \end{columns}
 \end{frame}
 
+% ── Handling Data Beyond the Context Window ─────────────────────
+\begin{frame}[fragile]{Handling Data Beyond the Context Window}
+\begin{columns}[T]
+\begin{column}{0.45\textwidth}
+\textbf{The Problem}
+\begin{itemize}\scriptsize
+  \item Tool results can exceed the LLM context window
+  \item Truncated data leads to \alert{incomplete analysis}
+  \item Paginated APIs require many round-trips:\\
+        \textit{fetch} $\rightarrow$ \textit{save} $\rightarrow$ \textit{fetch} $\rightarrow$ \textit{save} \ldots
+  \item Agent may resort to ad-hoc workarounds (\texttt{/tmp/}, scripts)
+\end{itemize}
+
+\medskip
+\textbf{The Solution: Result Redirection}
+\begin{itemize}\scriptsize
+  \item \textbf{Any tool} can redirect its result in the same call
+  \item Agent receives a short summary --- context stays clean
+  \item Data lands in reports (persistent, readable, appendable)
+  \item Cuts tool calls in half for paginated workflows
+\end{itemize}
+\end{column}
+\begin{column}{0.50\textwidth}
+\textbf{Three generic parameters:}
+\begin{lstlisting}[style=code,basicstyle=\ttfamily\tiny]
+# Save raw result to a file
+search_dci_jobs(query="...",
+  __save_to_file="/tmp/batch.json")
+
+# Create/replace a report
+search_jira_tickets(jql="...",
+  __write_to_report="quarterly-jira:jsonl")
+
+# Append to an existing report
+search_github_issues(query="...", offset=20,
+  __append_to_report="quarterly-prs:jsonl")
+\end{lstlisting}
+
+\medskip
+\textbf{\scriptsize Paginated collection pattern:}
+\begin{lstlisting}[style=code,basicstyle=\ttfamily\tiny]
+Batch 1: __write_to_report="data:jsonl"
+Batch 2: __append_to_report="data:jsonl"
+Batch 3: __append_to_report="data:jsonl"
+...then read the complete report
+\end{lstlisting}
+\end{column}
+\end{columns}
+\end{frame}
+
 % ══════════════════════════════════════════════════════════════════
 \section{Knowledge Graph}
 % ══════════════════════════════════════════════════════════════════

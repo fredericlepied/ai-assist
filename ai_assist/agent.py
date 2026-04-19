@@ -966,13 +966,19 @@ class AiAssistAgent:
             prompt += "Always use tools to retrieve real data. Never fabricate information that could be obtained through a tool call.\n"
             prompt += "For detailed tool documentation (query syntax, available fields, examples), call introspection__get_tool_help with the tool name.\n"
             prompt += "\n## Handling Large Tool Results\n\n"
-            prompt += "ALL tools (MCP, internal, introspection) support a special `__save_to_file` parameter:\n"
-            prompt += '- Add `__save_to_file: "/path/to/file.json"` to ANY tool call arguments\n'
-            prompt += "- The tool execution layer will save the raw result directly to the file\n"
-            prompt += "- You receive a short summary instead of the full result (keeps context clean)\n"
-            prompt += "- Use this proactively for bulk data fetches (limit > 50, pagination, large API responses)\n"
-            prompt += '- Example: `search_dci_jobs(query="...", limit=200, __save_to_file="/tmp/batch.json")`\n'
-            prompt += "- The file will contain the complete untruncated tool response\n\n"
+            prompt += "ALL tools (MCP, internal, introspection) support these special parameters:\n\n"
+            prompt += "**`__save_to_file`**: Save raw result to a file.\n"
+            prompt += '- Example: `search_dci_jobs(query="...", limit=200, __save_to_file="/tmp/batch.json")`\n\n'
+            prompt += '**`__write_to_report`**: Save raw result as a report (creates/replaces). Format: `"name"` or `"name:format"` (md/jsonl/csv/tsv, default md).\n'
+            prompt += '- Example: `search_jira_tickets(jql="...", __write_to_report="quarterly-jira:jsonl")`\n\n'
+            prompt += (
+                "**`__append_to_report`**: Append raw result to a report (creates if needed). Same format as above.\n"
+            )
+            prompt += (
+                '- Example: `search_github_issues(query="...", offset=20, __append_to_report="quarterly-prs:jsonl")`\n'
+            )
+            prompt += "- Ideal for paginated collection: use `__write_to_report` for the first batch, `__append_to_report` for subsequent batches.\n\n"
+            prompt += "All three return a short summary instead of the full result, keeping context clean.\n\n"
             prompt += "## Auto-Truncated Tool Results\n\n"
             limits = self.get_truncation_limits()
             max_chars = limits["max_message_chars"]
@@ -2039,22 +2045,96 @@ class AiAssistAgent:
 
         return tool_results, loop_detected
 
+    @staticmethod
+    def _parse_report_param(value: str) -> tuple[str, str]:
+        """Parse 'name' or 'name:format' into (name, format). Default format is 'md'."""
+        from .report_tools import SUPPORTED_FORMATS
+
+        if ":" in value:
+            name, fmt = value.rsplit(":", 1)
+        else:
+            name, fmt = value, "md"
+
+        name, fmt = name.strip(), fmt.strip().lower()
+        if not name:
+            raise ValueError("Report name cannot be empty")
+        if fmt not in SUPPORTED_FORMATS:
+            raise ValueError(f"Unsupported format '{fmt}'. Supported: {', '.join(sorted(SUPPORTED_FORMATS))}")
+        return name, fmt
+
+    def _handle_result_redirection(
+        self,
+        result_text: str,
+        save_to_file: str | None,
+        write_to_report: str | None,
+        append_to_report: str | None,
+    ) -> str | None:
+        """Handle __save_to_file, __write_to_report, __append_to_report.
+
+        Returns a summary string if any redirection was performed, None otherwise.
+        """
+        from pathlib import Path
+
+        summaries: list[str] = []
+
+        if save_to_file:
+            try:
+                output_path = Path(save_to_file)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(result_text)
+                summary = f"Result saved to {save_to_file} ({len(result_text):,} bytes, {len(result_text.splitlines())} lines)"
+                logger.info("Saved tool result to file: %s (%d bytes)", save_to_file, len(result_text))
+                summaries.append(summary)
+            except Exception:
+                logger.exception("Error saving result to %s", save_to_file)
+                summaries.append(f"Error saving result to {save_to_file}")
+
+        if write_to_report:
+            try:
+                name, fmt = self._parse_report_param(write_to_report)
+                report_result = self.report_tools._write_report(name, result_text, fmt=fmt)
+                logger.info("Wrote tool result to report: %s (%s)", name, fmt)
+                summaries.append(report_result)
+            except Exception:
+                logger.exception("Error writing result to report '%s'", write_to_report)
+                summaries.append(f"Error writing result to report '{write_to_report}'")
+
+        if append_to_report:
+            try:
+                name, fmt = self._parse_report_param(append_to_report)
+                report_result = self.report_tools._append_to_report(name, result_text, fmt=fmt)
+                logger.info("Appended tool result to report: %s (%s)", name, fmt)
+                summaries.append(report_result)
+            except Exception:
+                logger.exception("Error appending result to report '%s'", append_to_report)
+                summaries.append(f"Error appending result to report '{append_to_report}'")
+
+        return "\n".join(summaries) if summaries else None
+
     async def _execute_tool(self, tool_name: str, arguments: dict) -> str:
         """Execute a tool call on the appropriate MCP server, introspection, or internal tool
 
         Args:
             tool_name: Name of the tool to execute (format: server__tool_name)
-            arguments: Tool arguments. If '__save_to_file' is present, the raw result
-                      will be saved to that path and a summary will be returned instead.
+            arguments: Tool arguments. Special redirection parameters (popped before validation):
+                - __save_to_file: Save raw result to a file path
+                - __write_to_report: Write result as a new report ('name' or 'name:format')
+                - __append_to_report: Append result to a report ('name' or 'name:format')
 
         Returns:
-            Tool result string, or a summary if __save_to_file was specified
+            Tool result string, or a summary if any redirection parameter was specified
         """
 
-        # Extract special __save_to_file parameter if present
+        # Extract special redirection parameters before validation
         save_to_file = arguments.pop("__save_to_file", None)
+        write_to_report = arguments.pop("__write_to_report", None)
+        append_to_report = arguments.pop("__append_to_report", None)
         if save_to_file:
             logger.info("Tool %s called with __save_to_file=%s", tool_name, save_to_file)
+        if write_to_report:
+            logger.info("Tool %s called with __write_to_report=%s", tool_name, write_to_report)
+        if append_to_report:
+            logger.info("Tool %s called with __append_to_report=%s", tool_name, append_to_report)
 
         # Validate arguments against tool schema before execution
         validation_error = self._validate_tool_arguments(tool_name, arguments)
@@ -2087,21 +2167,9 @@ class AiAssistAgent:
 
                 self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=True)
 
-                # Handle __save_to_file for introspection tools
-                if save_to_file:
-                    from pathlib import Path
-
-                    try:
-                        output_path = Path(save_to_file)
-                        output_path.parent.mkdir(parents=True, exist_ok=True)
-                        output_path.write_text(result_text)
-                        summary = f"Result saved to {save_to_file} ({len(result_text):,} bytes, {len(result_text.splitlines())} lines)"
-                        logger.info("Saved tool result to file: %s (%d bytes)", save_to_file, len(result_text))
-                        return summary
-                    except Exception as e:
-                        error_msg = f"Error saving result to {save_to_file}: {str(e)}"
-                        logger.error(error_msg)
-                        return error_msg
+                redirect = self._handle_result_redirection(result_text, save_to_file, write_to_report, append_to_report)
+                if redirect:
+                    return redirect
 
                 return result_text
             except Exception as e:
@@ -2215,21 +2283,9 @@ class AiAssistAgent:
                 is_success = not (isinstance(result_text, str) and result_text.startswith("Error:"))
                 self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=is_success)
 
-                # Handle __save_to_file for internal tools
-                if save_to_file:
-                    from pathlib import Path
-
-                    try:
-                        output_path = Path(save_to_file)
-                        output_path.parent.mkdir(parents=True, exist_ok=True)
-                        output_path.write_text(result_text)
-                        summary = f"Result saved to {save_to_file} ({len(result_text):,} bytes, {len(result_text.splitlines())} lines)"
-                        logger.info("Saved tool result to file: %s (%d bytes)", save_to_file, len(result_text))
-                        return summary
-                    except Exception as e:
-                        error_msg = f"Error saving result to {save_to_file}: {str(e)}"
-                        logger.error(error_msg)
-                        return error_msg
+                redirect = self._handle_result_redirection(result_text, save_to_file, write_to_report, append_to_report)
+                if redirect:
+                    return redirect
 
                 return result_text
             except Exception as e:
@@ -2275,21 +2331,9 @@ class AiAssistAgent:
 
             self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=True)
 
-            # Handle __save_to_file: save raw result to file and return summary
-            if save_to_file:
-                from pathlib import Path
-
-                try:
-                    output_path = Path(save_to_file)
-                    output_path.parent.mkdir(parents=True, exist_ok=True)
-                    output_path.write_text(result_text)
-                    summary = f"Result saved to {save_to_file} ({len(result_text):,} bytes, {len(result_text.splitlines())} lines)"
-                    logger.info("Saved tool result to file: %s (%d bytes)", save_to_file, len(result_text))
-                    return summary
-                except Exception as e:
-                    error_msg = f"Error saving result to {save_to_file}: {str(e)}"
-                    logger.error(error_msg)
-                    return error_msg
+            redirect = self._handle_result_redirection(result_text, save_to_file, write_to_report, append_to_report)
+            if redirect:
+                return redirect
 
             return result_text
         except Exception as e:
