@@ -34,7 +34,7 @@ repos:
 
   # Python linting with ruff (includes isort, flake8, pyupgrade)
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.8
+    rev: v0.15.11
     hooks:
       - id: ruff
         args: ['--fix', '--line-length=120']
