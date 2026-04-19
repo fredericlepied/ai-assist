@@ -332,6 +332,36 @@ async def test_if_with_none_comparison_no_crash(mock_agent, runtime, caplog):
 
 
 @pytest.mark.asyncio
+async def test_missing_exposed_var_defaults_to_none(mock_agent, runtime, capsys):
+    """Missing exposed vars should default to None so @if evaluates to False without 'undefined' warning."""
+    # Task exposes has_improvements but Claude's response doesn't include it
+    mock_agent.query.return_value = '{"clusters_summary": "3 clusters found"}'
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(
+                task_id="cluster",
+                goal="Cluster results.",
+                expose=["clusters_summary", "has_improvements"],
+            ),
+            IfNode(
+                expression="has_improvements",
+                then_body=[TaskNode(task_id="apply", goal="Apply changes.")],
+                else_body=[TaskNode(task_id="report", goal="Report no changes.")],
+            ),
+        ]
+    )
+    result = await runtime.execute(workflow)
+    assert result.success is True
+    # The @if should take the else branch (has_improvements is None)
+    assert mock_agent.query.call_count == 2  # cluster + report (not apply)
+    captured = capsys.readouterr()
+    assert "missing exposed vars" in captured.out
+    assert "has_improvements" in captured.out
+    # Should NOT have an "undefined variable" warning
+    assert "undefined variable" not in captured.out
+
+
+@pytest.mark.asyncio
 async def test_fail_directive_raises(runtime):
     workflow = WorkflowNode(body=[FailNode(message="Jira is down")])
     with pytest.raises(AWLRuntimeError, match="Jira is down"):
@@ -1045,6 +1075,60 @@ class TestValidateWorkflowVariables:
         )
         warnings = validate_workflow_variables(workflow)
         assert any("undefined_var" in w for w in warnings)
+
+
+# ── _extract_exposed unit tests ──────────────────────────────────
+
+
+class TestExtractExposed:
+    """Tests for _extract_exposed accumulation across multiple JSON blocks."""
+
+    def _make_runtime(self, mock_agent):
+        return AWLRuntime(mock_agent)
+
+    def test_single_block_all_vars(self, mock_agent):
+        """Single JSON block containing all vars returns them all."""
+        rt = self._make_runtime(mock_agent)
+        response = '```json\n{"a": 1, "b": true}\n```'
+        result = rt._extract_exposed(response, ["a", "b"])
+        assert result == {"a": 1, "b": True}
+
+    def test_split_across_two_blocks(self, mock_agent):
+        """Vars split across two JSON blocks should all be found."""
+        rt = self._make_runtime(mock_agent)
+        response = (
+            'Here is the summary:\n```json\n{"clusters_summary": "3 clusters"}\n```\n'
+            'And the flag:\n```json\n{"has_improvements": true}\n```'
+        )
+        result = rt._extract_exposed(response, ["clusters_summary", "has_improvements"])
+        assert result == {"clusters_summary": "3 clusters", "has_improvements": True}
+
+    def test_first_block_wins_on_conflict(self, mock_agent):
+        """When same key appears in multiple blocks, first value wins."""
+        rt = self._make_runtime(mock_agent)
+        response = '```json\n{"x": "first"}\n```\n' '```json\n{"x": "second", "y": 2}\n```'
+        result = rt._extract_exposed(response, ["x", "y"])
+        assert result == {"x": "first", "y": 2}
+
+    def test_partial_match_not_returned_early(self, mock_agent):
+        """A block with only some vars should not cause early return."""
+        rt = self._make_runtime(mock_agent)
+        response = '```json\n{"a": 1}\n```\n' "Some text in between.\n" '```json\n{"b": 2, "c": 3}\n```'
+        result = rt._extract_exposed(response, ["a", "b", "c"])
+        assert result == {"a": 1, "b": 2, "c": 3}
+
+    def test_inline_json_fallback(self, mock_agent):
+        """Inline JSON (no fences) should also be found."""
+        rt = self._make_runtime(mock_agent)
+        response = 'The result is {"flag": false} and that is final.'
+        result = rt._extract_exposed(response, ["flag"])
+        assert result == {"flag": False}
+
+    def test_empty_expose_returns_empty(self, mock_agent):
+        """No expose vars means empty result."""
+        rt = self._make_runtime(mock_agent)
+        result = rt._extract_exposed('{"a": 1}', [])
+        assert result == {}
 
 
 # ── @wait runtime tests ──────────────────────────────────────────

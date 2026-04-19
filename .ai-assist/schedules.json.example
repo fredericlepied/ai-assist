@@ -25,6 +25,13 @@
       "prompt": "mcp://server/health_check",
       "interval": "9:00 on monday",
       "enabled": false
+    },
+    {
+      "name": "Daily CI Duty Triage",
+      "description": "AWL workflow for CI duty — use the filesystem path, not mcp://",
+      "prompt": "/home/user/scripts/ci_duty.awl",
+      "interval": "15:00 on monday,tuesday,wednesday,thursday,friday",
+      "enabled": true
     }
   ],
   "monitors": [

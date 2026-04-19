@@ -36,6 +36,39 @@ logging.getLogger("google.auth._default").setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
+def _resolve_dotpath(data: dict, path: str) -> Any:
+    """Navigate a dot-separated path in a dict.
+
+    Handles Elasticsearch-style totals where the value is {value: N, relation: ...}.
+    """
+    current: Any = data
+    for key in path.split("."):
+        if isinstance(current, dict):
+            current = current.get(key)
+        else:
+            return None
+    if isinstance(current, dict) and "value" in current:
+        return current["value"]
+    return current
+
+
+def _extract_data_items(data: Any, data_field: str) -> list:
+    """Extract the data array from a paginated response.
+
+    With data_field="auto", finds the first top-level list key not starting with '_'.
+    """
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    if data_field == "auto":
+        for key, val in data.items():
+            if isinstance(val, list) and not key.startswith("_"):
+                return val
+        return []
+    return data.get(data_field, [])
+
+
 _CONTENT_BLOCK_KEYS = {
     "text": {"type", "text", "citations"},
     "tool_use": {"type", "id", "name", "input"},
@@ -209,7 +242,9 @@ class AiAssistAgent:
         self.report_tools = ReportTools()
 
         # Initialize internal schedule management tools
-        self.schedule_tools = ScheduleTools()
+        self.schedule_tools = ScheduleTools(
+            known_mcp_servers=set(config.mcp_servers.keys()) if config.mcp_servers else None
+        )
 
         # Initialize internal filesystem tools
         self.filesystem_tools = FilesystemTools(config)
@@ -964,13 +999,24 @@ class AiAssistAgent:
             prompt += "Always use tools to retrieve real data. Never fabricate information that could be obtained through a tool call.\n"
             prompt += "For detailed tool documentation (query syntax, available fields, examples), call introspection__get_tool_help with the tool name.\n"
             prompt += "\n## Handling Large Tool Results\n\n"
-            prompt += "ALL tools (MCP, internal, introspection) support a special `__save_to_file` parameter:\n"
-            prompt += '- Add `__save_to_file: "/path/to/file.json"` to ANY tool call arguments\n'
-            prompt += "- The tool execution layer will save the raw result directly to the file\n"
-            prompt += "- You receive a short summary instead of the full result (keeps context clean)\n"
-            prompt += "- Use this proactively for bulk data fetches (limit > 50, pagination, large API responses)\n"
-            prompt += '- Example: `search_dci_jobs(query="...", limit=200, __save_to_file="/tmp/batch.json")`\n'
-            prompt += "- The file will contain the complete untruncated tool response\n\n"
+            prompt += "ALL tools (MCP, internal, introspection) support these special parameters:\n\n"
+            prompt += "**`__save_to_file`**: Save raw result to a file.\n"
+            prompt += '- Example: `search_dci_jobs(query="...", limit=200, __save_to_file="/tmp/batch.json")`\n\n'
+            prompt += '**`__write_to_report`**: Save raw result as a report (creates/replaces). Format: `"name"` or `"name:format"` (md/jsonl/csv/tsv, default md).\n'
+            prompt += '- Example: `search_jira_tickets(jql="...", __write_to_report="quarterly-jira:jsonl")`\n\n'
+            prompt += (
+                "**`__append_to_report`**: Append raw result to a report (creates if needed). Same format as above.\n"
+            )
+            prompt += (
+                '- Example: `search_github_issues(query="...", offset=20, __append_to_report="quarterly-prs:jsonl")`\n'
+            )
+            prompt += "- Ideal for paginated collection: use `__write_to_report` for the first batch, `__append_to_report` for subsequent batches.\n\n"
+            prompt += "All of the above return a short summary instead of the full result, keeping context clean.\n\n"
+            prompt += '**`__collect_to_report`**: Auto-paginate and collect ALL results into a report in a single tool call. Format: `"name:format"` or `"name:format:N"` (N = max items, omit for all).\n'
+            prompt += '- Example: `search_github_issues(query="...", __collect_to_report="quarterly-prs:jsonl")`\n'
+            prompt += '- Example: `search_dci_jobs(query="...", __collect_to_report="recent-jobs:jsonl:50")` -- at most 50 items\n'
+            prompt += "- The system handles offset/limit loops internally. You make one call, get a summary back.\n"
+            prompt += "- Requires server pagination config in mcp_servers.yaml. Falls back to single write if not configured.\n\n"
             prompt += "## Auto-Truncated Tool Results\n\n"
             limits = self.get_truncation_limits()
             max_chars = limits["max_message_chars"]
@@ -2037,22 +2083,226 @@ class AiAssistAgent:
 
         return tool_results, loop_detected
 
+    @staticmethod
+    def _parse_report_param(value: str) -> tuple[str, str]:
+        """Parse 'name' or 'name:format' into (name, format). Default format is 'md'."""
+        from .report_tools import SUPPORTED_FORMATS
+
+        if ":" in value:
+            name, fmt = value.rsplit(":", 1)
+        else:
+            name, fmt = value, "md"
+
+        name, fmt = name.strip(), fmt.strip().lower()
+        if not name:
+            raise ValueError("Report name cannot be empty")
+        if fmt not in SUPPORTED_FORMATS:
+            raise ValueError(f"Unsupported format '{fmt}'. Supported: {', '.join(sorted(SUPPORTED_FORMATS))}")
+        return name, fmt
+
+    @staticmethod
+    def _parse_collect_param(value: str) -> tuple[str, str, int | None]:
+        """Parse 'name', 'name:format', or 'name:format:N' for __collect_to_report.
+
+        Default format is 'jsonl'. Returns (name, format, max_items).
+        """
+        from .report_tools import SUPPORTED_FORMATS
+
+        parts = value.split(":")
+        if len(parts) == 3:
+            name, fmt, limit_str = parts[0].strip(), parts[1].strip().lower(), parts[2].strip()
+            max_items = int(limit_str)
+            if max_items <= 0:
+                raise ValueError("Max items must be positive")
+        elif len(parts) == 2:
+            name, fmt, max_items = parts[0].strip(), parts[1].strip().lower(), None
+        else:
+            name, fmt, max_items = value.strip(), "jsonl", None
+
+        if not name:
+            raise ValueError("Report name cannot be empty")
+        if fmt not in SUPPORTED_FORMATS:
+            raise ValueError(f"Unsupported format '{fmt}'. Supported: {', '.join(sorted(SUPPORTED_FORMATS))}")
+        return name, fmt, max_items
+
+    def _handle_result_redirection(
+        self,
+        result_text: str,
+        save_to_file: str | None,
+        write_to_report: str | None,
+        append_to_report: str | None,
+    ) -> str | None:
+        """Handle __save_to_file, __write_to_report, __append_to_report.
+
+        Returns a summary string if any redirection was performed, None otherwise.
+        """
+        from pathlib import Path
+
+        summaries: list[str] = []
+
+        if save_to_file:
+            try:
+                output_path = Path(save_to_file)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(result_text)
+                summary = f"Result saved to {save_to_file} ({len(result_text):,} bytes, {len(result_text.splitlines())} lines)"
+                logger.info("Saved tool result to file: %s (%d bytes)", save_to_file, len(result_text))
+                summaries.append(summary)
+            except Exception:
+                logger.exception("Error saving result to %s", save_to_file)
+                summaries.append(f"Error saving result to {save_to_file}")
+
+        if write_to_report:
+            try:
+                name, fmt = self._parse_report_param(write_to_report)
+                report_result = self.report_tools._write_report(name, result_text, fmt=fmt)
+                logger.info("Wrote tool result to report: %s (%s)", name, fmt)
+                summaries.append(report_result)
+            except Exception:
+                logger.exception("Error writing result to report '%s'", write_to_report)
+                summaries.append(f"Error writing result to report '{write_to_report}'")
+
+        if append_to_report:
+            try:
+                name, fmt = self._parse_report_param(append_to_report)
+                report_result = self.report_tools._append_to_report(name, result_text, fmt=fmt)
+                logger.info("Appended tool result to report: %s (%s)", name, fmt)
+                summaries.append(report_result)
+            except Exception:
+                logger.exception("Error appending result to report '%s'", append_to_report)
+                summaries.append(f"Error appending result to report '{append_to_report}'")
+
+        return "\n".join(summaries) if summaries else None
+
+    async def _collect_paginated_to_report(
+        self,
+        server_name: str,
+        original_tool_name: str,
+        arguments: dict,
+        collect_param: str,
+    ) -> str:
+        """Auto-paginate an MCP tool and collect all results into a report."""
+        name, fmt, max_items = self._parse_collect_param(collect_param)
+
+        server_config = self.config.mcp_servers.get(server_name)
+        pagination = server_config.pagination if server_config else None
+
+        if not pagination:
+            session = self.sessions[server_name]
+            result = await session.call_tool(original_tool_name, arguments)
+            result_text = (
+                "\n".join(item.text if hasattr(item, "text") else str(item) for item in (result.content or [])) or ""
+            )
+            self.report_tools._write_report(name, result_text, fmt=fmt)
+            return f"Collected results to report '{name}' (1 page, no pagination config for server '{server_name}')"
+
+        # Apply per-tool overrides
+        overrides = pagination.tool_overrides.get(original_tool_name, {})
+        offset_param = overrides.get("offset_param", pagination.offset_param)
+        limit_param = overrides.get("limit_param", pagination.limit_param)
+        total_field = overrides.get("total_field", pagination.total_field)
+        data_field = overrides.get("data_field", pagination.data_field)
+
+        page_size = int(arguments.get(limit_param, pagination.default_page_size))
+        arguments[limit_param] = page_size
+        current_offset = int(arguments.get(offset_param, 0))
+        arguments[offset_param] = current_offset
+
+        session = self.sessions[server_name]
+        total_collected = 0
+        page_count = 0
+        is_first_page = True
+        total_available: int | float = float("inf")
+        max_pages = 50
+
+        while page_count < max_pages:
+            result = await session.call_tool(original_tool_name, dict(arguments))
+            result_text = (
+                "\n".join(item.text if hasattr(item, "text") else str(item) for item in (result.content or [])) or ""
+            )
+
+            try:
+                data = json.loads(result_text)
+            except json.JSONDecodeError:
+                if is_first_page:
+                    self.report_tools._write_report(name, result_text, fmt=fmt)
+                else:
+                    self.report_tools._append_to_report(name, result_text, fmt=fmt)
+                page_count += 1
+                break
+
+            if is_first_page:
+                resolved_total = _resolve_dotpath(data, total_field)
+                if resolved_total is not None:
+                    total_available = int(resolved_total)
+
+            items = _extract_data_items(data, data_field)
+            if not items:
+                if is_first_page:
+                    self.report_tools._write_report(name, "", fmt=fmt)
+                break
+
+            if max_items is not None:
+                remaining = max_items - total_collected
+                if remaining <= 0:
+                    break
+                items = items[:remaining]
+
+            if fmt == "jsonl":
+                content = "\n".join(json.dumps(item) for item in items)
+            else:
+                content = json.dumps(items, indent=2)
+
+            if is_first_page:
+                self.report_tools._write_report(name, content, fmt=fmt)
+            else:
+                self.report_tools._append_to_report(name, content, fmt=fmt)
+
+            total_collected += len(items)
+            page_count += 1
+            is_first_page = False
+
+            current_offset += page_size
+            arguments[offset_param] = current_offset
+
+            effective_limit = total_available
+            if max_items is not None:
+                effective_limit = min(effective_limit, max_items)
+            if total_collected >= effective_limit:
+                break
+            if len(items) < page_size:
+                break
+
+        page_label = "page" if page_count == 1 else "pages"
+        return f"Collected {total_collected} items to report '{name}' ({page_count} {page_label})"
+
     async def _execute_tool(self, tool_name: str, arguments: dict) -> str:
         """Execute a tool call on the appropriate MCP server, introspection, or internal tool
 
         Args:
             tool_name: Name of the tool to execute (format: server__tool_name)
-            arguments: Tool arguments. If '__save_to_file' is present, the raw result
-                      will be saved to that path and a summary will be returned instead.
+            arguments: Tool arguments. Special redirection parameters (popped before validation):
+                - __save_to_file: Save raw result to a file path
+                - __write_to_report: Write result as a new report ('name' or 'name:format')
+                - __append_to_report: Append result to a report ('name' or 'name:format')
 
         Returns:
-            Tool result string, or a summary if __save_to_file was specified
+            Tool result string, or a summary if any redirection parameter was specified
         """
 
-        # Extract special __save_to_file parameter if present
+        # Extract special redirection parameters before validation
         save_to_file = arguments.pop("__save_to_file", None)
+        write_to_report = arguments.pop("__write_to_report", None)
+        append_to_report = arguments.pop("__append_to_report", None)
+        collect_to_report = arguments.pop("__collect_to_report", None)
         if save_to_file:
             logger.info("Tool %s called with __save_to_file=%s", tool_name, save_to_file)
+        if write_to_report:
+            logger.info("Tool %s called with __write_to_report=%s", tool_name, write_to_report)
+        if append_to_report:
+            logger.info("Tool %s called with __append_to_report=%s", tool_name, append_to_report)
+        if collect_to_report:
+            logger.info("Tool %s called with __collect_to_report=%s", tool_name, collect_to_report)
 
         # Validate arguments against tool schema before execution
         validation_error = self._validate_tool_arguments(tool_name, arguments)
@@ -2085,21 +2335,9 @@ class AiAssistAgent:
 
                 self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=True)
 
-                # Handle __save_to_file for introspection tools
-                if save_to_file:
-                    from pathlib import Path
-
-                    try:
-                        output_path = Path(save_to_file)
-                        output_path.parent.mkdir(parents=True, exist_ok=True)
-                        output_path.write_text(result_text)
-                        summary = f"Result saved to {save_to_file} ({len(result_text):,} bytes, {len(result_text.splitlines())} lines)"
-                        logger.info("Saved tool result to file: %s (%d bytes)", save_to_file, len(result_text))
-                        return summary
-                    except Exception as e:
-                        error_msg = f"Error saving result to {save_to_file}: {str(e)}"
-                        logger.error(error_msg)
-                        return error_msg
+                redirect = self._handle_result_redirection(result_text, save_to_file, write_to_report, append_to_report)
+                if redirect:
+                    return redirect
 
                 return result_text
             except Exception as e:
@@ -2213,21 +2451,9 @@ class AiAssistAgent:
                 is_success = not (isinstance(result_text, str) and result_text.startswith("Error:"))
                 self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=is_success)
 
-                # Handle __save_to_file for internal tools
-                if save_to_file:
-                    from pathlib import Path
-
-                    try:
-                        output_path = Path(save_to_file)
-                        output_path.parent.mkdir(parents=True, exist_ok=True)
-                        output_path.write_text(result_text)
-                        summary = f"Result saved to {save_to_file} ({len(result_text):,} bytes, {len(result_text.splitlines())} lines)"
-                        logger.info("Saved tool result to file: %s (%d bytes)", save_to_file, len(result_text))
-                        return summary
-                    except Exception as e:
-                        error_msg = f"Error saving result to {save_to_file}: {str(e)}"
-                        logger.error(error_msg)
-                        return error_msg
+                redirect = self._handle_result_redirection(result_text, save_to_file, write_to_report, append_to_report)
+                if redirect:
+                    return redirect
 
                 return result_text
             except Exception as e:
@@ -2238,6 +2464,20 @@ class AiAssistAgent:
         # Handle regular MCP server tools
         if server_name not in self.sessions:
             return f"Error: Server {server_name} not connected"
+
+        # Auto-paginated collection
+        if collect_to_report:
+            try:
+                summary = await self._collect_paginated_to_report(
+                    server_name, original_tool_name, arguments, collect_to_report
+                )
+                self.audit_logger.log_tool_call(tool_name, arguments, summary, success=True)
+                return summary
+            except Exception:
+                logger.exception("Error collecting paginated results for %s", tool_name)
+                error_msg = f"Error collecting paginated results for {tool_name}"
+                self.audit_logger.log_tool_call(tool_name, arguments, error_msg, success=False)
+                return error_msg
 
         session = self.sessions[server_name]
 
@@ -2273,21 +2513,9 @@ class AiAssistAgent:
 
             self.audit_logger.log_tool_call(tool_name, arguments, result_text, success=True)
 
-            # Handle __save_to_file: save raw result to file and return summary
-            if save_to_file:
-                from pathlib import Path
-
-                try:
-                    output_path = Path(save_to_file)
-                    output_path.parent.mkdir(parents=True, exist_ok=True)
-                    output_path.write_text(result_text)
-                    summary = f"Result saved to {save_to_file} ({len(result_text):,} bytes, {len(result_text.splitlines())} lines)"
-                    logger.info("Saved tool result to file: %s (%d bytes)", save_to_file, len(result_text))
-                    return summary
-                except Exception as e:
-                    error_msg = f"Error saving result to {save_to_file}: {str(e)}"
-                    logger.error(error_msg)
-                    return error_msg
+            redirect = self._handle_result_redirection(result_text, save_to_file, write_to_report, append_to_report)
+            if redirect:
+                return redirect
 
             return result_text
         except Exception as e:

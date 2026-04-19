@@ -49,7 +49,7 @@ This document provides guidance for AI agents and developers working on the ai-a
 
 ### Large Tool Results
 
-All tools support `__save_to_file` parameter - add it to any tool call to save the raw result directly to a file instead of returning it. Agent receives a summary. No automatic truncation.
+All tools support `__save_to_file`, `__write_to_report`, `__append_to_report`, and `__collect_to_report` parameters. Add to any tool call to redirect raw results to a file or report. Agent receives a summary. `__collect_to_report` auto-paginates and collects all results in one call (requires server pagination config in `mcp_servers.yaml`).
 
 ## Documentation
 

@@ -103,6 +103,17 @@ def setup_logging(config_dir: Path | None = None) -> None:
     )
 
 
+class PaginationConfig(BaseModel):
+    """Pagination configuration for an MCP server's tools"""
+
+    offset_param: str = "offset"
+    limit_param: str = "limit"
+    default_page_size: int = 200
+    total_field: str  # dot-path: "_meta.count", "total", "total_count"
+    data_field: str = "auto"  # "hits", "items", or "auto" (find first list key)
+    tool_overrides: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+
 class MCPServerConfig(BaseModel):
     """MCP Server configuration"""
 
@@ -110,6 +121,7 @@ class MCPServerConfig(BaseModel):
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     enabled: bool = True
+    pagination: PaginationConfig | None = None
 
 
 class AiAssistConfig(BaseModel):
@@ -261,8 +273,16 @@ def load_mcp_servers_from_yaml(path: Path) -> dict[str, MCPServerConfig]:
             for key, value in config.get("env", {}).items():
                 env[key] = os.path.expandvars(value)
 
+            pagination = None
+            if "pagination" in config:
+                pagination = PaginationConfig(**config["pagination"])
+
             servers[name] = MCPServerConfig(
-                command=config["command"], args=config.get("args", []), env=env, enabled=config.get("enabled", True)
+                command=config["command"],
+                args=config.get("args", []),
+                env=env,
+                enabled=config.get("enabled", True),
+                pagination=pagination,
             )
 
         return servers

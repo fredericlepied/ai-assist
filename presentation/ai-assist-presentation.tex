@@ -692,6 +692,62 @@ Skills are \alert{untrusted code} --- defense in depth:
 \end{columns}
 \end{frame}
 
+% ── Handling Data Beyond the Context Window ─────────────────────
+\begin{frame}[fragile]{Handling Data Beyond the Context Window}
+\begin{columns}[T]
+\begin{column}{0.45\textwidth}
+\textbf{The Problem}
+\begin{itemize}\scriptsize
+  \item Tool results can exceed the context window $\rightarrow$ \alert{truncated data}
+  \item Paginated APIs require many round-trips, wasting tokens
+\end{itemize}
+
+\smallskip
+\textbf{Result Redirection} (any tool, same call)
+\begin{itemize}\scriptsize
+  \item \texttt{\_\_save\_to\_file}, \texttt{\_\_write\_to\_report}, \texttt{\_\_append\_to\_report}
+  \item Agent gets a short summary --- data goes to report
+\end{itemize}
+
+\smallskip
+\textbf{Auto-Paginated Collection}
+\begin{itemize}\scriptsize
+  \item \texttt{\_\_collect\_to\_report}: \textbf{one call} replaces the fetch loop
+  \item Pagination config per server in \texttt{mcp\_servers.yaml}
+  \item \textbf{2.2$\times$ faster}, fraction of the token cost
+\end{itemize}
+\end{column}
+\begin{column}{0.50\textwidth}
+\begin{lstlisting}[style=code,basicstyle=\ttfamily\tiny]
+# Redirect result to a report
+search_jira_tickets(jql="...",
+  __write_to_report="jira-data:jsonl")
+
+# Auto-paginate: collect ALL items
+search_github_issues(query="...",
+  __collect_to_report="all-prs:jsonl")
+# => "Collected 110 items (6 pages)"
+
+# Limit to 50 items
+search_dci_jobs(query="...",
+  __collect_to_report="jobs:jsonl:50")
+\end{lstlisting}
+
+\smallskip
+\textbf{\scriptsize Pagination config (mcp\_servers.yaml):}
+\begin{lstlisting}[style=yaml,basicstyle=\ttfamily\tiny]
+pagination:
+  total_field: _meta.count
+  data_field: auto
+  tool_overrides:
+    search_dci_jobs:
+      total_field: total
+      data_field: hits
+\end{lstlisting}
+\end{column}
+\end{columns}
+\end{frame}
+
 % ══════════════════════════════════════════════════════════════════
 \section{Knowledge Graph}
 % ══════════════════════════════════════════════════════════════════

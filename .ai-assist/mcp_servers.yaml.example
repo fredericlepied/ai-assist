@@ -14,6 +14,25 @@ servers:
       JIRA_URL: "${JIRA_URL}"
       GOOGLE_APPLICATION_CREDENTIALS: "${GOOGLE_APPLICATION_CREDENTIALS}"
       MCP_SHOW_BANNER: "false"
+    # Pagination config for __collect_to_report auto-pagination
+    pagination:
+      offset_param: offset
+      limit_param: limit
+      default_page_size: 200
+      total_field: _meta.count
+      data_field: auto
+      tool_overrides:
+        search_dci_jobs:
+          total_field: total
+          data_field: hits
+        search_github_issues:
+          limit_param: max_results
+          total_field: total_count
+          data_field: items
+        search_jira_tickets:
+          limit_param: max_results
+          total_field: total_count
+          data_field: items
 
   # DCI MCP Server - Local development version
   dci-local:

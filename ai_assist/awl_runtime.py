@@ -362,7 +362,7 @@ class AWLRuntime:
             outcome = TaskOutcome(status="success", summary=response[:200], exposed=exposed)
             self._task_outcomes.append(outcome)
 
-            # Log exposed variables
+            # Log exposed variables and default missing ones to None
             if task.expose:
                 missing_vars = [v for v in task.expose if v not in exposed]
                 if missing_vars:
@@ -374,6 +374,10 @@ class AWLRuntime:
                         missing_vars,
                     )
                     print(f"    [!] missing exposed vars: {missing_vars}")
+                    # Default missing vars to None so downstream @if checks
+                    # evaluate to False instead of triggering "undefined variable"
+                    for var in missing_vars:
+                        self._variables[var] = None
 
             if exposed:
                 for key, val in exposed.items():
@@ -692,8 +696,12 @@ class AWLRuntime:
         if task.expose:
             keys = ", ".join(task.expose)
             example = ", ".join(f'"{k}": "<value>"' for k in task.expose)
-            parts.append(f"\nWhen complete, output results as JSON with these keys: {keys}")
-            parts.append(f"Example: {{{example}}}")
+            parts.append(f"\nIMPORTANT: Your final message MUST end with a JSON block containing these keys: {keys}")
+            parts.append(f"```json\n{{{example}}}\n```")
+            parts.append(
+                "This JSON block is mandatory — without it the workflow cannot continue. "
+                "Do NOT put the JSON inside a tool call or think block."
+            )
 
         # If the goal references an MCP prompt (e.g. /server/prompt), remind the agent
         # to use introspection__execute_mcp_prompt to run it.
@@ -712,29 +720,49 @@ class AWLRuntime:
         if not expose_vars:
             return {}
 
+        expected = set(expose_vars)
+        result: dict[str, Any] = {}
+
+        # Try fenced JSON blocks first — accumulate across all blocks
         json_blocks = re.findall(r"```(?:json)?\s*\n?(.*?)\n?```", response, re.DOTALL)
         for block in json_blocks:
             try:
                 data = json.loads(block.strip())
                 if isinstance(data, dict):
-                    return {k: data[k] for k in expose_vars if k in data}
+                    for k in expose_vars:
+                        if k in data and k not in result:
+                            result[k] = data[k]
+                    if expected <= set(result.keys()):
+                        return result
             except json.JSONDecodeError:
                 continue
 
+        if expected <= set(result.keys()):
+            return result
+
+        # Try parsing the entire response as JSON
         try:
             data = json.loads(response.strip())
             if isinstance(data, dict):
-                return {k: data[k] for k in expose_vars if k in data}
+                for k in expose_vars:
+                    if k in data and k not in result:
+                        result[k] = data[k]
+                if expected <= set(result.keys()):
+                    return result
         except json.JSONDecodeError:
             pass
 
-        json_match = re.search(r"\{[^{}]*\}", response)
-        if json_match:
+        # Fallback: find inline JSON objects (non-nested)
+        for json_match in re.finditer(r"\{[^{}]*\}", response):
             try:
                 data = json.loads(json_match.group())
                 if isinstance(data, dict):
-                    return {k: data[k] for k in expose_vars if k in data}
+                    for k in expose_vars:
+                        if k in data and k not in result:
+                            result[k] = data[k]
+                    if expected <= set(result.keys()):
+                        return result
             except json.JSONDecodeError:
-                pass
+                continue
 
-        return {}
+        return result
