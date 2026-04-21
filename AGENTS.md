@@ -4,7 +4,7 @@ This document provides guidance for AI agents and developers working on the ai-a
 
 ## Project Overview
 
-**ai-assist** (AI Assistant for Managers) is an intelligent assistant that helps managers monitor and analyze Jira projects and DCI (Distributed CI) jobs through natural language interaction.
+**ai-assist** (AI Assistant for Managers) is an intelligent assistant that integrates with Claude, MCP (Model Context Protocol) servers, Agent Skills, and a temporal knowledge graph to provide intelligent monitoring, querying, and workflow automation.
 
 ### Core Architecture
 
@@ -32,24 +32,120 @@ This document provides guidance for AI agents and developers working on the ai-a
 └────────────────┘ └────────────┘ └────────────────┘
 ```
 
-### Key Components
+The system has four major subsystems:
 
-1. **ai_assist/main.py**: CLI entry point, handles user interaction modes
-2. **ai_assist/agent.py**: MCP agent implementation, manages Claude conversations and tool execution
-3. **ai_assist/think_tool.py**: Planning/reasoning scratchpad for multi-step tasks
-4. **ai_assist/config.py**: Configuration management using Pydantic models
-5. **ai_assist/monitors.py**: Periodic monitoring tasks for Jira and DCI
-6. **ai_assist/state.py**: State management, caching, and history tracking
-7. **ai_assist/service.py**: Systemd user service management (install, remove, status, logs)
-8. **ai_assist/awl_parser.py**: AWL (Agent Workflow Language) parser
-9. **ai_assist/awl_runtime.py**: AWL workflow execution engine
-10. **ai_assist/awl_ast.py**: AWL AST node definitions
-11. **ai_assist/awl_expressions.py**: AWL expression evaluator and variable interpolation
-11. **emacs/awl-mode.el**: Emacs major mode for AWL files (syntax highlighting, indentation)
+1. **MCP Integration** (`agent.py`): Connects to MCP servers (DCI, Jira, etc.) and routes tool calls using the format `server_name__tool_name`
+2. **AWL Runtime** (`awl_parser.py`, `awl_runtime.py`, `awl_ast.py`, `awl_expressions.py`): Agent Workflow Language interpreter for multi-step workflows
+3. **Knowledge Graph** (`knowledge_graph.py`): Temporal SQLite database with vector embeddings for entity tracking, change detection, and conversation memory
+4. **Agent Skills** (`skills_loader.py`, `skills_manager.py`): Loads agentskills.io-compliant skills with optional sandboxed script execution
 
-### Large Tool Results
+Key interaction modes:
+- **Interactive** (`tui_interactive.py`): Rich TUI with streaming responses, history, tab completion
+- **Monitor** (`monitors.py`, `task_runner.py`): Periodic scheduled tasks with hot-reload
+- **Query** (`main.py`): One-off queries
+- **AWL** (`awl_runtime.py`): Multi-step workflow execution with conditionals and loops
 
-All tools support `__save_to_file`, `__write_to_report`, `__append_to_report`, and `__collect_to_report` parameters. Add to any tool call to redirect raw results to a file or report. Agent receives a summary. `__collect_to_report` auto-paginates and collects all results in one call (requires server pagination config in `mcp_servers.yaml`).
+### MCP Agent Flow
+```
+User → CLI (main.py) → AiAssistAgent (agent.py) → Claude API
+                                ↓
+                        MCP Server Sessions
+                        (DCI, Jira, GitHub, etc.)
+                                ↓
+                        Tool Results → Response
+```
+
+### AWL (Agent Workflow Language)
+
+AWL scripts define intent-driven workflows where the agent autonomously selects tools to achieve goals. Key constructs:
+
+- `@task <name> @flags`: Defines a goal for the agent to achieve, exposing variables
+- `@if <condition>`: Conditional execution with Python-like expressions
+- `@loop <var> as <item> limit=N collect=<var>`: Iteration with map-reduce pattern
+- `${var}`: Variable interpolation in goals and text
+- `@no-kg`, `@no-history`: Flags to suppress knowledge graph context or conversation history
+
+Files: `awl_parser.py` (parser), `awl_runtime.py` (executor), `awl_ast.py` (AST nodes), `awl_expressions.py` (variable interpolation and expression evaluation)
+
+See `docs/AWL_SPECIFICATIONS.md` for complete syntax.
+
+### Knowledge Graph
+
+Temporal database tracking:
+- Entities (DCI jobs, Jira tickets, conversations)
+- Relationships between entities
+- Change history (created_at vs discovered_at for lag detection)
+- Vector embeddings for semantic search (`embedding.py`, `context.py`)
+
+**KG Synthesis**: Nightly task extracts structured knowledge (preferences, lessons, context) from conversations and injects relevant context into future queries via semantic similarity.
+
+**Auto Context Injection**: Semantically relevant entities are automatically surfaced in the system prompt based on query similarity.
+
+Files: `knowledge_graph.py`, `kg_queries.py`, `kg_query_tools.py`, `knowledge_tools.py`, `embedding.py`, `context.py`
+
+### Agent Skills
+
+Skills follow the [agentskills.io](https://agentskills.io) specification:
+- SKILL.md with YAML frontmatter (name, description, allowed-tools)
+- Optional scripts/ directory for sandboxed execution
+- Loaded into system prompt automatically
+
+**Script Execution Security** (disabled by default):
+- Requires `AI_ASSIST_ALLOW_SCRIPT_EXECUTION=true`
+- Sandboxed environment (no API keys, 30s timeout, 20KB output limit)
+- Per-skill env var allowlist via `/skill/add_env` (persisted in `~/.ai-assist/skill_env.json`)
+
+Files: `skills_loader.py`, `skills_manager.py`, `script_execution_tools.py`, `security.py`
+
+### Service Management
+
+Cross-platform background service installation for persistent monitoring:
+- **Linux**: systemd user services with `journalctl` logging
+- **macOS**: launchd user agents with file-based logging (`~/Library/Logs/`)
+- Abstract `ServiceBackend` pattern for platform extensibility
+- Preserves user environment (PATH, env vars) in service context
+- Multiple instance support via config directory naming
+
+Files: `service.py`
+
+### Configuration & State
+
+**Configuration sources** (precedence order):
+1. Environment variables (`.env` file)
+2. `~/.ai-assist/mcp_servers.yaml` (MCP server definitions)
+3. `~/.ai-assist/identity.yaml` (personalization)
+4. `~/.ai-assist/schedules.json` (monitors/tasks)
+
+**Hot-reload** (`config_watcher.py`, `file_watchdog.py`):
+- Changes to config files trigger automatic reload without restart
+- Monitor mode restarts tasks when `schedules.json` changes
+
+**State persistence** (`~/.ai-assist/`):
+- `knowledge_graph.db` - Temporal database
+- `state/` - Monitor states and cache
+- `allowed_commands.json` - User-approved shell commands
+- `skill_env.json` - Per-skill env var allowlists
+- `scheduled-actions.json` - One-time future actions
+- `interactive_history.txt` - Command history
+
+Files: `config.py`, `state.py`, `config_watcher.py`, `file_watchdog.py`
+
+### Tools Architecture
+
+**Built-in tools** are organized by domain:
+- `report_tools.py` - Markdown report management (`~/ai-reports/`)
+- `schedule_tools.py` - Create/update/delete monitors and tasks
+- `schedule_action_tools.py` - One-time scheduled actions with notifications
+- `knowledge_tools.py` - KG synthesis and learning
+- `kg_query_tools.py` - KG querying (stats, changes, historical state)
+- `filesystem_tools.py` - File operations (read, search, execute)
+- `think_tool.py` - Planning/reasoning scratchpad
+- `json_tools.py` - JSON querying via jq (requires jq installed)
+- `introspection_tools.py` - Context awareness (current date/time, working directory, user info)
+
+**MCP tools** from configured servers are dynamically loaded and prefixed with server name.
+
+**Large tool results**: All tools support `__save_to_file`, `__write_to_report`, `__append_to_report`, and `__collect_to_report` parameters. Add to any tool call to redirect raw results to a file or report. Agent receives a summary. `__collect_to_report` auto-paginates and collects all results in one call (requires server pagination config in `mcp_servers.yaml`).
 
 ## Documentation
 
@@ -126,6 +222,8 @@ pytest tests/
 pytest tests/test_agent.py -v
 pytest tests/ --cov=ai_assist --cov-report=html
 ```
+
+Run `make test-cov` to verify coverage (≥71% required for build).
 
 ### 2. DRY - Don't Repeat Yourself
 
@@ -249,26 +347,6 @@ class SlackNotifier:
 5. **Momentum**: Visible progress maintains motivation
 
 ### 4. Additional Best Practices
-
-#### Code Organization
-
-```
-ai_assist/
-├── __init__.py          # Package info only
-├── main.py             # CLI and user interaction
-├── agent.py            # Core agent logic
-├── config.py           # Configuration models
-├── state.py            # State management and caching
-├── monitors.py         # Monitoring tasks
-├── notifications.py    # (Future) Notification handlers
-└── utils.py            # (Future) Shared utilities
-
-tests/
-├── test_agent.py       # Agent tests
-├── test_config.py      # Configuration tests
-├── test_monitors.py    # Monitor tests
-└── conftest.py         # Shared test fixtures
-```
 
 #### Minimize Code Branches
 
@@ -401,6 +479,115 @@ async def query(self, prompt: str, max_turns: int = 10) -> str:
     tool_results: List[Dict] = []
 ```
 
+#### Configuration Validation
+
+Use Pydantic models (`config.py`) for validation and environment loading with `Field(default_factory=lambda: os.getenv(...))`.
+
+```python
+class MyConfig(BaseModel):
+    setting: str = Field(default_factory=lambda: os.getenv("MY_SETTING", "default"))
+    number: int = Field(default=42, ge=0, le=100)
+
+    @validator("setting")
+    def validate_setting(cls, v):
+        if not v:
+            raise ValueError("Setting cannot be empty")
+        return v
+```
+
+## Important Patterns
+
+### Tool Execution
+
+All MCP tools use the format `server_name__tool_name`. The agent parses this and routes to the correct session.
+
+### Monitor Pattern
+
+Monitors (`monitors.py`) run periodic checks, cache results, and track seen items to avoid duplicate notifications. They support:
+- Interval schedules (e.g., "5m", "1h", "9:00 on weekdays")
+- Knowledge graph auto-save
+- Notification channels (desktop, file, console)
+- MCP prompts (e.g., `mcp://server/prompt`)
+
+```python
+async def check(self) -> list[dict]:
+    """Standard monitor check pattern"""
+    results = []
+
+    for query_item in self.query_items:
+        prompt = self._build_prompt(query_item)
+
+        try:
+            result = await self.agent.query(prompt)
+            results.append({
+                "item": query_item,
+                "summary": result,
+                "timestamp": datetime.now().isoformat(),
+            })
+        except Exception as e:
+            logger.error(f"Error checking {query_item}: {e}")
+
+    self.last_check = datetime.now()
+    return results
+```
+
+### Scheduled Actions
+
+One-time future actions (`scheduled_actions.py`) execute via the `/monitor` process with notifications. The agent decides whether to send a simple notification or query via the agent based on the prompt.
+
+Actions older than 7 days are archived to `scheduled-actions-archive.jsonl`.
+
+## Code Organization
+
+```
+ai_assist/
+├── main.py                    # CLI entry point
+├── agent.py                   # MCP agent with tool execution
+├── config.py                  # Pydantic configuration models
+├── service.py                 # Cross-platform service management (systemd/launchd)
+├── awl_*.py                   # AWL parser, runtime, AST, expressions
+├── knowledge_graph.py         # Temporal KG database
+├── embedding.py, context.py   # Vector embeddings and semantic search
+├── skills_*.py                # Agent Skills loader and manager
+├── tui*.py                    # Terminal UI components
+├── monitors.py, tasks.py      # Monitoring and task execution
+├── *_tools.py                 # Tool implementations (report, schedule, KG, filesystem, etc.)
+├── scheduled_actions.py       # One-time future actions
+├── notification_*.py          # Notification channels and dispatcher
+├── state.py                   # State management and caching
+├── *_watcher.py               # File watching and hot-reload
+└── security.py                # Sandboxed script execution
+
+tests/                         # Test suite (mirrors ai_assist structure)
+docs/                          # Detailed documentation
+presentation/                  # LaTeX/Beamer slides (run `make -C presentation`)
+emacs/                         # AWL major mode for Emacs
+```
+
+## Configuration Files
+
+- `.env` - Environment variables (API keys, model, feature flags)
+- `~/.ai-assist/mcp_servers.yaml` - MCP server definitions
+- `~/.ai-assist/identity.yaml` - User/assistant personalization
+- `~/.ai-assist/schedules.json` - Monitors and periodic tasks
+- `.pre-commit-config.yaml` - Git hooks configuration
+- `pyproject.toml` - Python package config, tool settings, linting rules
+
+## Documentation
+
+Detailed documentation in `docs/`:
+- `AWL_SPECIFICATIONS.md` - Complete AWL syntax and semantics
+- `PERSONAL_SKILLS.md` - Creating custom Agent Skills
+- `IDENTITY.md` - identity.yaml configuration guide
+- `MULTI_INSTANCE.md` - Running multiple ai-assist instances
+- `KNOWLEDGE_MANAGEMENT.md` - Knowledge graph usage and synthesis
+- `SCHEDULED_ACTIONS.md` - One-time future actions
+
+Also see:
+- `CONTRIBUTING.md` - Pre-commit setup and workflow
+- `SECURITY.md` - Security model for skill scripts
+- `VERTEX_AI_SETUP.md` - Vertex AI configuration
+
 ## Development Workflow
 
 ### Adding a New Feature
@@ -414,18 +601,23 @@ async def query(self, prompt: str, max_turns: int = 10) -> str:
 7. **Presentation**: Update `presentation/ai-assist-presentation.tex` to reflect the new feature and verify it builds with `make -C presentation`
 8. **Verify**: Run `pre-commit run -a` and ensure all checks pass before declaring the feature complete
 
+### Adding a New Tool
+
+1. Create tool class in appropriate `*_tools.py` file (follow `think_tool.py` pattern)
+2. Register in `agent.py`: import, init, tool registration, dispatch chain
+3. Write tests in `tests/test_*_tools.py`
+4. Update README.md if user-facing
+5. Update presentation if appropriate
+
 ### Adding a New MCP Server
 
-1. **Configure**: Add server to `config.py`
-2. **Test Connection**: Verify connection in `agent.py`
-3. **Document Tools**: List available tools in README.md
-4. **Create Monitor**: If needed, add monitor in `monitors.py`
-5. **Test Integration**: Write tests for the new server
-
-### Example: Adding GitHub MCP Server
+1. Add server config to `~/.ai-assist/mcp_servers.yaml`
+2. Test connection in interactive mode
+3. Document available tools in README.md
 
 ```python
-# 1. Add to config.py
+# Example: Adding GitHub MCP Server
+# 1. Add to config
 mcp_servers={
     "dci": MCPServerConfig(...),
     "github": MCPServerConfig(
@@ -434,66 +626,23 @@ mcp_servers={
         env={"GITHUB_TOKEN": os.getenv("GITHUB_TOKEN", "")}
     ),
 }
-
-# 2. Test (tests/test_github_integration.py)
-async def test_github_server_connection():
-    config = get_test_config_with_github()
-    agent = AiAssistAgent(config)
-    await agent.connect_to_servers()
-    assert "github" in agent.sessions
-
-# 3. Add monitor (ai_assist/monitors.py)
-class GitHubMonitor:
-    async def check(self):
-        """Check for PR updates"""
-        prompt = "List open PRs that need review"
-        return await self.agent.query(prompt)
-
-# 4. Document (README.md)
-### GitHub Tools
-- Search repositories
-- List pull requests
-- Get issue details
 ```
 
-## Debugging Tips
+### Adding a New AWL Feature
 
-### Enable Verbose Logging
+1. Update AST nodes in `awl_ast.py` if needed
+2. Update parser in `awl_parser.py`
+3. Update runtime in `awl_runtime.py`
+4. Add tests in `tests/test_awl_*.py`
+5. Update `docs/AWL_SPECIFICATIONS.md`
 
-```python
-# ai_assist/agent.py
-import logging
+### Adding Platform Support for Service Management
 
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-
-logger.debug(f"Executing tool: {tool_name} with args: {arguments}")
-```
-
-### Test Individual Components
-
-```python
-# Test config loading
-python -c "from ai_assist.config import get_config; print(get_config())"
-
-# Test agent connection
-python -c "import asyncio; from ai_assist.agent import AiAssistAgent; from ai_assist.config import get_config; asyncio.run(AiAssistAgent(get_config()).connect_to_servers())"
-```
-
-### Mock MCP Servers for Testing
-
-```python
-# tests/conftest.py
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-
-@pytest.fixture
-def mock_mcp_session():
-    session = AsyncMock()
-    session.list_tools.return_value = MagicMock(tools=[])
-    session.call_tool.return_value = MagicMock(content=[MagicMock(text="test result")])
-    return session
-```
+1. Create new class inheriting from `ServiceBackend` in `service.py`
+2. Implement all abstract methods: `service_file_path`, `service_content`, `install`, `remove`, `action`, `status`, `logs`
+3. Add platform detection in `_get_backend()` factory function
+4. Write tests in `tests/test_service.py`
+5. Document platform-specific requirements in README.md
 
 ## State Management Pattern
 
@@ -522,55 +671,6 @@ state_manager.update_monitor(
 
 # Append to history
 state_manager.append_history(monitor_name, result)
-```
-
-### Benefits of State Management
-
-1. **Reduced API Calls**: Cache prevents redundant queries within TTL window
-2. **Change Detection**: Track what's new vs. what was already seen
-3. **Historical Context**: Maintain logs for trend analysis
-4. **Offline Capability**: Use cached data when services are unavailable
-5. **Cost Efficiency**: Fewer Claude API calls and MCP tool executions
-
-## Common Patterns
-
-### Query Pattern for Monitors
-
-```python
-async def check(self) -> list[dict]:
-    """Standard monitor check pattern"""
-    results = []
-
-    for query_item in self.query_items:
-        prompt = self._build_prompt(query_item)
-
-        try:
-            result = await self.agent.query(prompt)
-            results.append({
-                "item": query_item,
-                "summary": result,
-                "timestamp": datetime.now().isoformat(),
-            })
-        except Exception as e:
-            logger.error(f"Error checking {query_item}: {e}")
-
-    self.last_check = datetime.now()
-    return results
-```
-
-### Configuration Pattern
-
-```python
-# Use Pydantic for validation and environment loading
-class MyConfig(BaseModel):
-    setting: str = Field(default_factory=lambda: os.getenv("MY_SETTING", "default"))
-    number: int = Field(default=42, ge=0, le=100)
-
-    @validator("setting")
-    def validate_setting(cls, v):
-        if not v:
-            raise ValueError("Setting cannot be empty")
-        return v
 ```
 
 ## Future Enhancements

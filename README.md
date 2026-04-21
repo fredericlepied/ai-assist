@@ -581,6 +581,9 @@ Schedules stored in `~/.ai-assist/schedules.json` with hot-reload support.
 **Planning:**
 - `think` - Planning and reasoning scratchpad for complex multi-step tasks
 
+**JSON Processing** (requires `jq` installed):
+- `json_query` - Query or transform JSON files using jq filter expressions
+
 **Filesystem Tools:**
 - `read_file` - Read files with line-range support
 - `search_in_file` - Regex search in files
@@ -689,6 +692,7 @@ This is useful during development to see code changes immediately.
 - Python 3.12+
 - Anthropic API access (Vertex AI or Direct API)
 - MCP servers (optional but recommended)
+- `jq` (optional, enables `internal__json_query` tool for efficient JSON processing)
 
 ## License
 
