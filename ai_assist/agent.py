@@ -16,6 +16,7 @@ from .config import AiAssistConfig, MCPServerConfig
 from .filesystem_tools import FilesystemTools
 from .identity import get_identity
 from .introspection_tools import IntrospectionTools
+from .json_tools import JsonTools
 from .mcp_stdio_fix import stdio_client_fixed
 from .report_tools import ReportTools
 from .schedule_tools import ScheduleTools
@@ -276,6 +277,9 @@ class AiAssistAgent:
         # Initialize think tool (planning/reasoning scratchpad)
         self.think_tool = ThinkTool()
 
+        # Initialize JSON query tool (requires jq)
+        self.json_tools = JsonTools(filesystem_tools=self.filesystem_tools)
+
         self.anthropic: Anthropic | AnthropicVertex
         if config.use_vertex:
             vertex_kwargs: dict[str, Any] = {"project_id": config.vertex_project_id}
@@ -472,6 +476,14 @@ class AiAssistAgent:
         # Add think tool (planning/reasoning scratchpad)
         think_tool_defs = self.think_tool.get_tool_definitions()
         self.available_tools.extend(think_tool_defs)
+
+        # Add JSON query tool (requires jq installed)
+        json_tool_defs = self.json_tools.get_tool_definitions()
+        if json_tool_defs:
+            self.available_tools.extend(json_tool_defs)
+            print(f"✓ Added {len(json_tool_defs)} JSON query tools (jq)")
+        else:
+            print("⚠ jq not found — install jq to enable JSON query tool")
 
         # Load installed skills
         self.skills_manager.load_installed_skills()
@@ -1034,6 +1046,15 @@ class AiAssistAgent:
             prompt += "  3. Use internal__search_in_file with specific patterns to find relevant sections\n"
             prompt += "  4. Reduce the scope (smaller limit, narrower date range, more specific query)\n"
             prompt += "- Always tell the user when you're working with truncated data\n\n"
+
+        if self.json_tools.jq_path:
+            prompt += "## JSON Processing\n\n"
+            prompt += "When you need to extract or transform data from a JSON file "
+            prompt += "(e.g., saved via __save_to_file), use internal__json_query with a jq filter "
+            prompt += "instead of writing Python scripts. "
+            prompt += "Common filters: `.key`, `.[] | {id, status}`, "
+            prompt += '`[.[] | select(.status == "failed")]`, '
+            prompt += "`length`, `map(.field)`, `group_by(.key)`, `sort_by(.key)`.\n\n"
 
         # Add MCP prompt execution guidance if any prompts are available
         if self.available_prompts:
@@ -2392,6 +2413,7 @@ class AiAssistAgent:
 
                 script_tools = ["execute_skill_script"]
                 think_tools = ["think"]
+                json_tool_names = ["json_query"]
                 schedule_action_tools = ["schedule_action"]
                 knowledge_tools = ["save_knowledge", "search_knowledge", "trigger_synthesis", "run_kg_synthesis"]
                 kg_query_tool_names = [
@@ -2418,6 +2440,8 @@ class AiAssistAgent:
                         )
                 elif original_tool_name in think_tools:
                     result_text = await self.think_tool.execute_tool(original_tool_name, arguments)
+                elif original_tool_name in json_tool_names:
+                    result_text = await self.json_tools.execute_tool(original_tool_name, arguments)
                 elif original_tool_name in schedule_action_tools:
                     result_text = await self.schedule_action_tools.execute_tool(
                         f"internal__{original_tool_name}", arguments
