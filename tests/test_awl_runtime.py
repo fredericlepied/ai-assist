@@ -353,12 +353,79 @@ async def test_missing_exposed_var_defaults_to_none(mock_agent, runtime, capsys)
     result = await runtime.execute(workflow)
     assert result.success is True
     # The @if should take the else branch (has_improvements is None)
-    assert mock_agent.query.call_count == 2  # cluster + report (not apply)
+    # 3 calls: cluster + nudge (retry for missing has_improvements) + report (not apply)
+    assert mock_agent.query.call_count == 3
     captured = capsys.readouterr()
     assert "missing exposed vars" in captured.out
     assert "has_improvements" in captured.out
     # Should NOT have an "undefined variable" warning
     assert "undefined variable" not in captured.out
+
+
+@pytest.mark.asyncio
+async def test_nudge_recovers_missing_exposed_vars(mock_agent, runtime, capsys):
+    """Nudge should recover missing exposed vars on retry."""
+    # First call returns partial vars, nudge call returns the missing one
+    mock_agent.query.side_effect = [
+        '{"clusters_summary": "3 clusters found"}',  # cluster task — missing has_improvements
+        '{"has_improvements": true}',  # nudge retry — recovers it
+        '{"files_changed": "log_map.yml"}',  # apply task (then branch)
+    ]
+    workflow = WorkflowNode(
+        body=[
+            TaskNode(
+                task_id="cluster",
+                goal="Cluster results.",
+                expose=["clusters_summary", "has_improvements"],
+            ),
+            IfNode(
+                expression="has_improvements",
+                then_body=[TaskNode(task_id="apply", goal="Apply changes.", expose=["files_changed"])],
+                else_body=[TaskNode(task_id="report", goal="Report no changes.")],
+            ),
+        ]
+    )
+    result = await runtime.execute(workflow)
+    assert result.success is True
+    # 3 calls: cluster + nudge + apply (then branch, not else)
+    assert mock_agent.query.call_count == 3
+    captured = capsys.readouterr()
+    assert "nudge recovered" in captured.out
+    assert "missing exposed vars" not in captured.out
+
+
+@pytest.mark.asyncio
+async def test_nudge_uses_conversation_history(mock_agent, runtime, capsys):
+    """Nudge should continue the existing conversation when _conversation_messages is available."""
+    call_count = 0
+
+    async def track_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # First call (task): set _conversation_messages to simulate real agent
+            mock_agent._conversation_messages = [
+                {"role": "user", "content": "original prompt"},
+                {"role": "assistant", "content": "I did the analysis."},
+            ]
+            return '{"partial": "data"}'
+        elif call_count == 2:
+            # Nudge call: verify it received messages (not just a prompt)
+            if "messages" in kwargs and kwargs["messages"] is not None:
+                assert len(kwargs["messages"]) == 3  # original 2 + nudge
+                assert "JSON block" in kwargs["messages"][-1]["content"]
+            return '{"partial": "data", "full_result": "recovered"}'
+        return "{}"
+
+    mock_agent.query.side_effect = track_query
+    workflow = WorkflowNode(
+        body=[TaskNode(task_id="t1", goal="Do analysis.", expose=["partial", "full_result"])],
+    )
+    result = await runtime.execute(workflow)
+    assert result.success is True
+    assert call_count == 2
+    captured = capsys.readouterr()
+    assert "nudge recovered" in captured.out
 
 
 @pytest.mark.asyncio

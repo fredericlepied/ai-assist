@@ -358,6 +358,13 @@ class AWLRuntime:
             finally:
                 self._agent.on_inner_execution = prev_inner
             exposed = self._extract_exposed(response, task.expose)
+
+            # Retry: if exposed vars are missing, nudge the agent to emit the JSON block
+            if task.expose:
+                missing_vars = [v for v in task.expose if v not in exposed]
+                if missing_vars:
+                    exposed = await self._retry_expose_extraction(task, response, exposed, missing_vars)
+
             self._variables.update(exposed)
             outcome = TaskOutcome(status="success", summary=response[:200], exposed=exposed)
             self._task_outcomes.append(outcome)
@@ -400,6 +407,65 @@ class AWLRuntime:
             print(f"    [-] failed: {e}")
             if self._loop_depth == 0 and "continue-on-failure" not in task.hints:
                 raise _TaskFailedError(f"Task '{task.task_id}' failed: {e}") from e
+
+    async def _retry_expose_extraction(
+        self,
+        task: TaskNode,
+        response: str,
+        partial_exposed: dict[str, Any],
+        missing_vars: list[str],
+    ) -> dict[str, Any]:
+        """Continue the conversation to extract missing Expose: variables.
+
+        When the agent completes a complex task (e.g. one that runs an MCP prompt)
+        it sometimes forgets to emit the required JSON block. This appends a nudge
+        to the existing conversation so the agent has full context of the work it
+        just performed (tool calls, RCA results, etc.) and can easily extract values.
+        """
+        keys = ", ".join(missing_vars)
+        example = ", ".join(f'"{k}": "<value>"' for k in missing_vars)
+        nudge = (
+            f"Your response is missing the required JSON block.\n"
+            f"Based on the work you just completed, output ONLY a JSON block with these keys: {keys}\n"
+            f"```json\n{{{example}}}\n```\n"
+            f"Extract the values from your analysis above. Do NOT call any tools. Output nothing else."
+        )
+        logger.info("AWL task '%s': nudging for missing exposed vars: %s", task.task_id, missing_vars)
+        print(f"    [~] nudging for missing vars: {missing_vars}")
+        try:
+            # Reuse the conversation history so the agent has full context
+            prev_messages = getattr(self._agent, "_conversation_messages", None)
+            if prev_messages:
+                messages = prev_messages.copy()
+                messages.append({"role": "user", "content": nudge})
+                retry_response = await self._agent.query(messages=messages, max_turns=2)
+            else:
+                # Fallback: fresh query with response tail as context
+                response_tail = response[-3000:] if len(response) > 3000 else response
+                fallback_prompt = (
+                    f"The task '{task.task_id}' completed. Your response ended with:\n"
+                    f"---\n{response_tail}\n---\n\n{nudge}"
+                )
+                retry_response = await self._agent.query(fallback_prompt, max_turns=2)
+            retry_exposed = self._extract_exposed(retry_response, task.expose)
+            if retry_exposed:
+                merged = {**partial_exposed, **retry_exposed}
+                still_missing = [v for v in task.expose if v not in merged]
+                if not still_missing:
+                    logger.info("AWL task '%s': nudge recovered all exposed vars", task.task_id)
+                    print(f"    [+] nudge recovered: {list(retry_exposed.keys())}")
+                else:
+                    logger.warning(
+                        "AWL task '%s': nudge recovered %s but still missing %s",
+                        task.task_id,
+                        list(retry_exposed.keys()),
+                        still_missing,
+                    )
+                    print(f"    [~] nudge recovered {list(retry_exposed.keys())}, still missing {still_missing}")
+                return merged
+        except Exception as e:
+            logger.warning("AWL task '%s': nudge failed: %s", task.task_id, e)
+        return partial_exposed
 
     def _execute_set(self, node: SetNode):
         self._variables[node.variable] = self._expr.interpolate(node.value, self._variables)
