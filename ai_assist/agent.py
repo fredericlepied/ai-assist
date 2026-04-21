@@ -325,6 +325,10 @@ class AiAssistAgent:
         # Active cancel event (set by query_streaming, used by execute_mcp_prompt)
         self._cancel_event: Any = None
 
+        # Deadline for outermost query — nested queries inherit this to enforce
+        # wall-clock limits even when execution is deep inside tool calls.
+        self._query_deadline: float | None = None
+
         # Update introspection tools with reference to available_prompts and agent
         # (will be populated during server connection)
         self.introspection_tools.available_prompts = self.available_prompts
@@ -1276,10 +1280,21 @@ class AiAssistAgent:
 
         # Track nesting depth for _no_kg reset logic
         self._query_depth += 1
+        is_outermost = self._query_depth == 1
+        effective_max_time = max_time_seconds if max_time_seconds else 600
+        if is_outermost:
+            self._query_deadline = time.time() + effective_max_time
         try:
-            return await self._query_inner(prompt, messages, max_turns, progress_callback, max_time_seconds)
+            return await asyncio.wait_for(
+                self._query_inner(prompt, messages, max_turns, progress_callback, max_time_seconds),
+                timeout=effective_max_time,
+            )
+        except TimeoutError:
+            return f"Task timeout after {effective_max_time} seconds (max: {effective_max_time}s)"
         finally:
             self._query_depth -= 1
+            if is_outermost:
+                self._query_deadline = None
 
     async def _query_inner(
         self,
@@ -1356,7 +1371,7 @@ class AiAssistAgent:
             progress_callback("thinking", 0, max_turns, None)
 
         for turn in range(max_turns):
-            # Check time-based timeout
+            # Check time-based timeout (soft check, fires between turns)
             elapsed = time.time() - start_time
             if elapsed > effective_max_time:
                 self._last_turn_count = turn + 1
@@ -1594,6 +1609,7 @@ class AiAssistAgent:
         max_turns: int = 100,
         progress_callback=None,
         cancel_event=None,
+        max_time_seconds: int | None = None,
     ):
         """Query the agent with streaming response
 
@@ -1604,6 +1620,7 @@ class AiAssistAgent:
             max_turns: Maximum number of agentic turns (safety limit, default: 100)
             progress_callback: Optional callback for progress updates
             cancel_event: Optional threading.Event; when set, streaming is cancelled
+            max_time_seconds: Maximum wall-clock time in seconds (default: 600)
 
         Yields:
             str: Text chunks as they arrive
@@ -1661,10 +1678,24 @@ class AiAssistAgent:
             # Store messages for introspection tools to access
             self._conversation_messages = messages
 
+            # Time-based timeout for streaming queries
+            start_time = time.time()
+            effective_max_time = max_time_seconds if max_time_seconds else 600
+
             if progress_callback:
                 progress_callback("thinking", 0, max_turns, None)
 
             for turn in range(max_turns):
+                # Check time-based timeout
+                elapsed = time.time() - start_time
+                if elapsed > effective_max_time:
+                    self._last_turn_count = turn + 1
+                    yield {
+                        "type": "error",
+                        "message": f"Task timeout after {int(elapsed)} seconds (max: {effective_max_time}s)",
+                    }
+                    return
+
                 # Check cancellation before each turn
                 if cancel_event and cancel_event.is_set():
                     self._last_turn_count = turn
@@ -1872,7 +1903,12 @@ class AiAssistAgent:
             self._query_depth -= 1
 
     async def execute_mcp_prompt(
-        self, server_name: str, prompt_name: str, arguments: dict[str, Any] | None = None, max_turns: int = 100
+        self,
+        server_name: str,
+        prompt_name: str,
+        arguments: dict[str, Any] | None = None,
+        max_turns: int = 100,
+        max_time_seconds: int | None = None,
     ) -> str:
         """Execute an MCP prompt by retrieving it from the server and feeding it to Claude
 
@@ -1881,6 +1917,8 @@ class AiAssistAgent:
             prompt_name: Name of prompt to execute
             arguments: Arguments to pass to prompt
             max_turns: Maximum agentic turns
+            max_time_seconds: Maximum wall-clock time in seconds. If None, inherits
+                remaining time from the outer query deadline when available.
 
         Returns:
             Claude's response after executing the prompt instructions
@@ -1936,9 +1974,16 @@ class AiAssistAgent:
         # Feed the prompt to Claude for execution (with tools available)
         # Use streaming to allow inner execution visibility via callback
         # Forward active cancel_event so Escape works during inner execution
+        # Inherit remaining time from outer query deadline if no explicit timeout
+        effective_timeout = max_time_seconds
+        if effective_timeout is None and self._query_deadline is not None:
+            effective_timeout = max(1, int(self._query_deadline - time.time()))
         full_response = ""
         async for chunk in self.query_streaming(
-            messages=messages, max_turns=max_turns, cancel_event=self._cancel_event
+            messages=messages,
+            max_turns=max_turns,
+            cancel_event=self._cancel_event,
+            max_time_seconds=effective_timeout,
         ):
             if isinstance(chunk, str):
                 full_response += chunk
