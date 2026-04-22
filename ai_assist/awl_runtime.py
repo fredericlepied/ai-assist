@@ -415,38 +415,29 @@ class AWLRuntime:
         partial_exposed: dict[str, Any],
         missing_vars: list[str],
     ) -> dict[str, Any]:
-        """Continue the conversation to extract missing Expose: variables.
+        """Send a follow-up to extract missing Expose: variables.
 
-        When the agent completes a complex task (e.g. one that runs an MCP prompt)
-        it sometimes forgets to emit the required JSON block. This appends a nudge
-        to the existing conversation so the agent has full context of the work it
-        just performed (tool calls, RCA results, etc.) and can easily extract values.
+        After complex tasks (e.g. RCA via MCP prompt), the agent may forget to
+        emit the JSON block.  We send a fresh query with the full response text
+        as context — the response is small (just the agent's final text), whereas
+        the conversation history (with downloaded log files in tool results) can
+        be hundreds of KB and would cause a 400 error.
         """
         keys = ", ".join(missing_vars)
         example = ", ".join(f'"{k}": "<value>"' for k in missing_vars)
-        nudge = (
-            f"Your response is missing the required JSON block.\n"
-            f"Based on the work you just completed, output ONLY a JSON block with these keys: {keys}\n"
+        prompt = (
+            f"A task just completed and produced the following output:\n"
+            f"---\n{response}\n---\n\n"
+            f"Extract the requested information from the output above and return "
+            f"ONLY a JSON block with these keys: {keys}\n"
             f"```json\n{{{example}}}\n```\n"
-            f"Extract the values from your analysis above. Do NOT call any tools. Output nothing else."
+            f"If a value is not present in the output, use your best judgement to "
+            f"infer it from context. Do NOT call any tools. Output nothing else."
         )
         logger.info("AWL task '%s': nudging for missing exposed vars: %s", task.task_id, missing_vars)
         print(f"    [~] nudging for missing vars: {missing_vars}")
         try:
-            # Reuse the conversation history so the agent has full context
-            prev_messages = getattr(self._agent, "_conversation_messages", None)
-            if prev_messages:
-                messages = prev_messages.copy()
-                messages.append({"role": "user", "content": nudge})
-                retry_response = await self._agent.query(messages=messages, max_turns=2)
-            else:
-                # Fallback: fresh query with response tail as context
-                response_tail = response[-3000:] if len(response) > 3000 else response
-                fallback_prompt = (
-                    f"The task '{task.task_id}' completed. Your response ended with:\n"
-                    f"---\n{response_tail}\n---\n\n{nudge}"
-                )
-                retry_response = await self._agent.query(fallback_prompt, max_turns=2)
+            retry_response = await self._agent.query(prompt, max_turns=2)
             retry_exposed = self._extract_exposed(retry_response, task.expose)
             if retry_exposed:
                 merged = {**partial_exposed, **retry_exposed}

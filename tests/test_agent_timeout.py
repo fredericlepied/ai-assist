@@ -48,8 +48,22 @@ async def test_query_timeout_returns_message(agent):
 
 
 @pytest.mark.asyncio
+async def test_query_no_timeout_without_explicit_max_time(agent):
+    """Without max_time_seconds, query should NOT use asyncio.wait_for."""
+
+    async def fast_inner(*args, **kwargs):
+        return "done"
+
+    with patch.object(agent, "_query_inner", side_effect=fast_inner):
+        result = await agent.query("test", max_turns=5)
+
+    assert result == "done"
+    assert agent._query_deadline is None
+
+
+@pytest.mark.asyncio
 async def test_query_sets_and_clears_deadline(agent):
-    """Outermost query should set _query_deadline and clear it on completion."""
+    """Outermost query should set _query_deadline only when max_time_seconds is explicit."""
     assert agent._query_deadline is None
 
     captured_deadline = None

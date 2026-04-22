@@ -395,26 +395,21 @@ async def test_nudge_recovers_missing_exposed_vars(mock_agent, runtime, capsys):
 
 
 @pytest.mark.asyncio
-async def test_nudge_uses_conversation_history(mock_agent, runtime, capsys):
-    """Nudge should continue the existing conversation when _conversation_messages is available."""
+async def test_nudge_includes_response_as_context(mock_agent, runtime, capsys):
+    """Nudge should include the task's response text so the agent can extract values."""
     call_count = 0
 
     async def track_query(*args, **kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            # First call (task): set _conversation_messages to simulate real agent
-            mock_agent._conversation_messages = [
-                {"role": "user", "content": "original prompt"},
-                {"role": "assistant", "content": "I did the analysis."},
-            ]
-            return '{"partial": "data"}'
+            return "The root cause is a stuck image pull on worker-2."
         elif call_count == 2:
-            # Nudge call: verify it received messages (not just a prompt)
-            if "messages" in kwargs and kwargs["messages"] is not None:
-                assert len(kwargs["messages"]) == 3  # original 2 + nudge
-                assert "JSON block" in kwargs["messages"][-1]["content"]
-            return '{"partial": "data", "full_result": "recovered"}'
+            # Nudge: verify the prompt includes the original response
+            prompt = args[0] if args else kwargs.get("prompt", "")
+            assert "stuck image pull" in prompt
+            assert "JSON block" in prompt
+            return '{"partial": "data", "full_result": "stuck image pull"}'
         return "{}"
 
     mock_agent.query.side_effect = track_query

@@ -1281,16 +1281,18 @@ class AiAssistAgent:
         # Track nesting depth for _no_kg reset logic
         self._query_depth += 1
         is_outermost = self._query_depth == 1
-        effective_max_time = max_time_seconds if max_time_seconds else 600
-        if is_outermost:
-            self._query_deadline = time.time() + effective_max_time
+        if is_outermost and max_time_seconds:
+            self._query_deadline = time.time() + max_time_seconds
         try:
-            return await asyncio.wait_for(
-                self._query_inner(prompt, messages, max_turns, progress_callback, max_time_seconds),
-                timeout=effective_max_time,
-            )
+            if max_time_seconds:
+                return await asyncio.wait_for(
+                    self._query_inner(prompt, messages, max_turns, progress_callback, max_time_seconds),
+                    timeout=max_time_seconds,
+                )
+            else:
+                return await self._query_inner(prompt, messages, max_turns, progress_callback, max_time_seconds)
         except TimeoutError:
-            return f"Task timeout after {effective_max_time} seconds (max: {effective_max_time}s)"
+            return f"Task timeout after {max_time_seconds} seconds (max: {max_time_seconds}s)"
         finally:
             self._query_depth -= 1
             if is_outermost:
@@ -1678,23 +1680,23 @@ class AiAssistAgent:
             # Store messages for introspection tools to access
             self._conversation_messages = messages
 
-            # Time-based timeout for streaming queries
+            # Time-based timeout for streaming queries (only when explicitly set)
             start_time = time.time()
-            effective_max_time = max_time_seconds if max_time_seconds else 600
 
             if progress_callback:
                 progress_callback("thinking", 0, max_turns, None)
 
             for turn in range(max_turns):
-                # Check time-based timeout
-                elapsed = time.time() - start_time
-                if elapsed > effective_max_time:
-                    self._last_turn_count = turn + 1
-                    yield {
-                        "type": "error",
-                        "message": f"Task timeout after {int(elapsed)} seconds (max: {effective_max_time}s)",
-                    }
-                    return
+                # Check time-based timeout (only when max_time_seconds is explicitly set)
+                if max_time_seconds:
+                    elapsed = time.time() - start_time
+                    if elapsed > max_time_seconds:
+                        self._last_turn_count = turn + 1
+                        yield {
+                            "type": "error",
+                            "message": f"Task timeout after {int(elapsed)} seconds (max: {max_time_seconds}s)",
+                        }
+                        return
 
                 # Check cancellation before each turn
                 if cancel_event and cancel_event.is_set():
