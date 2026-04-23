@@ -1,6 +1,7 @@
 """Configuration management for ai-assist"""
 
 import logging
+import logging.handlers
 import os
 from pathlib import Path
 
@@ -61,10 +62,8 @@ def setup_logging(config_dir: Path | None = None) -> None:
     logs_dir = config_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    # Log file path with date
-    from datetime import datetime
-
-    log_file = logs_dir / f"ai-assist-{datetime.now().strftime('%Y-%m-%d')}.log"
+    # Log file path — stable base name; TimedRotatingFileHandler handles daily rotation
+    log_file = logs_dir / "ai-assist.log"
 
     # Get logging levels from environment
     file_level_name = os.getenv("AI_ASSIST_LOG_LEVEL", "INFO").upper()
@@ -82,21 +81,28 @@ def setup_logging(config_dir: Path | None = None) -> None:
     file_level = level_map.get(file_level_name, logging.INFO)
     console_level = level_map.get(console_level_name, logging.WARNING)
 
-    # Configure logging
-    logging.basicConfig(
-        level=file_level,  # Root logger level (controls file handler)
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            # File handler - writes to daily log file
-            logging.FileHandler(log_file),
-            # Console handler - only show warnings and errors by default
-            logging.StreamHandler(),
-        ],
-    )
+    log_format = "%(asctime)s - %(process)d - %(name)s - %(levelname)s - %(message)s"
+    formatter = logging.Formatter(log_format)
 
-    # Set console handler to specified level
-    console_handler = logging.getLogger().handlers[1]  # StreamHandler
+    file_handler = logging.handlers.TimedRotatingFileHandler(
+        log_file,
+        when="midnight",
+        backupCount=30,
+        utc=False,
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(file_level)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
     console_handler.setLevel(console_level)
+
+    # Configure logging (force=True to replace any pre-existing handlers)
+    logging.basicConfig(
+        level=file_level,
+        handlers=[file_handler, console_handler],
+        force=True,
+    )
 
     logger.info(
         "Logging initialized - file: %s (level=%s), console (level=%s)", log_file, file_level_name, console_level_name

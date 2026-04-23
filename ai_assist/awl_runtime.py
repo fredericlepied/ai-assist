@@ -358,6 +358,13 @@ class AWLRuntime:
             finally:
                 self._agent.on_inner_execution = prev_inner
             exposed = self._extract_exposed(response, task.expose)
+
+            # Retry: if exposed vars are missing, nudge the agent to emit the JSON block
+            if task.expose:
+                missing_vars = [v for v in task.expose if v not in exposed]
+                if missing_vars:
+                    exposed = await self._retry_expose_extraction(task, response, exposed, missing_vars)
+
             self._variables.update(exposed)
             outcome = TaskOutcome(status="success", summary=response[:200], exposed=exposed)
             self._task_outcomes.append(outcome)
@@ -400,6 +407,56 @@ class AWLRuntime:
             print(f"    [-] failed: {e}")
             if self._loop_depth == 0 and "continue-on-failure" not in task.hints:
                 raise _TaskFailedError(f"Task '{task.task_id}' failed: {e}") from e
+
+    async def _retry_expose_extraction(
+        self,
+        task: TaskNode,
+        response: str,
+        partial_exposed: dict[str, Any],
+        missing_vars: list[str],
+    ) -> dict[str, Any]:
+        """Send a follow-up to extract missing Expose: variables.
+
+        After complex tasks (e.g. RCA via MCP prompt), the agent may forget to
+        emit the JSON block.  We send a fresh query with the full response text
+        as context — the response is small (just the agent's final text), whereas
+        the conversation history (with downloaded log files in tool results) can
+        be hundreds of KB and would cause a 400 error.
+        """
+        keys = ", ".join(missing_vars)
+        example = ", ".join(f'"{k}": "<value>"' for k in missing_vars)
+        prompt = (
+            f"A task just completed and produced the following output:\n"
+            f"---\n{response}\n---\n\n"
+            f"Extract the requested information from the output above and return "
+            f"ONLY a JSON block with these keys: {keys}\n"
+            f"```json\n{{{example}}}\n```\n"
+            f"If a value is not present in the output, use your best judgement to "
+            f"infer it from context. Do NOT call any tools. Output nothing else."
+        )
+        logger.info("AWL task '%s': nudging for missing exposed vars: %s", task.task_id, missing_vars)
+        print(f"    [~] nudging for missing vars: {missing_vars}")
+        try:
+            retry_response = await self._agent.query(prompt, max_turns=2)
+            retry_exposed = self._extract_exposed(retry_response, task.expose)
+            if retry_exposed:
+                merged = {**partial_exposed, **retry_exposed}
+                still_missing = [v for v in task.expose if v not in merged]
+                if not still_missing:
+                    logger.info("AWL task '%s': nudge recovered all exposed vars", task.task_id)
+                    print(f"    [+] nudge recovered: {list(retry_exposed.keys())}")
+                else:
+                    logger.warning(
+                        "AWL task '%s': nudge recovered %s but still missing %s",
+                        task.task_id,
+                        list(retry_exposed.keys()),
+                        still_missing,
+                    )
+                    print(f"    [~] nudge recovered {list(retry_exposed.keys())}, still missing {still_missing}")
+                return merged
+        except Exception as e:
+            logger.warning("AWL task '%s': nudge failed: %s", task.task_id, e)
+        return partial_exposed
 
     def _execute_set(self, node: SetNode):
         self._variables[node.variable] = self._expr.interpolate(node.value, self._variables)
