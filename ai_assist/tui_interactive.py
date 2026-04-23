@@ -499,6 +499,7 @@ async def handle_prompt_command(
 
 async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager):
     """Run interactive mode with TUI enhancements"""
+    agent.interactive_mode = True
     console = Console()
     identity = get_identity()
 

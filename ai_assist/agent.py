@@ -232,6 +232,7 @@ class AiAssistAgent:
         self._no_kg = False  # Per-query flag: @no-kg prefix suppresses KG injection
         self._no_history = False  # Per-query flag: @no-history prefix strips conversation history
         self._query_depth = 0  # Track nesting depth for _no_kg reset
+        self.interactive_mode = False
 
         # Load identity for personalized interactions
         self.identity = get_identity()
@@ -1114,8 +1115,12 @@ class AiAssistAgent:
         prompt += "\n\n# Honesty and Clarification\n\n"
         prompt += "Never guess or make assumptions when you are unsure. "
         prompt += "If you do not know the answer after searching available tools and knowledge, "
-        prompt += "say so honestly and ask the user for clarification.\n\n"
-        prompt += "## Source Citation\n\n"
+        prompt += "say so honestly and ask the user for clarification.\n"
+        if self.interactive_mode:
+            prompt += (
+                "Do not hesitate to ask questions for clarification when a request is ambiguous or underspecified.\n"
+            )
+        prompt += "\n## Source Citation\n\n"
         prompt += "When citing specific data (job statuses, ticket details, dates, counts, component versions, test results), "
         prompt += "reference the tool that provided it using inline citations like: (source: search_dci_jobs) or (source: get_jira_ticket).\n"
         prompt += "For general knowledge not from tools, prefix with: 'Based on my general knowledge: ...' to distinguish it from tool-sourced data.\n"

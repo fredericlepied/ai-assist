@@ -177,6 +177,7 @@ async def interactive_mode(agent: AiAssistAgent, state_manager: StateManager, us
 
 async def basic_interactive_mode(agent: AiAssistAgent, state_manager: StateManager):
     """Original simple interactive mode (fallback)"""
+    agent.interactive_mode = True
     identity = get_identity()
 
     print("\n" + "=" * 60)
