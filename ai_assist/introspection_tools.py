@@ -23,11 +23,17 @@ class IntrospectionTools:
         conversation_memory: Optional["ConversationMemory"] = None,
         available_prompts: dict | None = None,
         agent: Optional["AiAssistAgent"] = None,
+        available_resources: dict | None = None,
+        available_resource_templates: dict | None = None,
     ):
         self.knowledge_graph = knowledge_graph
         self.conversation_memory = conversation_memory
         # IMPORTANT: Use 'if not None' to preserve reference to empty dict
         self.available_prompts = available_prompts if available_prompts is not None else {}
+        self.available_resources = available_resources if available_resources is not None else {}
+        self.available_resource_templates = (
+            available_resource_templates if available_resource_templates is not None else {}
+        )
         self.agent = agent  # Reference to parent agent for executing prompts
 
     def get_tool_definitions(self) -> list[dict]:
@@ -567,6 +573,46 @@ Do NOT compact if you still need the old tool results for your current task.
             ]
         )
 
+        # MCP resource tools — always available
+        tools.extend(
+            [
+                {
+                    "name": "introspection__list_mcp_resources",
+                    "description": "List available MCP resources and resource templates from connected servers.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "server": {
+                                "type": "string",
+                                "description": "Filter by server name (optional, lists all if omitted)",
+                            },
+                        },
+                        "required": [],
+                    },
+                    "_server": "introspection",
+                },
+                {
+                    "name": "introspection__read_mcp_resource",
+                    "description": "Read the contents of an MCP resource by server name and URI.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "server": {
+                                "type": "string",
+                                "description": "MCP server name",
+                            },
+                            "uri": {
+                                "type": "string",
+                                "description": "Resource URI (e.g., 'dci://elasticsearch/mapping')",
+                            },
+                        },
+                        "required": ["server", "uri"],
+                    },
+                    "_server": "introspection",
+                },
+            ]
+        )
+
         return tools
 
     async def execute_tool(self, tool_name: str, arguments: dict) -> str:
@@ -585,6 +631,8 @@ Do NOT compact if you still need the old tool results for your current task.
             "get_skill_help": self._get_skill_help,
             "get_context_usage": self._get_context_usage,
             "compact_conversation": self._compact_conversation,
+            "list_mcp_resources": self._list_mcp_resources,
+            "read_mcp_resource": self._read_mcp_resource,
         }
 
         handler = dispatch.get(tool_name)
@@ -890,6 +938,60 @@ Do NOT compact if you still need the old tool results for your current task.
                 {"success": False, "error": str(e), "message": f"Failed to execute {server}/{prompt}: {str(e)}"},
                 indent=2,
             )
+
+    def _list_mcp_resources(self, arguments: dict) -> str:
+        server_filter = arguments.get("server")
+
+        resources = []
+        for server_name, res_list in self.available_resources.items():
+            if server_filter and server_name != server_filter:
+                continue
+            for res in res_list:
+                resources.append(
+                    {
+                        "server": server_name,
+                        "name": getattr(res, "name", None),
+                        "uri": str(res.uri),
+                        "description": res.description,
+                        "mimeType": res.mimeType,
+                        "size": getattr(res, "size", None),
+                    }
+                )
+
+        templates = []
+        for server_name, tpl_list in self.available_resource_templates.items():
+            if server_filter and server_name != server_filter:
+                continue
+            for tpl in tpl_list:
+                templates.append(
+                    {
+                        "server": server_name,
+                        "name": getattr(tpl, "name", None),
+                        "uri_template": tpl.uriTemplate,
+                        "description": tpl.description,
+                        "mimeType": tpl.mimeType,
+                    }
+                )
+
+        return json.dumps({"resources": resources, "resource_templates": templates}, indent=2)
+
+    async def _read_mcp_resource(self, arguments: dict) -> str:
+        server = arguments.get("server")
+        uri = arguments.get("uri")
+
+        if not server or not uri:
+            return json.dumps({"error": "Both 'server' and 'uri' are required"})
+
+        if not self.agent:
+            return json.dumps({"error": "Agent not available"})
+
+        try:
+            result = await self.agent.read_mcp_resource(server, uri)
+            return json.dumps(result, indent=2)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+        except Exception as e:
+            return json.dumps({"error": f"Failed to read resource: {e}"})
 
     def _get_tool_help(self, arguments: dict) -> str:
         """Return full documentation for a tool (progressive disclosure).

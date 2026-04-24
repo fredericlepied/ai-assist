@@ -306,6 +306,8 @@ class AiAssistAgent:
         self.sessions: dict[str, ClientSession] = {}
         self.available_tools: list[dict] = []
         self.available_prompts: dict[str, dict] = {}  # {server_name: {prompt_name: Prompt}}
+        self.available_resources: dict[str, list] = {}  # {server_name: [Resource, ...]}
+        self.available_resource_templates: dict[str, list] = {}  # {server_name: [ResourceTemplate, ...]}
         self._server_tasks: list[asyncio.Task] = []
 
         # Security: tool definition registry for rug-pull detection
@@ -333,6 +335,8 @@ class AiAssistAgent:
         # Update introspection tools with reference to available_prompts and agent
         # (will be populated during server connection)
         self.introspection_tools.available_prompts = self.available_prompts
+        self.introspection_tools.available_resources = self.available_resources
+        self.introspection_tools.available_resource_templates = self.available_resource_templates
         self.introspection_tools.agent = self  # Allow introspection tools to execute prompts
 
         # Initialize knowledge management tools
@@ -573,6 +577,35 @@ class AiAssistAgent:
                     except Exception:
                         # Prompts are optional - silently skip if not supported
                         pass
+
+                    # Discover resources from this server
+                    try:
+                        resources_result = await session.list_resources()
+                        if resources_result.resources:
+                            self.available_resources[name] = resources_result.resources
+                            for res in resources_result.resources:
+                                if res.description:
+                                    res_warnings = validate_tool_description(
+                                        f"resource:{name}/{res.uri}", res.description
+                                    )
+                                    if res_warnings:
+                                        for w in res_warnings:
+                                            logger.warning(
+                                                "Resource description warning for %s/%s: %s",
+                                                name,
+                                                res.uri,
+                                                w,
+                                            )
+                    except Exception:
+                        pass
+
+                    try:
+                        templates_result = await session.list_resource_templates()
+                        if templates_result.resourceTemplates:
+                            self.available_resource_templates[name] = templates_result.resourceTemplates
+                    except Exception:
+                        pass
+
                     # Keep the connection alive by waiting indefinitely
                     try:
                         await asyncio.Event().wait()
@@ -585,12 +618,16 @@ class AiAssistAgent:
             traceback.print_exc()
 
     def _disconnect_server(self, name: str):
-        """Disconnect a single MCP server, cleaning up session, tools, prompts, and task"""
+        """Disconnect a single MCP server, cleaning up session, tools, prompts, resources, and task"""
         if name in self.sessions:
             self.sessions.pop(name)
         self.available_tools = [t for t in self.available_tools if t.get("_server") != name]
         if name in self.available_prompts:
             self.available_prompts.pop(name)
+        if name in self.available_resources:
+            self.available_resources.pop(name)
+        if name in self.available_resource_templates:
+            self.available_resource_templates.pop(name)
         for task in self._server_tasks:
             if task.get_name() == f"mcp_{name}":
                 task.cancel()
@@ -1089,6 +1126,13 @@ class AiAssistAgent:
             prompt += "- Run once from CLI: ai-assist /run goal.awl\n"
             prompt += '- Schedule periodically via schedules.json: {"prompt": "goals/my_goal.awl", "interval": "30m"}\n'
             prompt += "- Use goal__create to generate a goal AWL file from natural language\n"
+
+        # Add MCP resource guidance if any resources are available
+        if self.available_resources or self.available_resource_templates:
+            prompt += "\n\n# MCP Resources\n\n"
+            prompt += "MCP servers expose read-only resources you can access on demand.\n"
+            prompt += "Use introspection__list_mcp_resources to discover available resources.\n"
+            prompt += "Use introspection__read_mcp_resource to read a specific resource by server and URI.\n"
 
         # Add Knowledge Graph guidance
         if self.knowledge_graph and not self._no_kg:
@@ -2006,6 +2050,39 @@ class AiAssistAgent:
                 elif chunk.get("type") == "done":
                     break
         return full_response
+
+    async def read_mcp_resource(self, server_name: str, uri: str) -> dict:
+        """Read an MCP resource by server name and URI
+
+        Returns:
+            Dict with 'contents' list, each entry having text or blob summary
+        """
+        if server_name not in self.sessions:
+            available = ", ".join(self.sessions.keys())
+            raise ValueError(f"MCP server '{server_name}' not connected. Available servers: {available}")
+
+        from pydantic import AnyUrl
+
+        session = self.sessions[server_name]
+        result = await session.read_resource(AnyUrl(uri))
+
+        contents = []
+        for item in result.contents:
+            if hasattr(item, "text") and item.text is not None:
+                text, _ = sanitize_tool_result(str(item.text), f"resource:{server_name}/{uri}")
+                contents.append(
+                    {"text": text, "mimeType": item.mimeType, "uri": str(item.uri) if hasattr(item, "uri") else uri}
+                )
+            elif hasattr(item, "blob") and item.blob is not None:
+                contents.append(
+                    {
+                        "type": "blob",
+                        "summary": f"Binary resource (base64-encoded, mimeType={item.mimeType})",
+                        "mimeType": item.mimeType,
+                        "uri": str(item.uri) if hasattr(item, "uri") else uri,
+                    }
+                )
+        return {"contents": contents}
 
     def _validate_prompt_arguments(self, prompt_def, arguments: dict):
         """Validate arguments against prompt definition
