@@ -416,9 +416,12 @@ class AiAssistAgent:
                     if server_name in self.sessions:
                         tool_count = len([t for t in self.available_tools if t["_server"] == server_name])
                         prompt_count = len(self.available_prompts.get(server_name, {}))
+                        resource_count = len(self.available_resources.get(server_name, []))
                         parts = [f"✓ Connected to {server_name} MCP server with {tool_count} tools"]
                         if prompt_count:
                             parts.append(f"{prompt_count} prompts")
+                        if resource_count:
+                            parts.append(f"{resource_count} resources")
                         print(", ".join(parts))
                         break
                 # No warning if not connected yet - it may still connect later
@@ -653,9 +656,12 @@ class AiAssistAgent:
         if connected:
             tool_count = len([t for t in self.available_tools if t.get("_server") == name])
             prompt_count = len(self.available_prompts.get(name, {}))
+            resource_count = len(self.available_resources.get(name, []))
             parts = [f"✓ Reconnected {name} with {tool_count} tools"]
             if prompt_count:
                 parts.append(f"{prompt_count} prompts")
+            if resource_count:
+                parts.append(f"{resource_count} resources")
             print(f"  {', '.join(parts)}")
             # Rug-pull detection: check for tool definition changes after reconnect
             # Scope to this server's tools only to avoid false positives from other servers
@@ -706,7 +712,11 @@ class AiAssistAgent:
             connected = await self._connect_server(name, new_servers[name])
             if connected:
                 tool_count = len([t for t in self.available_tools if t.get("_server") == name])
-                print(f"    ✓ Connected with {tool_count} tools")
+                resource_count = len(self.available_resources.get(name, []))
+                parts = [f"✓ Connected with {tool_count} tools"]
+                if resource_count:
+                    parts.append(f"{resource_count} resources")
+                print(f"    {', '.join(parts)}")
 
         # Reconnect modified servers (simple: disconnect + connect)
         common = old_names & new_names
@@ -723,9 +733,12 @@ class AiAssistAgent:
                 if connected:
                     tool_count = len([t for t in self.available_tools if t.get("_server") == name])
                     prompt_count = len(self.available_prompts.get(name, {}))
+                    resource_count = len(self.available_resources.get(name, []))
                     parts = [f"✓ Reconnected with {tool_count} tools"]
                     if prompt_count:
                         parts.append(f"{prompt_count} prompts")
+                    if resource_count:
+                        parts.append(f"{resource_count} resources")
                     print(f"    {', '.join(parts)}")
                     # Rug-pull detection after reconnect (scoped to this server)
                     server_tools = [t for t in self.available_tools if t.get("_server") == name]
