@@ -416,7 +416,7 @@ class FilesystemTools:
         return [
             {
                 "name": "internal__read_file",
-                "description": "Read the contents of a file from the filesystem. Can read the entire file or specific line ranges. For large files, use line_start and line_end to read only relevant sections, or use __save_to_file parameter to save output. Use search_in_file first to find line numbers of interest.",
+                "description": "Read the contents of a file from the filesystem. Can read the entire file or specific line ranges. For large files, use line_start and line_end to read only relevant sections. Use search_in_file first to find line numbers of interest.",
                 "input_schema": {
                     "type": "object",
                     "properties": {

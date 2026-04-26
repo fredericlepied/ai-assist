@@ -267,7 +267,7 @@ class ReportTools:
             with open(report_file, "a") as f:
                 f.write(content.rstrip("\n") + "\n")
 
-        return f"Content appended to '{name}' ({fmt})"
+        return f"Content appended to '{name}' ({fmt}) at {report_file}"
 
     def _read_report(self, name: str, fmt: str | None = None) -> str:
         resolved = self._resolve_report_file(name, fmt)
@@ -275,7 +275,8 @@ class ReportTools:
             return resolved
 
         if resolved.exists():
-            return resolved.read_text()
+            content = resolved.read_text()
+            return f"[Report file: {resolved}]\n{content}"
         else:
             return f"Report '{name}' not found"
 

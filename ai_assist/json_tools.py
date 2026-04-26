@@ -1,5 +1,6 @@
 """JSON query tool — wraps jq for efficient JSON file processing."""
 
+import os
 import shutil
 import subprocess
 from typing import Any
@@ -47,6 +48,11 @@ class JsonTools:
                             "description": "Use -r for raw string output (no JSON quotes).",
                             "default": False,
                         },
+                        "slurp": {
+                            "type": "boolean",
+                            "description": "Use --slurp to read all inputs into an array. Auto-enabled for .jsonl files.",
+                            "default": False,
+                        },
                     },
                     "required": ["file", "filter"],
                 },
@@ -59,19 +65,25 @@ class JsonTools:
         if tool_name != "json_query":
             return f"Error: unknown json tool '{tool_name}'"
 
-        file_path = arguments["file"]
+        file_path = os.path.expanduser(arguments["file"])
         path_error = await self.filesystem_tools._validate_path(file_path)
         if path_error:
             return path_error
 
         filter_expr = arguments["filter"]
         raw_output = arguments.get("raw_output", False)
+        slurp = arguments.get("slurp", False)
 
         jq = self.jq_path
         if not jq:
             return "Error: jq is not installed"
 
+        if not slurp and file_path.endswith(".jsonl"):
+            slurp = True
+
         args = [jq]
+        if slurp:
+            args.append("--slurp")
         if raw_output:
             args.append("-r")
         args.extend([filter_expr, file_path])

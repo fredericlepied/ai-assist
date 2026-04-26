@@ -15,12 +15,12 @@ SECRET_PATTERNS = re.compile(
     r"(sk-ant-[a-zA-Z0-9]+|ghp_[a-zA-Z0-9]+|gho_[a-zA-Z0-9]+"
     r"|xoxb-[a-zA-Z0-9-]+|xoxp-[a-zA-Z0-9-]+"
     r"|eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+"  # JWTs
-    r"|[a-zA-Z0-9+/]{40,}={0,2})"  # Base64 keys
+    r"|(?=[a-zA-Z0-9+]*[A-Z+])(?=[a-zA-Z0-9+]*[0-9+])[a-zA-Z0-9+]{40,}={0,2})"  # Base64 keys (must contain uppercase AND digit/+), excludes hex SHAs and CamelCase identifiers
 )
 
 SECRET_KEY_PATTERNS = {"api_key", "token", "secret", "password", "credential", "auth"}
 
-MAX_RESULT_SUMMARY_LENGTH = 1000
+MAX_RESULT_SUMMARY_LENGTH = 4000
 
 
 class AuditLogger:
@@ -80,10 +80,8 @@ class AuditLogger:
         }
 
         # Log to standard logger for log file visibility
-        args_short = json.dumps(sanitized_args)
-        if len(args_short) > 300:
-            args_short = args_short[:300] + "..."
-        logger.info("Tool call: %s(%s) -> %s", tool_name, args_short, "ok" if success else "FAILED")
+        args_full = json.dumps(sanitized_args)
+        logger.info("Tool call: %s(%s) -> %s", tool_name, args_full, "ok" if success else "FAILED")
 
         with open(self.log_file, "a") as f:
             f.write(json.dumps(entry) + "\n")
