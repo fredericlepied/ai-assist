@@ -81,7 +81,7 @@ def test_audit_log_truncates_large_results(logger, audit_dir):
     entry = json.loads(log_file.read_text().strip())
 
     # result_summary should be truncated
-    assert len(entry["result_summary"]) <= 1100  # 1000 chars + truncation message
+    assert len(entry["result_summary"]) <= 4100  # 4000 chars + truncation message
 
 
 def test_audit_log_rotation(audit_dir):

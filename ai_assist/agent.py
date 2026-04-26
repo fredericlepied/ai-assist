@@ -1066,8 +1066,8 @@ class AiAssistAgent:
             prompt += "Always use tools to retrieve real data. Never fabricate information that could be obtained through a tool call.\n"
             prompt += "For detailed tool documentation (query syntax, available fields, examples), call introspection__get_tool_help with the tool name.\n"
             prompt += "\n## Handling Large Tool Results\n\n"
-            prompt += "ALL tools (MCP, internal, introspection) support these special parameters:\n\n"
-            prompt += "**`__save_to_file`**: Save raw result to a file.\n"
+            prompt += "MCP tools and selected internal tools (internal__execute_command, internal__json_query) support these special parameters:\n\n"
+            prompt += "**`__save_to_file`**: Save raw result to a file. Not available on internal__read_file, internal__search_in_file, internal__list_directory, or report tools (use the file path returned by those tools directly instead).\n"
             prompt += '- Example: `search_dci_jobs(query="...", limit=200, __save_to_file="/tmp/batch.json")`\n\n'
             prompt += '**`__write_to_report`**: Save raw result as a report (creates/replaces). Format: `"name"` or `"name:format"` (md/jsonl/csv/tsv, default md).\n'
             prompt += '- Example: `search_jira_tickets(jql="...", __write_to_report="quarterly-jira:jsonl")`\n\n'
@@ -2458,6 +2458,10 @@ class AiAssistAgent:
         write_to_report = arguments.pop("__write_to_report", None)
         append_to_report = arguments.pop("__append_to_report", None)
         collect_to_report = arguments.pop("__collect_to_report", None)
+        _SAVE_TO_FILE_ALLOWED = {"internal__execute_command", "internal__json_query"}
+        if save_to_file and tool_name.startswith("internal__") and tool_name not in _SAVE_TO_FILE_ALLOWED:
+            logger.warning("Ignoring __save_to_file on %s", tool_name)
+            save_to_file = None
         if save_to_file:
             logger.info("Tool %s called with __save_to_file=%s", tool_name, save_to_file)
         if write_to_report:

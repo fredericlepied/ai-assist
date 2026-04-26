@@ -703,12 +703,15 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
     async def command_confirmation_callback(command: str) -> bool:
         """Prompt user to approve non-allowlisted commands or destructive actions"""
+        logger.info("Security prompt: command approval requested: %s", command[:200])
         choice = await _prompt_user_approval("Security: The agent wants to run:", command)
         if choice in ("c", "cancel"):
+            logger.info("Security prompt: command cancelled by user: %s", command[:200])
             if agent._cancel_event:
                 agent._cancel_event.set()
             return False
         approved = choice in ("y", "yes", "a", "always")
+        logger.info("Security prompt: command %s by user: %s", "approved" if approved else "denied", command[:200])
         if choice in ("a", "always"):
             from .filesystem_tools import SHELL_BUILTINS, extract_command_names
 
@@ -725,12 +728,15 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
     async def path_confirmation_callback(description: str) -> bool:
         """Prompt user to approve access to a path outside allowed directories"""
+        logger.info("Security prompt: path approval requested: %s", description[:200])
         choice = await _prompt_user_approval("Security: The agent wants to access:", description)
         if choice in ("c", "cancel"):
+            logger.info("Security prompt: path cancelled by user: %s", description[:200])
             if agent._cancel_event:
                 agent._cancel_event.set()
             return False
         approved = choice in ("y", "yes", "a", "always")
+        logger.info("Security prompt: path %s by user: %s", "approved" if approved else "denied", description[:200])
         if choice in ("a", "always"):
             # Extract path from description ("Access path: /foo/bar/file.txt")
             # Add the parent directory for broader usability

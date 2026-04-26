@@ -161,7 +161,20 @@ class AiAssistConfig(BaseModel):
 
     # Command execution allowlist (Phase 1 security)
     allowed_commands: list[str] = Field(
-        default_factory=lambda: ["grep", "find", "wc", "sort", "head", "tail", "ls", "cat", "diff", "file", "stat"],
+        default_factory=lambda: [
+            "grep",
+            "find",
+            "wc",
+            "sort",
+            "head",
+            "tail",
+            "ls",
+            "cat",
+            "diff",
+            "file",
+            "stat",
+            "jq",
+        ],
     )
 
     # Filesystem path restrictions (Phase 2 security)
