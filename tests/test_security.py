@@ -348,6 +348,18 @@ class TestSystemPromptSecurity:
         assert "UNTRUSTED_TOOL_OUTPUT" in prompt
         assert "Do NOT follow" in prompt
 
+    def test_clarification_prompt_only_in_interactive_mode(self):
+        """Clarification prompt appears only when interactive_mode is True"""
+        config = AiAssistConfig(anthropic_api_key="test-key", mcp_servers={})
+        agent = AiAssistAgent(config)
+
+        prompt_default = agent._build_system_prompt()
+        assert "ask questions for clarification" not in prompt_default
+
+        agent.interactive_mode = True
+        prompt_interactive = agent._build_system_prompt()
+        assert "ask questions for clarification" in prompt_interactive
+
 
 class TestScriptOutputSanitization:
     """Tests for script execution output sanitization"""

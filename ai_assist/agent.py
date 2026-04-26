@@ -232,6 +232,7 @@ class AiAssistAgent:
         self._no_kg = False  # Per-query flag: @no-kg prefix suppresses KG injection
         self._no_history = False  # Per-query flag: @no-history prefix strips conversation history
         self._query_depth = 0  # Track nesting depth for _no_kg reset
+        self.interactive_mode = False
 
         # Load identity for personalized interactions
         self.identity = get_identity()
@@ -305,6 +306,8 @@ class AiAssistAgent:
         self.sessions: dict[str, ClientSession] = {}
         self.available_tools: list[dict] = []
         self.available_prompts: dict[str, dict] = {}  # {server_name: {prompt_name: Prompt}}
+        self.available_resources: dict[str, list] = {}  # {server_name: [Resource, ...]}
+        self.available_resource_templates: dict[str, list] = {}  # {server_name: [ResourceTemplate, ...]}
         self._server_tasks: list[asyncio.Task] = []
 
         # Security: tool definition registry for rug-pull detection
@@ -332,6 +335,8 @@ class AiAssistAgent:
         # Update introspection tools with reference to available_prompts and agent
         # (will be populated during server connection)
         self.introspection_tools.available_prompts = self.available_prompts
+        self.introspection_tools.available_resources = self.available_resources
+        self.introspection_tools.available_resource_templates = self.available_resource_templates
         self.introspection_tools.agent = self  # Allow introspection tools to execute prompts
 
         # Initialize knowledge management tools
@@ -411,9 +416,12 @@ class AiAssistAgent:
                     if server_name in self.sessions:
                         tool_count = len([t for t in self.available_tools if t["_server"] == server_name])
                         prompt_count = len(self.available_prompts.get(server_name, {}))
+                        resource_count = len(self.available_resources.get(server_name, []))
                         parts = [f"✓ Connected to {server_name} MCP server with {tool_count} tools"]
                         if prompt_count:
                             parts.append(f"{prompt_count} prompts")
+                        if resource_count:
+                            parts.append(f"{resource_count} resources")
                         print(", ".join(parts))
                         break
                 # No warning if not connected yet - it may still connect later
@@ -572,6 +580,35 @@ class AiAssistAgent:
                     except Exception:
                         # Prompts are optional - silently skip if not supported
                         pass
+
+                    # Discover resources from this server
+                    try:
+                        resources_result = await session.list_resources()
+                        if resources_result.resources:
+                            self.available_resources[name] = resources_result.resources
+                            for res in resources_result.resources:
+                                if res.description:
+                                    res_warnings = validate_tool_description(
+                                        f"resource:{name}/{res.uri}", res.description
+                                    )
+                                    if res_warnings:
+                                        for w in res_warnings:
+                                            logger.warning(
+                                                "Resource description warning for %s/%s: %s",
+                                                name,
+                                                res.uri,
+                                                w,
+                                            )
+                    except Exception:
+                        pass
+
+                    try:
+                        templates_result = await session.list_resource_templates()
+                        if templates_result.resourceTemplates:
+                            self.available_resource_templates[name] = templates_result.resourceTemplates
+                    except Exception:
+                        pass
+
                     # Keep the connection alive by waiting indefinitely
                     try:
                         await asyncio.Event().wait()
@@ -584,12 +621,16 @@ class AiAssistAgent:
             traceback.print_exc()
 
     def _disconnect_server(self, name: str):
-        """Disconnect a single MCP server, cleaning up session, tools, prompts, and task"""
+        """Disconnect a single MCP server, cleaning up session, tools, prompts, resources, and task"""
         if name in self.sessions:
             self.sessions.pop(name)
         self.available_tools = [t for t in self.available_tools if t.get("_server") != name]
         if name in self.available_prompts:
             self.available_prompts.pop(name)
+        if name in self.available_resources:
+            self.available_resources.pop(name)
+        if name in self.available_resource_templates:
+            self.available_resource_templates.pop(name)
         for task in self._server_tasks:
             if task.get_name() == f"mcp_{name}":
                 task.cancel()
@@ -615,9 +656,12 @@ class AiAssistAgent:
         if connected:
             tool_count = len([t for t in self.available_tools if t.get("_server") == name])
             prompt_count = len(self.available_prompts.get(name, {}))
+            resource_count = len(self.available_resources.get(name, []))
             parts = [f"✓ Reconnected {name} with {tool_count} tools"]
             if prompt_count:
                 parts.append(f"{prompt_count} prompts")
+            if resource_count:
+                parts.append(f"{resource_count} resources")
             print(f"  {', '.join(parts)}")
             # Rug-pull detection: check for tool definition changes after reconnect
             # Scope to this server's tools only to avoid false positives from other servers
@@ -668,7 +712,11 @@ class AiAssistAgent:
             connected = await self._connect_server(name, new_servers[name])
             if connected:
                 tool_count = len([t for t in self.available_tools if t.get("_server") == name])
-                print(f"    ✓ Connected with {tool_count} tools")
+                resource_count = len(self.available_resources.get(name, []))
+                parts = [f"✓ Connected with {tool_count} tools"]
+                if resource_count:
+                    parts.append(f"{resource_count} resources")
+                print(f"    {', '.join(parts)}")
 
         # Reconnect modified servers (simple: disconnect + connect)
         common = old_names & new_names
@@ -685,9 +733,12 @@ class AiAssistAgent:
                 if connected:
                     tool_count = len([t for t in self.available_tools if t.get("_server") == name])
                     prompt_count = len(self.available_prompts.get(name, {}))
+                    resource_count = len(self.available_resources.get(name, []))
                     parts = [f"✓ Reconnected with {tool_count} tools"]
                     if prompt_count:
                         parts.append(f"{prompt_count} prompts")
+                    if resource_count:
+                        parts.append(f"{resource_count} resources")
                     print(f"    {', '.join(parts)}")
                     # Rug-pull detection after reconnect (scoped to this server)
                     server_tools = [t for t in self.available_tools if t.get("_server") == name]
@@ -1089,6 +1140,13 @@ class AiAssistAgent:
             prompt += '- Schedule periodically via schedules.json: {"prompt": "goals/my_goal.awl", "interval": "30m"}\n'
             prompt += "- Use goal__create to generate a goal AWL file from natural language\n"
 
+        # Add MCP resource guidance if any resources are available
+        if self.available_resources or self.available_resource_templates:
+            prompt += "\n\n# MCP Resources\n\n"
+            prompt += "MCP servers expose read-only resources you can access on demand.\n"
+            prompt += "Use introspection__list_mcp_resources to discover available resources.\n"
+            prompt += "Use introspection__read_mcp_resource to read a specific resource by server and URI.\n"
+
         # Add Knowledge Graph guidance
         if self.knowledge_graph and not self._no_kg:
             prompt += "\n\n# Knowledge Graph\n\n"
@@ -1114,8 +1172,12 @@ class AiAssistAgent:
         prompt += "\n\n# Honesty and Clarification\n\n"
         prompt += "Never guess or make assumptions when you are unsure. "
         prompt += "If you do not know the answer after searching available tools and knowledge, "
-        prompt += "say so honestly and ask the user for clarification.\n\n"
-        prompt += "## Source Citation\n\n"
+        prompt += "say so honestly and ask the user for clarification.\n"
+        if self.interactive_mode:
+            prompt += (
+                "Do not hesitate to ask questions for clarification when a request is ambiguous or underspecified.\n"
+            )
+        prompt += "\n## Source Citation\n\n"
         prompt += "When citing specific data (job statuses, ticket details, dates, counts, component versions, test results), "
         prompt += "reference the tool that provided it using inline citations like: (source: search_dci_jobs) or (source: get_jira_ticket).\n"
         prompt += "For general knowledge not from tools, prefix with: 'Based on my general knowledge: ...' to distinguish it from tool-sourced data.\n"
@@ -2001,6 +2063,39 @@ class AiAssistAgent:
                 elif chunk.get("type") == "done":
                     break
         return full_response
+
+    async def read_mcp_resource(self, server_name: str, uri: str) -> dict:
+        """Read an MCP resource by server name and URI
+
+        Returns:
+            Dict with 'contents' list, each entry having text or blob summary
+        """
+        if server_name not in self.sessions:
+            available = ", ".join(self.sessions.keys())
+            raise ValueError(f"MCP server '{server_name}' not connected. Available servers: {available}")
+
+        from pydantic import AnyUrl
+
+        session = self.sessions[server_name]
+        result = await session.read_resource(AnyUrl(uri))
+
+        contents = []
+        for item in result.contents:
+            if hasattr(item, "text") and item.text is not None:
+                text, _ = sanitize_tool_result(str(item.text), f"resource:{server_name}/{uri}")
+                contents.append(
+                    {"text": text, "mimeType": item.mimeType, "uri": str(item.uri) if hasattr(item, "uri") else uri}
+                )
+            elif hasattr(item, "blob") and item.blob is not None:
+                contents.append(
+                    {
+                        "type": "blob",
+                        "summary": f"Binary resource (base64-encoded, mimeType={item.mimeType})",
+                        "mimeType": item.mimeType,
+                        "uri": str(item.uri) if hasattr(item, "uri") else uri,
+                    }
+                )
+        return {"contents": contents}
 
     def _validate_prompt_arguments(self, prompt_def, arguments: dict):
         """Validate arguments against prompt definition
