@@ -2,7 +2,9 @@
 
 import html
 import webbrowser
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from .awl_ast import (
     ASTNode,
@@ -83,7 +85,7 @@ def _truncate(text: str, max_len: int = 120) -> str:
 
 def _render_node(node: ASTNode) -> str:
     """Render a single AST node to HTML."""
-    renderers = {
+    renderers: dict[type, Callable[[Any], str]] = {
         TaskNode: _render_task,
         IfNode: _render_if,
         LoopNode: _render_loop,

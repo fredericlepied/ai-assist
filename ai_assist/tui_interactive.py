@@ -1307,7 +1307,7 @@ async def handle_awl_viz_command(user_input: str, console: Console):
     console.print(f"\n[dim]Enter number (1-{len(scripts)}) or 'q' to cancel:[/dim]")
     from prompt_toolkit import PromptSession as SelectSession
 
-    select_session = SelectSession()
+    select_session: Any = SelectSession()
     try:
         choice = await select_session.prompt_async(">> ")
         choice = choice.strip()
