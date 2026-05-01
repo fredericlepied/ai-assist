@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.filters import has_completions
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
@@ -525,10 +526,28 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     def _(event):
         event.current_buffer.insert_text("\n")
 
+    @kb.add("enter", filter=has_completions)
+    def _(event):
+        event.current_buffer.complete_state = None
+
+    @kb.add("tab")
+    def _(event):
+        b = event.current_buffer
+        if b.complete_state is not None:
+            current = b.complete_state.current_completion
+            if current is not None and current.text.endswith("/"):
+                b.complete_state = None
+                b.start_completion()
+            else:
+                b.complete_next()
+        else:
+            b.start_completion()
+
     session: Any = PromptSession(
         message="You> ",
         multiline=False,  # Enter submits by default
         completer=AiAssistCompleter(agent=agent),
+        complete_while_typing=True,
         history=FileHistory(str(history_file)),
         key_bindings=kb,
     )
