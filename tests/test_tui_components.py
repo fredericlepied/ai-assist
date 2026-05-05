@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 
+import pytest
 from prompt_toolkit.document import Document
 
 from ai_assist.tui import AiAssistCompleter, format_tool_args, format_tool_display_name
@@ -266,3 +267,95 @@ def test_format_tool_args():
     # Custom max_len
     result = format_tool_args({"key": "abcdefghij"}, max_len=5)
     assert result == "key=abcde..."
+
+
+# --- File path completion tests ---
+
+
+@pytest.fixture
+def path_completion_dir(tmp_path):
+    (tmp_path / "file_a.txt").write_text("a")
+    (tmp_path / "file_b.py").write_text("b")
+    sub = tmp_path / "subdir"
+    sub.mkdir()
+    (sub / "nested.txt").write_text("n")
+    return tmp_path
+
+
+def _completion_texts(completions):
+    return [c.text for c in completions]
+
+
+def test_path_completion_dot_slash(path_completion_dir, monkeypatch):
+    monkeypatch.chdir(path_completion_dir)
+    completer = AiAssistCompleter()
+    doc = Document("./", cursor_position=2)
+    completions = list(completer.get_completions(doc, None))
+    texts = _completion_texts(completions)
+    assert any("file_a.txt" in t for t in texts)
+    assert any("subdir" in t for t in texts)
+
+
+def test_path_completion_dot_slash_partial(path_completion_dir, monkeypatch):
+    monkeypatch.chdir(path_completion_dir)
+    completer = AiAssistCompleter()
+    doc = Document("./file_", cursor_position=7)
+    completions = list(completer.get_completions(doc, None))
+    assert len(completions) == 2
+
+
+def test_path_completion_dot_dot_slash(path_completion_dir, monkeypatch):
+    monkeypatch.chdir(path_completion_dir / "subdir")
+    completer = AiAssistCompleter()
+    doc = Document("../", cursor_position=3)
+    completions = list(completer.get_completions(doc, None))
+    texts = _completion_texts(completions)
+    assert any("file_a.txt" in t for t in texts)
+
+
+def test_path_completion_tilde_slash():
+    completer = AiAssistCompleter()
+    doc = Document("~/", cursor_position=2)
+    completions = list(completer.get_completions(doc, None))
+    assert len(completions) > 0
+
+
+def test_path_completion_mid_sentence(path_completion_dir, monkeypatch):
+    monkeypatch.chdir(path_completion_dir)
+    completer = AiAssistCompleter()
+    doc = Document("process ./file_", cursor_position=15)
+    completions = list(completer.get_completions(doc, None))
+    assert len(completions) == 2
+
+
+def test_path_completion_subdir(path_completion_dir, monkeypatch):
+    monkeypatch.chdir(path_completion_dir)
+    completer = AiAssistCompleter()
+    doc = Document("./subdir/", cursor_position=9)
+    completions = list(completer.get_completions(doc, None))
+    texts = _completion_texts(completions)
+    assert any("nested.txt" in t for t in texts)
+
+
+def test_path_completion_directory_appends_slash(path_completion_dir, monkeypatch):
+    monkeypatch.chdir(path_completion_dir)
+    completer = AiAssistCompleter()
+    doc = Document("./sub", cursor_position=5)
+    completions = list(completer.get_completions(doc, None))
+    assert len(completions) == 1
+    assert completions[0].text == "dir/"
+
+
+def test_path_completion_no_conflict_with_slash_commands():
+    completer = AiAssistCompleter()
+    doc = Document("/st", cursor_position=3)
+    completions = list(completer.get_completions(doc, None))
+    texts = _completion_texts(completions)
+    assert "/status" in texts
+
+
+def test_path_completion_not_triggered_for_regular_words():
+    completer = AiAssistCompleter()
+    doc = Document("hello world", cursor_position=11)
+    completions = list(completer.get_completions(doc, None))
+    assert len(completions) == 0

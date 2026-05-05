@@ -1,5 +1,7 @@
 """TUI components for ai-assist"""
 
+import os
+
 from prompt_toolkit.completion import Completer, Completion
 
 
@@ -55,9 +57,45 @@ class AiAssistCompleter(Completer):
             "/help",
         ]
 
+    @staticmethod
+    def _is_path_prefix(word: str) -> bool:
+        return word.startswith(("./", "../")) or (word.startswith("~") and len(word) >= 2)
+
+    @staticmethod
+    def _get_path_completions(word: str):
+        expanded = os.path.expanduser(word)
+        if expanded.endswith("/"):
+            search_dir = expanded
+            prefix = ""
+        else:
+            search_dir = os.path.dirname(expanded) or "."
+            prefix = os.path.basename(expanded)
+        try:
+            entries = os.listdir(search_dir)
+        except OSError:
+            return
+        for entry in sorted(entries):
+            if not prefix and entry.startswith("."):
+                continue
+            if entry.lower().startswith(prefix.lower()):
+                full_path = os.path.join(search_dir, entry)
+                is_dir = os.path.isdir(full_path)
+                suffix = "/" if is_dir else ""
+                yield Completion(
+                    entry[len(prefix) :] + suffix,
+                    display=entry + suffix,
+                )
+
     def get_completions(self, document, complete_event):
         """Get completions for the current input"""
         text = document.text_before_cursor
+
+        words = text.split()
+        if words:
+            last_word = words[-1]
+            if self._is_path_prefix(last_word):
+                yield from self._get_path_completions(last_word)
+                return
 
         # Only complete if line starts with /
         if text.startswith("/"):
