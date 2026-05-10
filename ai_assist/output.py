@@ -137,45 +137,56 @@ def _format_args_rich(input_dict: dict, max_len: int = 100) -> str:
 
 
 class RichRenderer:
-    """Rich console renderer with Live widgets, spinners, and Markdown streaming."""
+    """Rich console renderer with spinners and Markdown streaming.
+
+    Uses a single Rich Live widget for the spinner only. Text is never put
+    into the Live widget — it is accumulated and printed via console.print
+    at flush time (show_text_done / stop).
+    """
 
     def __init__(self, console: Console, assistant_name: str = "Assistant"):
         self._console = console
         self._assistant_name = assistant_name
         self._live: Any = None
         self._live_running = False
-        self._full_response = ""
-        self._committed_response = ""
+        self._pending_text = ""
         self._response_started = False
-        self._status = "Starting..."
 
     def start(self):
         """Start the initial spinner display."""
         from rich.live import Live
         from rich.spinner import Spinner
 
-        spinner = Spinner("dots", text=self._status, style="cyan")
-        self._live = Live(spinner, console=self._console, refresh_per_second=10)
+        spinner = Spinner("dots", text="💭 Thinking...", style="cyan")
+        self._live = Live(spinner, console=self._console, refresh_per_second=10, transient=True)
         self._live.start()
         self._live_running = True
-        self._full_response = ""
-        self._committed_response = ""
+        self._pending_text = ""
         self._response_started = False
 
     def stop(self):
         """Stop and clean up the display."""
-        if self._live_running and self._live:
-            self._live.stop()
-            self._live_running = False
+        self._stop_live()
+        self._flush_text()
         self._live = None
 
-    def show_tool_call(self, tool_name: str, arguments: dict) -> None:
-        # Stop Live before printing to avoid display corruption
+    def _stop_live(self) -> None:
+        """Stop the Live widget without printing anything."""
         if self._live_running and self._live:
             self._live.stop()
             self._live_running = False
-        # Mark current text as committed (already printed by live.stop())
-        self._committed_response = self._full_response
+
+    def _flush_text(self) -> None:
+        """Print pending text via console.print and clear the buffer."""
+        if self._pending_text.strip():
+            from rich.markdown import Markdown
+
+            self._console.print(Markdown(self._pending_text))
+        self._pending_text = ""
+
+    def show_tool_call(self, tool_name: str, arguments: dict) -> None:
+        self._stop_live()
+        self._pending_text = ""
 
         display_name = _format_display_name(tool_name)
         self._console.print(f"\n[dim]🔧 {display_name}[/dim]")
@@ -187,14 +198,11 @@ class RichRenderer:
             else:
                 self._console.print(f"[dim]   {_format_args_rich(arguments)}[/dim]")
 
-        # Restart with spinner
         self._restart_spinner()
 
     def show_inner_tool_call(self, tool_name: str, arguments: dict) -> None:
-        # Stop Live before printing
-        if self._live_running and self._live:
-            self._live.stop()
-            self._live_running = False
+        self._stop_live()
+        self._pending_text = ""
 
         display_name = _format_display_name(tool_name)
         self._console.print(f"\n[dim]  🔧 {display_name}[/dim]")
@@ -206,50 +214,30 @@ class RichRenderer:
             else:
                 self._console.print(f"[dim]     {_format_args_rich(arguments)}[/dim]")
 
-        # Restart with simple spinner (not full markdown)
         self._restart_spinner(text="  executing prompt...")
 
     def show_progress(self, status: str, detail: str = "") -> None:
-        from rich.spinner import Spinner
-
-        if status == "thinking":
-            self._status = "🤔 Analyzing your question..."
-        elif status == "calling_claude":
-            self._status = "💭 Thinking..."
-        elif status == "executing_tool":
-            self._status = f"🔧 Using tool: {detail}"
-        elif status == "complete":
-            self._status = "✨ Complete!"
-
-        # Only update spinner before response streaming starts
-        if not self._response_started and self._live_running and self._live:
-            self._live.update(Spinner("dots", text=self._status, style="cyan"))
+        pass
 
     def show_text_delta(self, text: str) -> None:
-        from rich.markdown import Markdown
-
         if not self._response_started:
+            self._stop_live()
             self._console.print()
             self._console.print(f"[bold cyan]{self._assistant_name}:[/bold cyan]")
             self._response_started = True
 
-        self._full_response += text
-        new_text = self._full_response[len(self._committed_response) :]
-        if self._live:
-            self._live.update(Markdown(new_text))
+        self._pending_text += text
 
     def show_text_done(self) -> None:
-        if self._live_running and self._live:
-            self._live.stop()
-            self._live_running = False
+        self._stop_live()
+        self._flush_text()
 
     def show_warning(self, message: str) -> None:
         self._console.print(f"[yellow]  {message}[/yellow]")
 
     def show_error(self, message: str) -> None:
-        if self._live_running and self._live:
-            self._live.stop()
-            self._live_running = False
+        self._stop_live()
+        self._flush_text()
         self._console.print(f"\n[red]{message}[/red]")
 
     def on_inner_execution(self, chunk: Any) -> None:
@@ -262,11 +250,11 @@ class RichRenderer:
             self.show_error(chunk.get("message", "Unknown error"))
 
     def _restart_spinner(self, text: str | None = None) -> None:
-        """Restart Live with a simple spinner."""
+        """Restart Live with a simple spinner (transient so it leaves no artifacts)."""
         from rich.live import Live
         from rich.spinner import Spinner
 
-        spinner = Spinner("dots", text=text or self._status, style="cyan")
-        self._live = Live(spinner, console=self._console, refresh_per_second=10)
+        spinner = Spinner("dots", text=text or "💭 Thinking...", style="cyan")
+        self._live = Live(spinner, console=self._console, refresh_per_second=10, transient=True)
         self._live.start()
         self._live_running = True
