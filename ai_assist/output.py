@@ -139,7 +139,7 @@ def _format_args_rich(input_dict: dict, max_len: int = 100) -> str:
 class RichRenderer:
     """Rich console renderer with Live widgets, spinners, and Markdown streaming."""
 
-    def __init__(self, console: "Console", assistant_name: str = "Assistant"):
+    def __init__(self, console: Console, assistant_name: str = "Assistant"):
         self._console = console
         self._assistant_name = assistant_name
         self._live: Any = None

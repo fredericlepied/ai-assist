@@ -197,7 +197,7 @@ class SkillsLoader:
                 reset_ts = e.response.headers.get("x-ratelimit-reset", e.response.headers.get("retry-after", ""))
                 try:
                     wait = max(1, int(reset_ts) - int(time.time()))
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     wait = 60
                 raise ValueError(f"ClawHub rate limit exceeded. Try again in {wait}s") from e
             raise ValueError(f"Failed to download skill '{slug}' version {resolved_version}") from e

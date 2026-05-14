@@ -6,7 +6,7 @@ enabling intelligent decisions about when to use cached data vs fresh API calls.
 
 import json
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .agent import AiAssistAgent
@@ -19,10 +19,10 @@ class IntrospectionTools:
 
     def __init__(
         self,
-        knowledge_graph: Optional["KnowledgeGraph"] = None,
-        conversation_memory: Optional["ConversationMemory"] = None,
+        knowledge_graph: KnowledgeGraph | None = None,
+        conversation_memory: ConversationMemory | None = None,
         available_prompts: dict | None = None,
-        agent: Optional["AiAssistAgent"] = None,
+        agent: AiAssistAgent | None = None,
         available_resources: dict | None = None,
         available_resource_templates: dict | None = None,
     ):

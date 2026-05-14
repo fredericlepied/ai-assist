@@ -115,7 +115,7 @@ class ConditionEvaluator:
                         compare_value = float(value_str)
                     else:
                         compare_value = value_str
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     compare_value = value_str
 
                 # Evaluate comparison

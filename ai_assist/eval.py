@@ -23,7 +23,7 @@ def _partition_by_age(lines: list[str], cutoff: datetime) -> tuple[list[str], in
                 kept.append(stripped)
             else:
                 removed += 1
-        except (json.JSONDecodeError, KeyError, ValueError):
+        except json.JSONDecodeError, KeyError, ValueError:
             kept.append(stripped)
     return kept, removed
 
@@ -63,7 +63,7 @@ class QueryTrace:
         return json.dumps(asdict(self), default=str)
 
     @classmethod
-    def from_json(cls, data: dict) -> "QueryTrace":
+    def from_json(cls, data: dict) -> QueryTrace:
         """Deserialize from JSON dict."""
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
@@ -94,7 +94,7 @@ class TraceStore:
                     try:
                         data = json.loads(stripped)
                         traces.append(QueryTrace.from_json(data))
-                    except (json.JSONDecodeError, TypeError):
+                    except json.JSONDecodeError, TypeError:
                         pass  # Skip malformed lines
         return traces
 

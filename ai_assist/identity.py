@@ -47,7 +47,7 @@ class Identity(BaseModel):
     preferences: CommunicationPreferences = Field(default_factory=CommunicationPreferences)
 
     @classmethod
-    def load_from_file(cls, path: Path | None = None) -> "Identity":
+    def load_from_file(cls, path: Path | None = None) -> Identity:
         """Load identity from YAML file
 
         Args:

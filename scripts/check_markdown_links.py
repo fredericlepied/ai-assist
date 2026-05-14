@@ -26,7 +26,7 @@ def get_anchors(filepath: Path) -> set[str]:
     """Extract all heading anchors from a markdown file."""
     try:
         content = filepath.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    except OSError, UnicodeDecodeError:
         return set()
     anchors = set()
     for match in HEADING_RE.finditer(content):
@@ -39,7 +39,7 @@ def check_file(filepath: Path, repo_root: Path) -> list[str]:
     errors = []
     try:
         content = filepath.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    except OSError, UnicodeDecodeError:
         return errors
 
     file_dir = filepath.parent

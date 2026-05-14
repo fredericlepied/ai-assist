@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 class ConsoleNotificationChannel:
     """Console-based notifications using Rich"""
 
-    async def send(self, notification: "Notification") -> bool:
+    async def send(self, notification: Notification) -> bool:
         from rich.console import Console
         from rich.panel import Panel
 
@@ -54,7 +54,7 @@ class FileNotificationChannel:
     def __init__(self, log_file: Path):
         self.log_file = log_file
 
-    async def send(self, notification: "Notification") -> bool:
+    async def send(self, notification: Notification) -> bool:
         # Ensure directory exists
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -76,7 +76,7 @@ class FileNotificationChannel:
 class DesktopNotificationChannel:
     """Desktop notifications via D-Bus (Linux) or native APIs"""
 
-    async def send(self, notification: "Notification") -> bool:
+    async def send(self, notification: Notification) -> bool:
         try:
             import platform
 
@@ -95,7 +95,7 @@ class DesktopNotificationChannel:
             print(f"Desktop notification failed: {e}")
             return False
 
-    async def _send_dbus(self, notification: "Notification") -> bool:
+    async def _send_dbus(self, notification: Notification) -> bool:
         """Send via D-Bus (Linux libnotify)"""
         try:
             import subprocess
@@ -124,10 +124,10 @@ class DesktopNotificationChannel:
             )
 
             return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except subprocess.CalledProcessError, FileNotFoundError:
             return False
 
-    async def _send_macos(self, notification: "Notification") -> bool:
+    async def _send_macos(self, notification: Notification) -> bool:
         """Send via osascript (macOS)"""
         try:
             import subprocess
@@ -150,7 +150,7 @@ class DesktopNotificationChannel:
         except subprocess.CalledProcessError:
             return False
 
-    async def _send_windows(self, notification: "Notification") -> bool:
+    async def _send_windows(self, notification: Notification) -> bool:
         """Send via Windows toast notifications"""
         # Placeholder - would use win10toast or similar
         return False

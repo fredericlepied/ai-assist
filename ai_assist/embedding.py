@@ -8,14 +8,14 @@ import numpy as np
 
 
 class EmbeddingModel:
-    _instance: "EmbeddingModel | None" = None
+    _instance: EmbeddingModel | None = None
     _lock = threading.Lock()
 
     def __init__(self) -> None:
         self._model: Any = None
 
     @classmethod
-    def get(cls) -> "EmbeddingModel":
+    def get(cls) -> EmbeddingModel:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:

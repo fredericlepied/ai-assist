@@ -463,7 +463,7 @@ async def handle_prompt_command(
 
                 arguments[arg.name] = value
 
-            except (KeyboardInterrupt, EOFError):
+            except KeyboardInterrupt, EOFError:
                 console.print("\n[yellow]Cancelled[/yellow]\n")
                 return True
 
@@ -510,7 +510,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         import termios
 
         saved_terminal_attrs = termios.tcgetattr(sys.stdin.fileno())
-    except (ImportError, termios.error, OSError):
+    except ImportError, termios.error, OSError:
         pass
 
     # Setup history file
@@ -1107,7 +1107,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                 except Exception as e:
                     console.print(f"\n[red]Error: {e}[/red]\n")
 
-            except (EOFError, KeyboardInterrupt):
+            except EOFError, KeyboardInterrupt:
                 state_manager.save_conversation_context("last_interactive_session", {"messages": conversation_context})
                 console.print("\n[cyan]Goodbye![/cyan]")
                 break
@@ -1124,7 +1124,7 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
                 import termios
 
                 termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, saved_terminal_attrs)
-            except (ImportError, termios.error, OSError):
+            except ImportError, termios.error, OSError:
                 pass
 
 
@@ -1340,7 +1340,7 @@ async def handle_awl_viz_command(user_input: str, console: Console):
             console.print(f"[dim]File: {filepath}[/dim]\n")
         else:
             console.print("[red]Invalid selection[/red]\n")
-    except (ValueError, EOFError, KeyboardInterrupt):
+    except ValueError, EOFError, KeyboardInterrupt:
         console.print("[dim]Cancelled[/dim]\n")
 
 

@@ -6,7 +6,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from anthropic import Anthropic, AnthropicVertex, APIConnectionError, APIError, BadRequestError, RateLimitError
 from mcp import ClientSession, StdioServerParameters
@@ -225,7 +225,7 @@ class AiAssistAgent:
     EXTENDED_CONTEXT_BETA_HEADER = "context-1m-2025-08-07"
     EXTENDED_CONTEXT_ACTIVATION_THRESHOLD = 0.75  # Activate at 75% of 200K (150K tokens)
 
-    def __init__(self, config: AiAssistConfig, knowledge_graph: Optional["KnowledgeGraph"] = None):
+    def __init__(self, config: AiAssistConfig, knowledge_graph: KnowledgeGraph | None = None):
         self.config = config
         self.knowledge_graph = knowledge_graph
         self.kg_save_enabled = True  # Can be toggled by user
@@ -2755,7 +2755,7 @@ class AiAssistAgent:
         """Clear tracked tool calls"""
         self.last_tool_calls = []
 
-    async def _run_synthesis(self, conversation_memory: "ConversationMemory", focus: str = "all"):
+    async def _run_synthesis(self, conversation_memory: ConversationMemory, focus: str = "all"):
         """Agent reflects on conversation and extracts learnings
 
         Args:
@@ -3154,7 +3154,7 @@ class AiAssistAgent:
             logger.exception("Connection discovery failed: %s", e)
             return f"Connection discovery failed: {e}"
 
-    async def check_and_run_synthesis(self, conversation_memory: "ConversationMemory"):
+    async def check_and_run_synthesis(self, conversation_memory: ConversationMemory):
         """Check if synthesis was triggered and run it
 
         Args:
@@ -3166,7 +3166,7 @@ class AiAssistAgent:
 
             await self._run_synthesis(conversation_memory, focus)
 
-    def set_conversation_memory(self, conversation_memory: Optional["ConversationMemory"]):
+    def set_conversation_memory(self, conversation_memory: ConversationMemory | None):
         """Set conversation memory for introspection tools
 
         Args:

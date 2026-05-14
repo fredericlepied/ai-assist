@@ -96,7 +96,7 @@ async def stdio_client_fixed(server: StdioServerParameters, errlog: TextIO = sys
                             logger.exception("Parse error")
                             try:
                                 await read_stream_writer.send(exc)
-                            except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+                            except anyio.ClosedResourceError, anyio.BrokenResourceError:
                                 return
                         else:
                             await read_stream_writer.send(session_message)
@@ -123,7 +123,7 @@ async def stdio_client_fixed(server: StdioServerParameters, errlog: TextIO = sys
                         )
                     )
                     logger.debug("[FIX] stdin_writer sent message")
-        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+        except anyio.ClosedResourceError, anyio.BrokenResourceError:
             await anyio.lowlevel.checkpoint()
         except Exception as e:
             logger.error(f"stdin_writer error: {e}")
