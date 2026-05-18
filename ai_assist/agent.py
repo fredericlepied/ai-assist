@@ -308,9 +308,9 @@ class AiAssistAgent:
             else:
                 print(f"Using Vertex AI: project={config.vertex_project_id} (default region)")
 
-            self.anthropic = AnthropicVertex(**vertex_kwargs)
+            self.anthropic = AnthropicVertex(**vertex_kwargs, max_retries=5)
         else:
-            self.anthropic = Anthropic(api_key=config.anthropic_api_key)
+            self.anthropic = Anthropic(api_key=config.anthropic_api_key, max_retries=5)
 
         # Display model configuration
         max_tokens = self.get_max_tokens()

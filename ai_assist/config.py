@@ -153,7 +153,7 @@ class AiAssistConfig(BaseModel):
     vertex_project_id: str | None = Field(default_factory=lambda: os.getenv("ANTHROPIC_VERTEX_PROJECT_ID"))
     vertex_region: str | None = Field(default_factory=lambda: os.getenv("ANTHROPIC_VERTEX_REGION"))
 
-    model: str = Field(default="claude-sonnet-4-5@20250929")
+    model: str = Field(default="claude-sonnet-4-6")
 
     @property
     def use_vertex(self) -> bool:
@@ -273,7 +273,7 @@ class AiAssistConfig(BaseModel):
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             vertex_project_id=os.getenv("ANTHROPIC_VERTEX_PROJECT_ID"),
             vertex_region=os.getenv("ANTHROPIC_VERTEX_REGION"),
-            model=os.getenv("AI_ASSIST_MODEL", "claude-sonnet-4-6@20260219"),
+            model=os.getenv("AI_ASSIST_MODEL", "claude-sonnet-4-6"),
             mcp_servers=mcp_servers,
         )
 

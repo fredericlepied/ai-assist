@@ -82,4 +82,4 @@ Run `pre-commit run --all-files` before declaring a feature complete.
 - **Security**: Script execution is disabled by default. Only enable if you trust installed skills.
 - **Extended context**: 1M token window is opt-in via `AI_ASSIST_ALLOW_EXTENDED_CONTEXT=true` (2x pricing above 200K)
 - **JSON processing**: `internal__json_query` requires `jq` installed on the system
-- **Vertex AI users**: Use `@` format for model names (e.g., `claude-sonnet-4-5@20250929`)
+- **Vertex AI users**: For Claude 4.6+ models, use dateless IDs (e.g., `claude-sonnet-4-6`). The `@YYYYMMDD` format only applies to older models (e.g., `claude-sonnet-4-5@20250929`)
