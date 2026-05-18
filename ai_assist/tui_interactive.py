@@ -16,7 +16,6 @@ from prompt_toolkit.filters import has_completions
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
-from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
@@ -32,7 +31,7 @@ from .identity import get_identity
 from .knowledge_graph import KnowledgeGraph
 from .prompt_utils import extract_prompt_messages
 from .state import StateManager
-from .tui import AiAssistCompleter, format_tool_args, format_tool_display_name
+from .tui import AiAssistCompleter, format_tool_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +119,50 @@ class NotificationWatcher:
             await self.watchdog.stop()
 
 
+async def consume_streaming_response(
+    agent: AiAssistAgent,
+    renderer: Any,
+    console: Console,
+    cancel_event: threading.Event,
+    prompt: str | None = None,
+    messages: list[dict] | None = None,
+    progress_callback: Any = None,
+) -> str:
+    """Consume an agent streaming response, dispatching chunks to a renderer.
+
+    Returns the full text response.
+    """
+    full_response = ""
+    try:
+        async for chunk in agent.query_streaming(
+            prompt=prompt,
+            messages=messages,
+            progress_callback=progress_callback,
+            cancel_event=cancel_event,
+        ):
+            if isinstance(chunk, str):
+                renderer.show_text_delta(chunk)
+                full_response += chunk
+            elif isinstance(chunk, dict):
+                if chunk.get("type") == "tool_use":
+                    renderer.show_tool_call(chunk["name"], chunk.get("input", {}))
+                elif chunk.get("type") == "cancelled":
+                    renderer.stop()
+                    console.print("\n[yellow]Query cancelled[/yellow]")
+                    break
+                elif chunk.get("type") == "done":
+                    renderer.show_text_done()
+                    break
+                elif chunk.get("type") == "error":
+                    renderer.show_error(chunk.get("message", ""))
+                    break
+    except Exception as e:
+        renderer.show_error(str(e))
+    finally:
+        renderer.stop()
+    return full_response
+
+
 async def query_with_feedback(
     agent: AiAssistAgent,
     prompt: str,
@@ -194,38 +237,21 @@ async def query_with_feedback(
         escape_watcher = EscapeWatcher(cancel_event)
         agent._active_escape_watcher = escape_watcher
         with escape_watcher:
-            async for chunk in agent.query_streaming(
+            full_response = await consume_streaming_response(
+                agent,
+                renderer,
+                console,
+                cancel_event,
                 prompt=prompt if messages is None else None,
                 messages=messages,
                 progress_callback=progress_callback,
-                cancel_event=cancel_event,
-            ):
-                if isinstance(chunk, str):
-                    renderer.show_text_delta(chunk)
-                    full_response += chunk
-
-                elif isinstance(chunk, dict):
-                    if chunk.get("type") == "tool_use":
-                        renderer.show_tool_call(chunk["name"], chunk.get("input", {}))
-
-                    elif chunk.get("type") == "cancelled":
-                        renderer.stop()
-                        console.print("\n[yellow]Query cancelled[/yellow]")
-                        break
-
-                    elif chunk.get("type") == "done":
-                        renderer.show_text_done()
-                        break
-
-                    elif chunk.get("type") == "error":
-                        renderer.show_error(chunk.get("message", ""))
-                        break
+            )
 
     except Exception as e:
         renderer.show_error(str(e))
+        renderer.stop()
 
     finally:
-        renderer.stop()
         agent._active_live = None
         agent._active_escape_watcher = None
 
@@ -612,11 +638,18 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
     agent.on_inner_execution = agent.renderer.on_inner_execution
 
     # Set up security confirmation callbacks for filesystem tools
+    _approval_lock = asyncio.Lock()
+
     async def _prompt_user_approval(message: str, detail: str) -> str:
         """Common approval prompt logic. Returns user's choice string.
 
         Supports Escape and Ctrl-C to cancel the query.
+        Uses a lock to serialize concurrent prompts (e.g. parallel tool calls).
         """
+        async with _approval_lock:
+            return await _prompt_user_approval_inner(message, detail)
+
+    async def _prompt_user_approval_inner(message: str, detail: str) -> str:
         live = agent._active_live
         live_was_running = live and live._started
         if live_was_running:
@@ -844,63 +877,21 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
 
                             # Use streaming query with the messages that now include the prompt
                             full_response = ""
-                            response_started = False
                             identity = get_identity()
 
                             cancel_event = threading.Event()
-                            prompt_live = Live(Markdown(""), console=console, refresh_per_second=10)
+                            from ai_assist.output import RichRenderer
+
+                            prompt_renderer = RichRenderer(console, assistant_name=identity.assistant.nickname)
+                            prompt_renderer.start()
                             with EscapeWatcher(cancel_event):
-                                async for chunk in agent.query_streaming(
-                                    messages=messages, progress_callback=None, cancel_event=cancel_event
-                                ):
-                                    # Handle text chunks
-                                    if isinstance(chunk, str):
-                                        if not response_started:
-                                            console.print()  # Blank line before agent message
-                                            console.print(f"[bold cyan]{identity.assistant.nickname}:[/bold cyan]")
-                                            prompt_live = Live(Markdown(""), console=console, refresh_per_second=10)
-                                            prompt_live.start()
-                                            response_started = True
-                                        full_response += chunk
-                                        prompt_live.update(Markdown(full_response))
-
-                                    # Handle tool use notifications
-                                    elif isinstance(chunk, dict):
-                                        if chunk.get("type") == "tool_use":
-                                            if prompt_live._started:
-                                                prompt_live.stop()
-                                            display_name = format_tool_display_name(chunk["name"])
-
-                                            # Show tool call with arguments
-                                            console.print(f"\n[dim]🔧 {display_name}[/dim]")
-
-                                            # Display arguments if present
-                                            if chunk.get("input"):
-                                                if chunk["name"] == "internal__think":
-                                                    thought = chunk["input"].get("thought", "")
-                                                    for line in thought.splitlines():
-                                                        console.print(f"[dim]   {line}[/dim]")
-                                                else:
-                                                    console.print(f"[dim]   {format_tool_args(chunk['input'])}[/dim]")
-                                            if response_started:
-                                                prompt_live = Live(
-                                                    Markdown(full_response), console=console, refresh_per_second=10
-                                                )
-                                                prompt_live.start()
-                                        elif chunk.get("type") == "cancelled":
-                                            if prompt_live._started:
-                                                prompt_live.stop()
-                                            console.print("\n[yellow]Query cancelled[/yellow]")
-                                            break
-                                        elif chunk.get("type") == "done":
-                                            if prompt_live._started:
-                                                prompt_live.stop()
-                                            break
-                                        elif chunk.get("type") == "error":
-                                            if prompt_live._started:
-                                                prompt_live.stop()
-                                            console.print(f"\n[red]{chunk.get('message')}[/red]")
-                                            break
+                                full_response = await consume_streaming_response(
+                                    agent,
+                                    prompt_renderer,
+                                    console,
+                                    cancel_event,
+                                    messages=messages,
+                                )
 
                             # Show KG save feedback if entities were saved
                             kg_saved_count = agent.get_last_kg_saved_count()
