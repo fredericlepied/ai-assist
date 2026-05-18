@@ -114,7 +114,7 @@ class AuditLogger:
                         kept.append(stripped)
                     else:
                         removed += 1
-                except (json.JSONDecodeError, KeyError, ValueError):
+                except json.JSONDecodeError, KeyError, ValueError:
                     kept.append(stripped)
 
         with open(self.log_file, "w") as f:

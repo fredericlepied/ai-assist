@@ -213,7 +213,7 @@ class AiAssistConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_percentages(self) -> "AiAssistConfig":
+    def validate_percentages(self) -> AiAssistConfig:
         """Validate that percentage allocations are within acceptable ranges"""
         # Validate individual ranges
         if not 1.0 <= self.message_limit_pct <= 20.0:
@@ -236,7 +236,7 @@ class AiAssistConfig(BaseModel):
         return self
 
     @classmethod
-    def from_env(cls, mcp_servers_file: Path | None = None, config_dir: Path | None = None) -> "AiAssistConfig":
+    def from_env(cls, mcp_servers_file: Path | None = None, config_dir: Path | None = None) -> AiAssistConfig:
         """Load configuration from environment variables and YAML files
 
         Args:
@@ -259,7 +259,7 @@ class AiAssistConfig(BaseModel):
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             vertex_project_id=os.getenv("ANTHROPIC_VERTEX_PROJECT_ID"),
             vertex_region=os.getenv("ANTHROPIC_VERTEX_REGION"),
-            model=os.getenv("AI_ASSIST_MODEL", "claude-sonnet-4-5@20250929"),
+            model=os.getenv("AI_ASSIST_MODEL", "claude-sonnet-4-6@20260219"),
             mcp_servers=mcp_servers,
         )
 

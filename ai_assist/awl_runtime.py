@@ -670,7 +670,7 @@ class AWLRuntime:
                     result = [parsed]
                     self._variables[var_name] = result
                     return result
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError, ValueError:
                 pass
 
             # Try Python literal (single quotes)
@@ -683,7 +683,7 @@ class AWLRuntime:
                     result = [parsed]
                     self._variables[var_name] = result
                     return result
-            except (ValueError, SyntaxError):
+            except ValueError, SyntaxError:
                 pass
 
         return value

@@ -71,7 +71,7 @@ class EscapeWatcher:
         if self._original_attrs is not None and self._stdin_fd is not None:
             try:
                 termios.tcsetattr(self._stdin_fd, termios.TCSADRAIN, self._original_attrs)
-            except (termios.error, OSError):
+            except termios.error, OSError:
                 pass
 
         # Close pipe fds
@@ -93,7 +93,7 @@ class EscapeWatcher:
         while True:
             try:
                 readable, _, _ = select.select([stdin_fd, stop_fd], [], [])
-            except (ValueError, OSError):
+            except ValueError, OSError:
                 break
 
             if stop_fd in readable:
@@ -109,7 +109,7 @@ class EscapeWatcher:
                     # Wait briefly for follow-up bytes (escape sequence)
                     try:
                         ready, _, _ = select.select([stdin_fd, stop_fd], [], [], self.ESCAPE_TIMEOUT)
-                    except (ValueError, OSError):
+                    except ValueError, OSError:
                         break
 
                     if stop_fd in ready:

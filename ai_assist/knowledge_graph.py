@@ -47,7 +47,7 @@ class Entity:
         }
 
     @classmethod
-    def from_row(cls, row: tuple) -> "Entity":
+    def from_row(cls, row: tuple) -> Entity:
         """Create Entity from database row"""
         return cls(
             id=row[0],
@@ -101,7 +101,7 @@ class Relationship:
         }
 
     @classmethod
-    def from_row(cls, row: tuple) -> "Relationship":
+    def from_row(cls, row: tuple) -> Relationship:
         """Create Relationship from database row"""
         return cls(
             id=row[0],
@@ -965,7 +965,7 @@ class KnowledgeGraph:
             if isinstance(conf, str):
                 try:
                     conf = float(conf)
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     conf = 1.0
             if conf < min_confidence:
                 skipped_conf += 1

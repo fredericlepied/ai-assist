@@ -83,7 +83,7 @@ async def handle_prompt_command_basic(command: str, agent: AiAssistAgent, conver
 
                 arguments[arg.name] = value
 
-            except (KeyboardInterrupt, EOFError):
+            except KeyboardInterrupt, EOFError:
                 print("\nCancelled\n")
                 return True
 
@@ -928,7 +928,7 @@ def main():
 
             stdin_fd = sys.stdin.fileno()
             _saved_terminal_attrs = termios.tcgetattr(stdin_fd)
-        except (ImportError, OSError, Exception):
+        except ImportError, OSError, Exception:
             pass
 
     def _restore_terminal():
@@ -950,7 +950,7 @@ def main():
     for sig in (signal.SIGTERM, signal.SIGHUP):
         try:
             signal.signal(sig, _signal_handler)
-        except (OSError, ValueError):
+        except OSError, ValueError:
             pass
 
     try:

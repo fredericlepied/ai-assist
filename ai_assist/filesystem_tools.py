@@ -320,7 +320,7 @@ class FilesystemTools:
             for cmd in commands:
                 if cmd not in self.allowed_commands:
                     self.allowed_commands.append(cmd)
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             pass
 
     def add_permanent_allowed_command(self, cmd_name: str):
@@ -334,7 +334,7 @@ class FilesystemTools:
             if path.exists():
                 with open(path) as f:
                     existing = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             existing = []
 
         if cmd_name not in existing:
@@ -354,7 +354,7 @@ class FilesystemTools:
                 resolved = Path(p).expanduser().resolve()
                 if resolved not in self.allowed_paths:
                     self.allowed_paths.append(resolved)
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             pass
 
     def add_permanent_allowed_path(self, path_str: str):
@@ -369,7 +369,7 @@ class FilesystemTools:
             if persist_path.exists():
                 with open(persist_path) as f:
                     existing = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             existing = []
 
         if path_str not in existing:

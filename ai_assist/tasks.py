@@ -71,7 +71,7 @@ class TaskDefinition:
         return parts[0], parts[1]
 
     @classmethod
-    def from_dict(cls, task_data: dict[str, Any]) -> "TaskDefinition":
+    def from_dict(cls, task_data: dict[str, Any]) -> TaskDefinition:
         """Create a TaskDefinition from a dictionary, using defaults for missing optional fields."""
         return cls(
             name=task_data["name"],

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 class KnowledgeTools:
     """Tools for agent to manage its own knowledge"""
 
-    def __init__(self, knowledge_graph: "KnowledgeGraph"):
+    def __init__(self, knowledge_graph: KnowledgeGraph):
         self.kg = knowledge_graph
         self.agent: AiAssistAgent | None = None
 

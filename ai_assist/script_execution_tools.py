@@ -243,7 +243,7 @@ class ScriptExecutionTools:
         try:
             with open(path) as f:
                 return json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             return {}
 
     @staticmethod
@@ -260,7 +260,7 @@ class ScriptExecutionTools:
             if path.exists():
                 with open(path) as f:
                     config = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             config = {}
 
         if skill_name not in config:
@@ -289,7 +289,7 @@ class ScriptExecutionTools:
             if path.exists():
                 with open(path) as f:
                     config = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             config = {}
 
         if skill_name not in config or env_var not in config[skill_name]:

@@ -3,7 +3,7 @@
 import logging
 import re
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .knowledge_graph import KnowledgeGraph
@@ -190,7 +190,7 @@ class KnowledgeGraphContext:
     relevant historical context.
     """
 
-    def __init__(self, knowledge_graph: Optional["KnowledgeGraph"] = None):
+    def __init__(self, knowledge_graph: KnowledgeGraph | None = None):
         """Initialize knowledge graph context
 
         Args:

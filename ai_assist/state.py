@@ -32,7 +32,7 @@ class MonitorState(BaseModel):
         return value.isoformat() if value else None
 
     @classmethod
-    def from_dict(cls, data: dict) -> "MonitorState":
+    def from_dict(cls, data: dict) -> MonitorState:
         """Load from dictionary with type conversion"""
         if "last_check" in data and data["last_check"]:
             data["last_check"] = datetime.fromisoformat(data["last_check"])
