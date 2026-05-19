@@ -204,6 +204,9 @@ Install specialized skills following the [agentskills.io](https://agentskills.io
 - DOCX manipulation
 - Custom workflow automation
 - Domain-specific expertise
+- **Slack notifications** (`skills/slack-webhook/`) - Post messages to Slack channels via webhooks
+
+📖 **Slack skill setup:** See [docs/SLACK_SKILL_SETUP.md](docs/SLACK_SKILL_SETUP.md)
 
 **Creating your own skills:**
 ```bash
