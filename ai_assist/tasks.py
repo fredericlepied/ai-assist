@@ -52,7 +52,10 @@ class TaskDefinition:
         """Check if this is a time-based schedule"""
         if self.interval is None:
             return False
-        return " on " in self.interval.lower() and not self.is_interval_with_range
+        lower = self.interval.lower()
+        if self.is_interval_with_range:
+            return False
+        return " on " in lower or lower.endswith(" daily") or lower.endswith(" everyday")
 
     @property
     def is_mcp_prompt(self) -> bool:
@@ -133,6 +136,8 @@ class TaskLoader:
     DAY_GROUPS = {
         "weekdays": [0, 1, 2, 3, 4],  # Monday-Friday
         "weekends": [5, 6],  # Saturday-Sunday
+        "daily": [0, 1, 2, 3, 4, 5, 6],  # Every day
+        "everyday": [0, 1, 2, 3, 4, 5, 6],
     }
 
     @staticmethod
@@ -149,13 +154,17 @@ class TaskLoader:
         """
         schedule_str = schedule_str.strip().lower()
 
-        if " on " not in schedule_str:
+        if " on " in schedule_str:
+            time_part, days_part = schedule_str.split(" on ", 1)
+        elif schedule_str.endswith(" daily") or schedule_str.endswith(" everyday"):
+            last_space = schedule_str.rfind(" ")
+            time_part = schedule_str[:last_space]
+            days_part = schedule_str[last_space + 1 :]
+        else:
             raise ValueError(
-                f"Time-based schedule must include 'on': '{schedule_str}'. "
-                "Examples: 'morning on weekdays', '9:00 on monday,friday'"
+                f"Time-based schedule must include 'on', 'daily', or 'everyday': '{schedule_str}'. "
+                "Examples: 'morning on weekdays', '9:00 daily', '9:00 on monday,friday'"
             )
-
-        time_part, days_part = schedule_str.split(" on ", 1)
         time_part = time_part.strip()
         days_part = days_part.strip()
 

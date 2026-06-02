@@ -1,0 +1,7 @@
+expected_tools:
+  - "schedule_action"
+  - "create_action"
+forbidden_tools:
+  - "kg_"
+  - "write_report"
+  - "read_file"

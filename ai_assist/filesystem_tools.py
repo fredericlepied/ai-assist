@@ -493,7 +493,7 @@ class FilesystemTools:
             },
             {
                 "name": "internal__list_directory",
-                "description": "List files and directories in a directory. Returns a list of names with file/directory indicators.",
+                "description": "List files and directories in a directory with type and size details. Always prefer this over execute_command for listing directory contents.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -558,7 +558,7 @@ class FilesystemTools:
             },
             {
                 "name": "internal__execute_command",
-                "description": "Execute a command and return the output. Commands are checked against an allowlist. Non-allowlisted commands require user approval in interactive mode. For commands that produce large output, consider using __save_to_file parameter or redirecting output to a file.",
+                "description": "Execute a shell command and return the output. Only use for commands that have no dedicated tool (prefer internal__read_file, internal__list_directory, internal__search_in_file for filesystem operations). Commands are checked against an allowlist.",
                 "input_schema": {
                     "type": "object",
                     "properties": {

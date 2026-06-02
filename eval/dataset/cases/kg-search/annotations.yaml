@@ -1,0 +1,5 @@
+expected_tools:
+  - "search_knowledge"
+forbidden_tools:
+  - "write_report"
+  - "schedule"

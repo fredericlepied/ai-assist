@@ -29,7 +29,7 @@ class ScheduleTools:
         return [
             {
                 "name": "internal__create_monitor",
-                "description": "Create a new monitor schedule with knowledge graph integration. When user references an MCP prompt (like '/server/prompt'), convert it to 'mcp://server/prompt' format and extract any arguments.",
+                "description": "Create a recurring monitor that runs at regular intervals (e.g., daily, hourly). Use this for periodic checks, status monitoring, and scheduled reports. For one-time future actions, use internal__schedule_action instead.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -47,7 +47,7 @@ class ScheduleTools:
                         },
                         "interval": {
                             "type": "string",
-                            "description": "Interval (e.g., '5m', '1h', 'morning on weekdays')",
+                            "description": "Interval (e.g., '5m', '1h', '9:00 daily', '9:00 on weekdays')",
                         },
                         "description": {
                             "type": "string",
@@ -73,7 +73,7 @@ class ScheduleTools:
             },
             {
                 "name": "internal__create_task",
-                "description": "Create a new periodic task schedule. When user references an MCP prompt (like '/server/prompt'), convert it to 'mcp://server/prompt' format and extract any arguments.",
+                "description": "Create a periodic task (no knowledge graph integration). For monitoring with KG integration, use internal__create_monitor instead.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
