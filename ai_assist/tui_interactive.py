@@ -799,11 +799,25 @@ async def tui_interactive_mode(agent: AiAssistAgent, state_manager: StateManager
         logger.info("Security prompt: path %s by user: %s", "approved" if approved else "denied", description[:200])
         if choice in ("a", "always"):
             # Extract path from description ("Access path: /foo/bar/file.txt")
-            # Add the parent directory for broader usability
             path_str = description.replace("Access path: ", "")
-            parent_dir = str(Path(path_str).parent)
-            agent.filesystem_tools.add_permanent_allowed_path(parent_dir)
-            console.print(f"[green]'{parent_dir}' permanently added to allowed paths[/green]")
+            resolved_path = Path(path_str).resolve()
+            # For regular files, propose the parent directory;
+            # for directories, propose the directory itself
+            if resolved_path.is_file():
+                resolved = str(resolved_path.parent)
+            else:
+                resolved = str(resolved_path)
+            try:
+                edited = await session.prompt_async(
+                    f'Save as permanently allowed path: "{resolved}" [Enter to confirm, or edit]\n> ',
+                    default=resolved,
+                )
+                edited = edited.strip()
+                if edited:
+                    agent.filesystem_tools.add_permanent_allowed_path(edited)
+                    console.print(f"[green]'{edited}' permanently added to allowed paths[/green]")
+            except EOFError, KeyboardInterrupt:
+                console.print("[yellow]Cancelled — approved for this session only[/yellow]")
         return approved
 
     agent.filesystem_tools.confirmation_callback = command_confirmation_callback
