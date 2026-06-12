@@ -99,6 +99,14 @@ TRANSPARENT_WRAPPERS = frozenset({"env", "nohup", "nice", "ionice", "timeout"})
 
 PRIVILEGE_WRAPPERS = frozenset({"sudo", "su", "doas"})
 
+PROTECTED_CONFIG_FILES = frozenset(
+    {
+        ALLOWED_COMMANDS_FILE,
+        ALLOWED_PATHS_FILE,
+        "skill_env.json",
+    }
+)
+
 ENV_VAR_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
@@ -496,6 +504,16 @@ class FilesystemTools:
             existing.append(path_str)
             with open(persist_path, "w") as f:
                 json.dump(existing, f, indent=2)
+
+    @staticmethod
+    def _is_protected_config(path_str: str) -> bool:
+        """Check if a path points to a security-sensitive config file."""
+        resolved = Path(path_str).expanduser().resolve()
+        config_dir = get_config_dir().resolve()
+        for protected in PROTECTED_CONFIG_FILES:
+            if resolved == config_dir / protected:
+                return True
+        return False
 
     async def _validate_path(self, path_str: str) -> str | None:
         """Validate that a path is within allowed directories.
@@ -1089,6 +1107,9 @@ class FilesystemTools:
         if content is None:
             return "Error: content parameter is required"
 
+        if self._is_protected_config(path):
+            return f"Error: {Path(path).name} is a protected security config file and cannot be modified by the agent."
+
         path_error = await self._validate_path(path)
         if path_error:
             return path_error
@@ -1117,6 +1138,9 @@ class FilesystemTools:
 
         if old_string == new_string:
             return "Error: old_string and new_string are identical"
+
+        if self._is_protected_config(path):
+            return f"Error: {Path(path).name} is a protected security config file and cannot be modified by the agent."
 
         for check in (
             await self._validate_path(path),
@@ -1154,6 +1178,13 @@ class FilesystemTools:
 
         if not command:
             return "Error: command parameter is required"
+
+        # Block commands that target protected security config files
+        config_dir = str(get_config_dir().resolve())
+        for protected in PROTECTED_CONFIG_FILES:
+            protected_path = f"{config_dir}/{protected}"
+            if protected_path in command or f"~/.ai-assist/{protected}" in command:
+                return f"Error: {protected} is a protected security config file and cannot be modified by the agent."
 
         # In interactive mode (confirmation_callback set), no timeout -- the user
         # can press Escape to interrupt like any normal interaction.

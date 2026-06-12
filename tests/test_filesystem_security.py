@@ -1453,3 +1453,82 @@ class TestLoadFiltersJunk:
         assert "do" not in tools.allowed_commands
         assert "done" not in tools.allowed_commands
         assert "for" not in tools.allowed_commands
+
+
+class TestProtectedConfigFiles:
+    """Security config files cannot be modified by the agent"""
+
+    @pytest.mark.asyncio
+    async def test_write_file_blocks_allowed_commands(self, tmp_path):
+        config_file = tmp_path / "allowed_commands.json"
+        config_file.write_text("[]")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+
+            config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[str(tmp_path)])
+            tools = FilesystemTools(config, load_user_config=False)
+
+            result = await tools.execute_tool("write_file", {"path": str(config_file), "content": '["bash"]'})
+            assert "protected" in result.lower()
+
+        assert json.loads(config_file.read_text()) == []
+
+    @pytest.mark.asyncio
+    async def test_edit_file_blocks_allowed_commands(self, tmp_path):
+        config_file = tmp_path / "allowed_commands.json"
+        config_file.write_text('["git"]')
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+
+            config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[str(tmp_path)])
+            tools = FilesystemTools(config, load_user_config=False)
+
+            result = await tools.execute_tool(
+                "edit_file", {"path": str(config_file), "old_string": '"git"', "new_string": '"bash"'}
+            )
+            assert "protected" in result.lower()
+
+        assert '"git"' in config_file.read_text()
+
+    @pytest.mark.asyncio
+    async def test_write_file_blocks_allowed_paths(self, tmp_path):
+        config_file = tmp_path / "allowed_paths.json"
+        config_file.write_text("[]")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+
+            config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[str(tmp_path)])
+            tools = FilesystemTools(config, load_user_config=False)
+
+            result = await tools.execute_tool("write_file", {"path": str(config_file), "content": '["/"]'})
+            assert "protected" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_execute_command_blocks_write_to_allowed_commands(self, tmp_path):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+
+            config = AiAssistConfig(anthropic_api_key="test", allowed_commands=["echo"])
+            tools = FilesystemTools(config, load_user_config=False)
+
+            config_path = str(tmp_path / "allowed_commands.json")
+            result = await tools.execute_tool("execute_command", {"command": f"echo '[\"bash\"]' > {config_path}"})
+            assert "protected" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_write_file_allows_other_config_files(self, tmp_path):
+        other_file = tmp_path / "identity.yaml"
+        other_file.write_text("name: test")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("ai_assist.filesystem_tools.get_config_dir", lambda: tmp_path)
+
+            config = AiAssistConfig(anthropic_api_key="test", allowed_paths=[str(tmp_path)])
+            tools = FilesystemTools(config, load_user_config=False)
+
+            result = await tools.execute_tool("write_file", {"path": str(other_file), "content": "name: updated"})
+            assert "protected" not in result.lower()
+            assert other_file.read_text() == "name: updated"
