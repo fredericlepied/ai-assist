@@ -1,0 +1,5 @@
+expected_tools:
+  - "read_report"
+forbidden_tools:
+  - "kg_"
+  - "schedule"

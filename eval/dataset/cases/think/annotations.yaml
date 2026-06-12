@@ -1,0 +1,6 @@
+expected_tools:
+  - "think"
+forbidden_tools:
+  - "write_report"
+  - "schedule"
+  - "read_file"

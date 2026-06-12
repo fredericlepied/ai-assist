@@ -1,0 +1,6 @@
+expected_tools:
+  - "kg_recent_changes"
+forbidden_tools:
+  - "write_report"
+  - "schedule"
+  - "read_file"

@@ -56,5 +56,4 @@ coverage.xml
 
 # Project specific
 *.log
-reports/
 temp/

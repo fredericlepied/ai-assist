@@ -27,11 +27,11 @@ class ActionTools:
             {
                 "name": "internal__create_action",
                 "description": (
-                    "Create a new action with a trigger. Trigger types: "
-                    "'interval' (every: '5m'), 'schedule' (at: '9:00', days: 'weekdays'), "
-                    "'interval_range' (every: '1h', between: '9:00', and: '18:00'), "
-                    "'mqtt' (topic: 'alerts/#'), 'dbus' (interface, signal), "
-                    "'once' (at: '2026-05-07T14:00:00')."
+                    "Create an event-driven action with an advanced trigger (mqtt, dbus, interval_range). "
+                    "For simple daily/hourly recurring monitors, prefer internal__create_monitor. "
+                    "For one-time future actions, prefer internal__schedule_action. "
+                    "Trigger types: 'mqtt' (topic: 'alerts/#'), 'dbus' (interface, signal), "
+                    "'interval_range' (every: '1h', between: '9:00', and: '18:00')."
                 ),
                 "input_schema": {
                     "type": "object",

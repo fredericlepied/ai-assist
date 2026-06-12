@@ -1,0 +1,6 @@
+expected_tools:
+  - "list_directory"
+forbidden_tools:
+  - "kg_"
+  - "write_report"
+  - "schedule"

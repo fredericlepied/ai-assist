@@ -1,0 +1,99 @@
+skill: ai-assist-internal-tools
+
+execution:
+  mode: case
+  arguments: "{prompt}"
+  timeout: 120
+
+runner:
+  type: cli
+  command:
+    - "uv"
+    - "run"
+    - "--project"
+    - "/home/flepied/work/ai-assist-branch2"
+    - "python"
+    - "/home/flepied/work/ai-assist-branch2/eval/eval_wrapper.py"
+    - "--workspace"
+    - "{workspace}"
+    - "--output-dir"
+    - "{output_dir}"
+    - "--model"
+    - "{model}"
+    - "--timeout"
+    - "{timeout}"
+
+models:
+  skill: claude-sonnet-4-6
+
+dataset:
+  path: dataset/cases
+  schema: |
+    Each case has a prompt field (natural language query for the agent).
+    annotations.yaml has expected_tools (list of tool name substrings
+    the agent should call) and optional forbidden_tools (tool name
+    substrings that should NOT be called).
+
+outputs:
+  - path: output
+    schema: |
+      response.txt: the agent's text response
+      tool_calls.json: list of {name, input} for each tool called
+      metrics.json: token usage and turn count
+
+traces:
+  stdout: true
+  stderr: true
+
+judges:
+  - name: tool_selection
+    description: Verify the agent called at least one expected tool
+    check: |
+      import json
+      annotations = outputs.get("annotations", {})
+      expected = annotations.get("expected_tools", [])
+      if not expected:
+        return True, "No expected tools specified"
+      files = outputs.get("files", {})
+      tc_content = next((v for k, v in files.items() if "tool_calls.json" in k), "[]")
+      tool_calls = json.loads(tc_content)
+      actual = [tc["name"] for tc in tool_calls]
+      matched = [e for e in expected if any(e in a for a in actual)]
+      if not matched:
+        return False, f"Expected one of {expected}, got {actual}"
+      return True, f"Correctly called: {matched}"
+
+  - name: no_wrong_category
+    description: Verify the agent did not call tools from a forbidden category
+    check: |
+      import json
+      annotations = outputs.get("annotations", {})
+      forbidden = annotations.get("forbidden_tools", [])
+      if not forbidden:
+        return True, "No forbidden tools specified"
+      files = outputs.get("files", {})
+      tc_content = next((v for k, v in files.items() if "tool_calls.json" in k), "[]")
+      tool_calls = json.loads(tc_content)
+      actual = [tc["name"] for tc in tool_calls]
+      violations = [a for a in actual if any(f in a for f in forbidden)]
+      if violations:
+        return False, f"Called forbidden tools: {violations}"
+      return True, "No forbidden tools called"
+
+  - name: response_quality
+    description: Evaluate if the response is coherent and addresses the prompt
+    prompt: |
+      The user asked the AI assistant: {{ inputs.prompt }}
+
+      The agent responded:
+      {{ outputs.files['output/response.txt'] }}
+
+      Tools the agent called:
+      {{ outputs.files['output/tool_calls.json'] }}
+
+      Did the agent provide a coherent, helpful response that addresses
+      the user's request? Consider whether the response acknowledges
+      the action taken (if any) and provides useful feedback.
+      The tool calls above show what the agent actually did.
+
+      Respond with only a JSON object: {"passed": true, "rationale": "..."} or {"passed": false, "rationale": "..."}

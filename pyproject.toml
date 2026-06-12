@@ -21,6 +21,9 @@ dependencies = [
 [project.optional-dependencies]
 mqtt = ["aiomqtt>=2.0.0"]
 dbus = ["dbus-next>=0.2.3"]
+eval = [
+    "agent-eval-harness @ git+https://github.com/opendatahub-io/agent-eval-harness.git",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -43,6 +46,9 @@ ai-assist = "ai_assist.main:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 # Tool configurations
 
@@ -166,7 +172,7 @@ ignore-imports = true
 fail_under = 71
 
 [tool.bandit]
-exclude_dirs = ["tests", ".venv", "build", "dist", "examples"]
+exclude_dirs = ["tests", ".venv", "build", "dist", "examples", "eval"]
 skips = [
     "B101",  # assert_used check (common in tests)
     "B110",  # try_except_pass - intentional best-effort error handling

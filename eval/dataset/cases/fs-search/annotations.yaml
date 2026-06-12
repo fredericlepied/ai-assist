@@ -1,0 +1,6 @@
+expected_tools:
+  - "search_in_file"
+forbidden_tools:
+  - "kg_"
+  - "write_report"
+  - "schedule"

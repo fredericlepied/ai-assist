@@ -1,0 +1,7 @@
+expected_tools:
+  - "create_monitor"
+  - "create_task"
+forbidden_tools:
+  - "kg_"
+  - "write_report"
+  - "read_file"
