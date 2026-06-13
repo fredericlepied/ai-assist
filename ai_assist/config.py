@@ -188,6 +188,7 @@ class AiAssistConfig(BaseModel):
             "diff",
             "file",
             "stat",
+            "realpath",
             "jq",
         ],
     )

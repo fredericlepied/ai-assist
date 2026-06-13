@@ -501,12 +501,11 @@ class AiAssistAgent:
             self._allow_local_skill_paths()
 
     def _allow_local_skill_paths(self):
-        """Auto-allow local skill directories for filesystem access"""
+        """Auto-allow skill directories for filesystem access"""
         for skill in self.skills_manager.installed_skills:
-            if skill.source_type == "local":
-                skill_path = Path(skill.cache_path).resolve()
-                if skill_path not in self.filesystem_tools.allowed_paths:
-                    self.filesystem_tools.allowed_paths.append(skill_path)
+            skill_path = Path(skill.cache_path).resolve()
+            if skill_path not in self.filesystem_tools.allowed_paths:
+                self.filesystem_tools.allowed_paths.append(skill_path)
 
     def _transport(self, config: MCPServerConfig):
         """Return the appropriate MCP transport context manager for this server config."""
