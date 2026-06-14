@@ -252,7 +252,6 @@ class TestComposeCmd:
         assert "podman-compose" in result
         assert "-f" in result
         assert str(tmp_path / "compose.yaml") in result
-        assert any("--userns=keep-id" in arg for arg in result)
 
 
 class TestSandboxList:
@@ -290,7 +289,7 @@ class TestSandboxService:
         assert "[Install]" in content
         assert str(tmp_path) in content
         assert "podman-compose" in content
-        assert "--userns=keep-id" in content
+        assert "podman-compose" in content
 
     def test_service_name(self):
         from ai_assist.sandbox import _sandbox_service_name

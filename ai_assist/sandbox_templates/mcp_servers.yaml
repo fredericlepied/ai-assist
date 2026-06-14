@@ -1,6 +1,6 @@
 servers:
   dci:
-    url: "http://dci-mcp-server:8001/sse"
+    url: "http://dci-mcp-server:8000/sse"
     pagination:
       offset_param: offset
       limit_param: limit

@@ -58,7 +58,7 @@ DCI_MCP_SERVER_DIR ?= ../dci-mcp-server
 
 sandbox-build:  ## Build sandbox container images (ai-assist + dci-mcp-server)
 	podman build -t ai-assist-sandbox -f sandbox/ai-assist/Dockerfile .
-	podman build -t dci-mcp-server -f sandbox/dci-mcp-server/Dockerfile $(DCI_MCP_SERVER_DIR)
+	podman build -t dci-mcp-server -f $(DCI_MCP_SERVER_DIR)/Containerfile.sse $(DCI_MCP_SERVER_DIR)
 
 dev-setup: install-dev pre-commit-install  ## Complete dev environment setup
 	@echo "✓ Development environment ready!"

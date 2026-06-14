@@ -50,7 +50,6 @@ def _instance_dir(name: str) -> Path:
 def _compose_cmd(instance_dir: Path) -> list[str]:
     return [
         "podman-compose",
-        "--podman-run-args=--userns=keep-id",
         "-f",
         str(instance_dir / "compose.yaml"),
     ]
@@ -127,7 +126,7 @@ def _build_compose(features: set[str]) -> dict:
                     "CMD",
                     "python3.14",
                     "-c",
-                    "import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost',8001)); s.close()",
+                    "import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost',8000)); s.close()",
                 ],
                 "interval": "5s",
                 "timeout": "3s",
@@ -136,7 +135,7 @@ def _build_compose(features: set[str]) -> dict:
             "environment": {
                 "MCP_TRANSPORT": "sse",
                 "MCP_HOST": "0.0.0.0",
-                "MCP_PORT": "8001",
+                "MCP_PORT": "8000",
                 "DCI_CLIENT_ID": "${DCI_CLIENT_ID:-}",
                 "DCI_API_SECRET": "${DCI_API_SECRET:-}",
                 "DCI_CS_URL": "${DCI_CS_URL:-https://api.distributed-ci.io}",

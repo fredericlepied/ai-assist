@@ -8,8 +8,8 @@ Container images for running ai-assist instances in isolated podman-compose stac
 # From the ai-assist repo root:
 podman build -t ai-assist-sandbox -f sandbox/ai-assist/Dockerfile .
 
-# From the dci-mcp-server repo:
-podman build -t dci-mcp-server -f sandbox/dci-mcp-server/Dockerfile /path/to/dci-mcp-server/
+# DCI MCP server (uses its own Containerfile.sse):
+podman build -t dci-mcp-server -f /path/to/dci-mcp-server/Containerfile.sse /path/to/dci-mcp-server/
 ```
 
 ## Usage
