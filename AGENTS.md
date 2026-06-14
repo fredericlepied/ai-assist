@@ -109,6 +109,31 @@ Cross-platform background service installation for persistent monitoring:
 
 Files: `service.py`
 
+### Sandbox Instances (Container Isolation)
+
+Isolated ai-assist instances via podman-compose with per-service credential isolation. Each MCP server runs in its own container and only receives its own secrets via compose environment injection. The ai-assist container never sees MCP server credentials.
+
+- **SSE transport**: MCP servers connect via SSE (`MCPServerConfig.url`) instead of stdio
+- **`_transport()` method** in `agent.py`: selects SSE or stdio based on config
+- **Instance directory**: `$AI_ASSIST_INSTANCES_DIR/<name>/` with host-only `compose.yaml`/`.env` and bind-mounted `sandbox/` directory
+- **Readiness check**: `_wait_for_mcp_servers()` polls TCP ports before launching ai-assist
+- **CLI**: `ai-assist /sandbox init|run|stop|list|delete|service`
+- **Features**: `--features=ssh,gpg,git,gh,dci,dbus` (default: all). Vertex AI (gcloud) always included. Features control which host configs are mounted, which commands are allowed, and which MCP server containers are started.
+- **Image profiles**: `--image=ai-assist-dev` for workload-specific images. Profile Dockerfiles in `sandbox/profiles/` extend the base image. Must not set `USER` (breaks `userns_mode: keep-id`).
+- **Service mode**: `ai-assist /sandbox service <name> install|remove|start|stop|status|logs` wraps the compose stack as a systemd user service running `/monitor`. Requires `loginctl enable-linger $USER` for boot startup.
+- **No pods**: uses `--in-pod=false` so each container has its own user namespace. The ai-assist container uses `userns_mode: keep-id`, MCP server containers run as their default user.
+
+Files: `sandbox.py`, `sandbox_templates/`, `config.py` (`MCPServerConfig.url` field)
+Container images: `sandbox/ai-assist/Dockerfile`, profiles in `sandbox/profiles/`
+DCI MCP server image: built from upstream `Containerfile.sse`
+
+#### Sandbox Testing
+
+- **Unit tests** (`tests/test_sandbox.py`): mock subprocess, verify compose generation, features, CLI parsing. Run by default.
+- **Integration tests** (`tests/test_sandbox_integration.py`): start real containers, verify UID mapping, DNS resolution, MCP connectivity, volume mounts. Excluded from default `pytest` and pre-commit.
+- Run integration tests before merging sandbox changes: `make test-integration`
+- Requires: podman, built images (`make sandbox-build`), optionally dev image (`make sandbox-build-dev`)
+
 ### Event-Driven Actions
 
 Unified action system where everything is a **trigger + prompt**. Actions are stored in `~/.ai-assist/event-schedules.json` and managed via agent tools. Trigger types include time-based (interval, schedule, once) and event-based (MQTT, D-Bus).

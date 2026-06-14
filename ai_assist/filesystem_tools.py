@@ -174,6 +174,8 @@ def _split_shell_commands(command: str) -> list[str]:
                     segments.append("".join(current))
                     current = []
                     i += 1
+                elif i > 0 and command[i - 1] == ">":
+                    current.append(c)
                 else:
                     segments.append("".join(current))
                     current = []
@@ -196,7 +198,8 @@ def _is_safe_env_assignment(token: str) -> bool:
     if not ENV_VAR_PATTERN.match(token):
         return False
     value = token.split("=", 1)[1]
-    if "$(" in value or "`" in value or "${" in value:
+    temp = value.replace("$((", "")
+    if "$(" in temp or "`" in value or "${" in value:
         return False
     return True
 
@@ -224,17 +227,20 @@ def extract_command_names(command: str) -> list[str]:
         if not tokens:
             continue
 
-        # Skip safe env var assignments, flag unsafe ones
+        # Skip env var assignments, flag unsafe ones only when they prefix a command.
+        # Standalone assignments like `result=$(cmd -i file)` are shell variable
+        # captures — shlex mis-splits them but they execute no separate command.
         idx = 0
         while idx < len(tokens) and ENV_VAR_PATTERN.match(tokens[idx]):
-            if not _is_safe_env_assignment(tokens[idx]):
-                commands.append("<shell-expansion>")
             idx += 1
 
         if idx >= len(tokens):
             continue
 
-        cmd_name = Path(tokens[idx]).name
+        cmd_token = tokens[idx].lstrip("(").rstrip(")")
+        if not cmd_token or cmd_token.startswith("-"):
+            continue
+        cmd_name = Path(cmd_token).name
         commands.append(cmd_name)
 
     return commands
