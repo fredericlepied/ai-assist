@@ -468,6 +468,11 @@ ai-assist /service install          # default instance (~/.ai-assist)
 ai-assist /service install ~/.iris  # additional instance
 ```
 
+**Note:** Systemd user services only run while you're logged in. To start services at boot:
+```bash
+sudo loginctl enable-linger $USER
+```
+
 See [docs/MULTI_INSTANCE.md](docs/MULTI_INSTANCE.md#systemd-services) for details.
 
 #### Sandbox Instances (Container Isolation)
@@ -494,6 +499,13 @@ ai-assist /sandbox run my-agent /monitor
 ai-assist /sandbox list
 ai-assist /sandbox stop my-agent
 ai-assist /sandbox delete my-agent
+
+# Install as a persistent systemd service (runs /monitor)
+ai-assist /sandbox service my-agent install
+ai-assist /sandbox service my-agent status
+ai-assist /sandbox service my-agent logs -f
+ai-assist /sandbox service my-agent stop
+ai-assist /sandbox service my-agent remove
 ```
 
 Available features: `ssh` (agent forwarding), `gpg` (commit signing), `git` (gitconfig), `gh` (GitHub CLI), `dci` (DCI MCP server).

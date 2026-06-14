@@ -11,7 +11,7 @@ import yaml
 
 TEMPLATES_DIR = Path(__file__).parent / "sandbox_templates"
 
-ALL_FEATURES = {"ssh", "gpg", "git", "gh", "dci"}
+ALL_FEATURES = {"ssh", "gpg", "git", "gh", "dci", "dbus"}
 
 SANDBOX_SUBDIRS = [
     ".ai-assist/state",
@@ -95,6 +95,12 @@ def _build_compose(features: set[str]) -> dict:
         volumes.append("${HOME}/.config/gh:/host-config/gh:ro,z")
         environment["GH_CONFIG_DIR"] = "/host-config/gh"
         environment["GITHUB_TOKEN"] = "${GITHUB_TOKEN:-}"
+
+    if "dbus" in features:
+        volumes.append("${XDG_RUNTIME_DIR:-/run/user/1000}/bus:/dbus-socket")
+        environment["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/dbus-socket"
+        if "label=disable" not in security_opt:
+            security_opt.append("label=disable")
     ai_assist_service: dict = {
         "image": "ai-assist-sandbox:latest",
         "userns_mode": "keep-id",
@@ -112,10 +118,21 @@ def _build_compose(features: set[str]) -> dict:
     services: dict = {"ai-assist": ai_assist_service}
 
     if "dci" in features:
-        ai_assist_service["depends_on"] = {"dci-mcp-server": {"condition": "service_started"}}
+        ai_assist_service["depends_on"] = {"dci-mcp-server": {"condition": "service_healthy"}}
         services["dci-mcp-server"] = {
             "image": "dci-mcp-server:latest",
             "restart": "unless-stopped",
+            "healthcheck": {
+                "test": [
+                    "CMD",
+                    "python3.14",
+                    "-c",
+                    "import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost',8001)); s.close()",
+                ],
+                "interval": "5s",
+                "timeout": "3s",
+                "retries": 5,
+            },
             "environment": {
                 "MCP_TRANSPORT": "sse",
                 "MCP_HOST": "0.0.0.0",
@@ -333,8 +350,122 @@ def sandbox_list() -> None:
     for name in instances:
         instance = instances_dir / name
         has_env = (instance / ".env").exists()
-        status = "configured" if has_env else "needs .env"
-        print(f"  {name:20s}  {status}")
+        svc_file = _sandbox_service_file(name)
+        parts = []
+        parts.append("configured" if has_env else "needs .env")
+        if svc_file.exists():
+            result = subprocess.run(
+                ["systemctl", "--user", "is-active", _sandbox_service_name(name)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            svc_status = result.stdout.strip()
+            parts.append(f"service: {svc_status}")
+        print(f"  {name:20s}  {', '.join(parts)}")
+
+
+SERVICE_SUBCOMMANDS = {"install", "remove", "start", "stop", "restart", "status", "logs"}
+
+
+def _sandbox_service_name(name: str) -> str:
+    return f"ai-assist-sandbox-{name}"
+
+
+def _sandbox_service_file(name: str) -> Path:
+    return Path.home() / ".config" / "systemd" / "user" / f"{_sandbox_service_name(name)}.service"
+
+
+def _sandbox_service_content(name: str, instance: Path) -> str:
+    compose_cmd = " ".join(_compose_cmd(instance))
+    current_path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+
+    lines = [
+        "[Unit]",
+        f"Description=ai-assist sandbox ({name})",
+        "After=network-online.target",
+        "Wants=network-online.target",
+        "",
+        "[Service]",
+        "Type=simple",
+        f"WorkingDirectory={instance}",
+        f"Environment=PATH={current_path}",
+        "Environment=PYTHONUNBUFFERED=1",
+        f"ExecStart={compose_cmd} up",
+        f"ExecStop={compose_cmd} down",
+        "Restart=on-failure",
+        "RestartSec=10s",
+        "",
+        "[Install]",
+        "WantedBy=default.target",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def sandbox_service(name: str, action: str, extra_args: list[str] | None = None) -> None:
+    """Manage a sandbox instance as a systemd user service."""
+    instance = _instance_dir(name)
+    svc_name = _sandbox_service_name(name)
+    svc_file = _sandbox_service_file(name)
+
+    if action == "install":
+        if not instance.exists():
+            print(f"Error: Instance '{name}' not found at {instance}")
+            sys.exit(1)
+        env_file = instance / ".env"
+        if not env_file.exists():
+            print(f"Error: {env_file} not found. Configure credentials first.")
+            sys.exit(1)
+
+        # Set ai-assist command to /monitor in the compose
+        compose_file = instance / "compose.yaml"
+        data = yaml.safe_load(compose_file.read_text())
+        data["services"]["ai-assist"]["command"] = "/monitor"
+        data["services"]["ai-assist"].pop("stdin_open", None)
+        data["services"]["ai-assist"].pop("tty", None)
+        with open(compose_file, "w") as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+        svc_file.parent.mkdir(parents=True, exist_ok=True)
+        svc_file.write_text(_sandbox_service_content(name, instance))
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "--user", "enable", "--now", svc_name], check=True)
+        print(f"Installed and started service {svc_name}")
+        print(f"  Logs: ai-assist /sandbox service logs {name}")
+        print(f"  Stop: ai-assist /sandbox service stop {name}")
+
+    elif action == "remove":
+        subprocess.run(["systemctl", "--user", "disable", "--now", svc_name], check=False)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        if svc_file.exists():
+            svc_file.unlink()
+        # Restore interactive settings in compose
+        if instance.exists():
+            compose_file = instance / "compose.yaml"
+            if compose_file.exists():
+                data = yaml.safe_load(compose_file.read_text())
+                data["services"]["ai-assist"].pop("command", None)
+                data["services"]["ai-assist"]["stdin_open"] = True
+                data["services"]["ai-assist"]["tty"] = True
+                with open(compose_file, "w") as f:
+                    yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        print(f"Removed service {svc_name}")
+
+    elif action == "status":
+        subprocess.run(["systemctl", "--user", "status", svc_name], check=False)
+
+    elif action == "logs":
+        subprocess.run(
+            ["journalctl", "--user", "-u", svc_name] + (extra_args or []),
+            check=False,
+        )
+
+    elif action in ("start", "stop", "restart", "enable", "disable"):
+        subprocess.run(["systemctl", "--user", action, svc_name], check=True)
+
+    else:
+        print(f"Unknown service action: {action}")
+        sys.exit(1)
 
 
 def sandbox_delete(name: str) -> None:
@@ -388,6 +519,15 @@ async def handle_sandbox_command(args: list[str]) -> None:
         sandbox_stop(args[1])
     elif subcmd == "list":
         sandbox_list()
+    elif subcmd == "service":
+        if len(args) < 3 or args[2] not in SERVICE_SUBCOMMANDS:
+            print("Usage: ai-assist /sandbox service <name> <action>")
+            print(f"Actions: {', '.join(sorted(SERVICE_SUBCOMMANDS))}")
+            sys.exit(1)
+        sandbox_name = args[1]
+        action = args[2]
+        extra = args[3:] if len(args) > 3 else None
+        sandbox_service(sandbox_name, action, extra)
     elif subcmd == "delete":
         if len(args) < 2:
             print("Usage: ai-assist /sandbox delete <name>")
@@ -411,8 +551,10 @@ def _print_usage():
     print("Usage: ai-assist /sandbox <command> [args...]")
     print()
     print("Commands:")
-    print("  init <name> [--features=ssh,gpg,git]  Create a new sandbox instance")
-    print("  run <name> /mode [args...]             Run ai-assist in a sandbox")
-    print("  stop <name>                            Stop a running sandbox")
-    print("  list                                   List sandbox instances")
-    print("  delete <name>                          Delete a sandbox instance")
+    print("  init <name> [--features=ssh,gpg,git,gh,dci]  Create a new sandbox instance")
+    print("  run <name> /mode [args...]                    Run ai-assist in a sandbox")
+    print("  stop <name>                                   Stop a running sandbox")
+    print("  list                                          List sandbox instances")
+    print("  delete <name>                                 Delete a sandbox instance")
+    print("  service <name> <action>                       Manage as systemd service")
+    print(f"    Actions: {', '.join(sorted(SERVICE_SUBCOMMANDS))}")

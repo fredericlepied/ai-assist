@@ -1,7 +1,7 @@
 """Tests for sandbox management module"""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
@@ -16,6 +16,7 @@ from ai_assist.sandbox import (
     get_instances_dir,
     sandbox_init,
     sandbox_list,
+    sandbox_service,
 )
 
 
@@ -64,6 +65,23 @@ class TestBuildCompose:
     def test_no_ssh_no_selinux_disable(self):
         compose = _build_compose(set())
         assert "security_opt" not in compose["services"]["ai-assist"]
+
+    def test_dbus_adds_socket_and_env(self):
+        compose = _build_compose({"dbus"})
+        volumes = compose["services"]["ai-assist"]["volumes"]
+        env = compose["services"]["ai-assist"]["environment"]
+        assert any("dbus-socket" in v for v in volumes)
+        assert env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/dbus-socket"
+
+    def test_dbus_disables_selinux(self):
+        compose = _build_compose({"dbus"})
+        security_opt = compose["services"]["ai-assist"].get("security_opt", [])
+        assert "label=disable" in security_opt
+
+    def test_ssh_and_dbus_no_duplicate_selinux(self):
+        compose = _build_compose({"ssh", "dbus"})
+        security_opt = compose["services"]["ai-assist"].get("security_opt", [])
+        assert security_opt.count("label=disable") == 1
 
     def test_gpg_adds_volume(self):
         compose = _build_compose({"gpg"})
@@ -260,3 +278,58 @@ class TestSandboxList:
         with patch.dict("os.environ", {"AI_ASSIST_INSTANCES_DIR": str(tmp_path / "nonexistent")}):
             sandbox_list()
         assert "No instances found" in capsys.readouterr().out
+
+
+class TestSandboxService:
+    def test_service_content(self, tmp_path):
+        from ai_assist.sandbox import _sandbox_service_content
+
+        content = _sandbox_service_content("test", tmp_path)
+        assert "[Unit]" in content
+        assert "[Service]" in content
+        assert "[Install]" in content
+        assert str(tmp_path) in content
+        assert "podman-compose" in content
+        assert "--userns=keep-id" in content
+
+    def test_service_name(self):
+        from ai_assist.sandbox import _sandbox_service_name
+
+        assert _sandbox_service_name("fixer") == "ai-assist-sandbox-fixer"
+        assert _sandbox_service_name("pr-review") == "ai-assist-sandbox-pr-review"
+
+    def test_service_file_path(self):
+        from ai_assist.sandbox import _sandbox_service_file
+
+        path = _sandbox_service_file("fixer")
+        assert path.name == "ai-assist-sandbox-fixer.service"
+        assert "systemd/user" in str(path)
+
+    def test_service_install_sets_monitor_command(self, tmp_path):
+        with patch.dict("os.environ", {"AI_ASSIST_INSTANCES_DIR": str(tmp_path)}):
+            sandbox_init("svc-test")
+            (tmp_path / "svc-test" / ".env").write_text("KEY=val")
+
+            with patch("ai_assist.sandbox.subprocess") as mock_sub:
+                mock_sub.run.return_value = MagicMock(returncode=0)
+                sandbox_service("svc-test", "install")
+
+        compose = yaml.safe_load((tmp_path / "svc-test" / "compose.yaml").read_text())
+        assert compose["services"]["ai-assist"]["command"] == "/monitor"
+        assert "stdin_open" not in compose["services"]["ai-assist"]
+        assert "tty" not in compose["services"]["ai-assist"]
+
+    def test_service_remove_restores_interactive(self, tmp_path):
+        with patch.dict("os.environ", {"AI_ASSIST_INSTANCES_DIR": str(tmp_path)}):
+            sandbox_init("svc-test")
+            (tmp_path / "svc-test" / ".env").write_text("KEY=val")
+
+            with patch("ai_assist.sandbox.subprocess") as mock_sub:
+                mock_sub.run.return_value = MagicMock(returncode=0)
+                sandbox_service("svc-test", "install")
+                sandbox_service("svc-test", "remove")
+
+        compose = yaml.safe_load((tmp_path / "svc-test" / "compose.yaml").read_text())
+        assert "command" not in compose["services"]["ai-assist"]
+        assert compose["services"]["ai-assist"]["stdin_open"] is True
+        assert compose["services"]["ai-assist"]["tty"] is True

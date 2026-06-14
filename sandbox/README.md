@@ -35,6 +35,17 @@ ai-assist /sandbox run my-instance /run workflow.awl
 ai-assist /sandbox list
 ai-assist /sandbox stop my-instance
 ai-assist /sandbox delete my-instance
+
+# Install as a persistent systemd service (runs /monitor)
+ai-assist /sandbox service my-instance install
+ai-assist /sandbox service my-instance status
+ai-assist /sandbox service my-instance logs -f
+ai-assist /sandbox service my-instance remove
+```
+
+**Note:** Systemd user services only run while you're logged in. To start at boot:
+```bash
+sudo loginctl enable-linger $USER
 ```
 
 ## Architecture
