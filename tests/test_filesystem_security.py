@@ -675,8 +675,8 @@ def test_local_skill_paths_added_to_allowed_paths(tmp_path):
     assert local_path.resolve() in agent.filesystem_tools.allowed_paths
 
 
-def test_git_skill_paths_not_added_to_allowed_paths(tmp_path):
-    """Git skills (already under config dir) are not redundantly added"""
+def test_all_skill_paths_added_to_allowed_paths(tmp_path):
+    """All installed skill cache paths are added to allowed paths regardless of source type"""
     from ai_assist.agent import AiAssistAgent
     from ai_assist.skills_manager import InstalledSkill
 
@@ -689,6 +689,7 @@ def test_git_skill_paths_not_added_to_allowed_paths(tmp_path):
 
     initial_count = len(agent.filesystem_tools.allowed_paths)
 
+    cache_path = tmp_path / "cache"
     agent.skills_manager.installed_skills = [
         InstalledSkill(
             name="some-git-skill",
@@ -696,13 +697,14 @@ def test_git_skill_paths_not_added_to_allowed_paths(tmp_path):
             source_type="git",
             branch="main",
             installed_at="2026-01-01T00:00:00",
-            cache_path=str(tmp_path / "cache"),
+            cache_path=str(cache_path),
         ),
     ]
 
     agent._allow_local_skill_paths()
 
-    assert len(agent.filesystem_tools.allowed_paths) == initial_count
+    assert len(agent.filesystem_tools.allowed_paths) == initial_count + 1
+    assert cache_path.resolve() in agent.filesystem_tools.allowed_paths
 
 
 # --- Phase 10: Smart command parsing ---
@@ -764,6 +766,20 @@ class TestSplitShellCommands:
         result = _split_shell_commands("ls && pwd; echo done")
         assert len(result) == 3
 
+    def test_stderr_redirect_not_split(self):
+        result = _split_shell_commands("ls /foo 2>&1")
+        assert result == ["ls /foo 2>&1"]
+
+    def test_stderr_redirect_with_pipe(self):
+        result = _split_shell_commands("git log 2>&1 | head")
+        assert len(result) == 2
+        assert "git log 2>&1" in result[0]
+        assert "head" in result[1]
+
+    def test_background_ampersand_still_splits(self):
+        result = _split_shell_commands("cmd1 & cmd2")
+        assert len(result) == 2
+
 
 class TestIsSafeEnvAssignment:
     """Tests for _is_safe_env_assignment()"""
@@ -791,6 +807,12 @@ class TestIsSafeEnvAssignment:
 
     def test_quoted_value_with_substitution(self):
         assert _is_safe_env_assignment('FOO="$(cmd)"') is False
+
+    def test_arithmetic_expansion_is_safe(self):
+        assert _is_safe_env_assignment("errors=$((errors + 1))") is True
+
+    def test_arithmetic_expansion_with_nested_cmd_is_unsafe(self):
+        assert _is_safe_env_assignment("FOO=$(($(evil)))") is False
 
 
 class TestExtractCommandNames:
@@ -829,10 +851,9 @@ class TestExtractCommandNames:
         non_builtin = [n for n in result if n not in SHELL_BUILTINS]
         assert len(non_builtin) > 0
 
-    def test_env_var_with_backtick(self):
-        result = extract_command_names("FOO=`rm -rf /` ls")
-        non_builtin = [n for n in result if n not in SHELL_BUILTINS]
-        assert len(non_builtin) > 0
+    def test_env_var_with_cmd_sub_extracts_command(self):
+        result = extract_command_names("FOO=$(evil) real_cmd arg")
+        assert "real_cmd" in result
 
     def test_compound_and(self):
         result = extract_command_names("ls && curl http://example.com")
@@ -957,6 +978,12 @@ async def test_all_builtin_compound_allowed():
 
     result = await tools.execute_tool("execute_command", {"command": "cd /tmp && echo hello && pwd"})
     assert "not allowed" not in result.lower()
+
+
+def test_subshell_parentheses_stripped():
+    """Subshell parentheses are stripped from command names"""
+    assert extract_command_names("(git clone repo)") == ["git"]
+    assert extract_command_names("ls /foo || (git clone repo && echo done)") == ["ls", "git", "echo"]
 
 
 # --- Phase 11: Command argument path validation (cd, find, python) ---

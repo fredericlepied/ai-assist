@@ -501,26 +501,29 @@ class AiAssistAgent:
             self._allow_local_skill_paths()
 
     def _allow_local_skill_paths(self):
-        """Auto-allow local skill directories for filesystem access"""
+        """Auto-allow skill directories for filesystem access"""
         for skill in self.skills_manager.installed_skills:
-            if skill.source_type == "local":
-                skill_path = Path(skill.cache_path).resolve()
-                if skill_path not in self.filesystem_tools.allowed_paths:
-                    self.filesystem_tools.allowed_paths.append(skill_path)
+            skill_path = Path(skill.cache_path).resolve()
+            if skill_path not in self.filesystem_tools.allowed_paths:
+                self.filesystem_tools.allowed_paths.append(skill_path)
+
+    def _transport(self, config: MCPServerConfig):
+        """Return the appropriate MCP transport context manager for this server config."""
+        if config.url:
+            from mcp.client.sse import sse_client
+
+            return sse_client(config.url, sse_read_timeout=3600)
+        server_params = StdioServerParameters(
+            command=config.command,
+            args=config.args,
+            env=config.env if config.env else None,
+        )
+        return stdio_client_fixed(server_params)
 
     async def _run_server(self, name: str, config: MCPServerConfig):
         """Run an MCP server connection (as a background task)"""
         try:
-            server_params = StdioServerParameters(
-                command=config.command,
-                args=config.args,
-                env=config.env if config.env else None,
-            )
-
-            # Use FIXED stdio_client with proper buffering
-            async with stdio_client_fixed(server_params) as (read_stream, write_stream):
-                # CRITICAL: ClientSession must be used as async context manager
-                # to start the _receive_loop task that processes incoming messages!
+            async with self._transport(config) as (read_stream, write_stream):
                 async with ClientSession(read_stream, write_stream) as session:
                     try:
                         await asyncio.wait_for(session.initialize(), timeout=60.0)
