@@ -569,7 +569,7 @@ Skills are \alert{untrusted code} --- defense in depth:
 \begin{columns}[T]
 \begin{column}{0.32\textwidth}
 \textbf{\color{rhred}Reports}
-\begin{itemize}\scriptsize
+\begin{itemize}\scriptsize\setlength{\itemsep}{0pt}
   \item Write / append / read
   \item List with metadata
   \item Delete
@@ -577,27 +577,25 @@ Skills are \alert{untrusted code} --- defense in depth:
 
 \smallskip
 \textbf{\color{rhblue}Scheduling}
-\begin{itemize}\scriptsize
+\begin{itemize}\scriptsize\setlength{\itemsep}{0pt}
   \item Create monitors and tasks
   \item List / update / delete
   \item Enable / disable
-  \item Get run status
 \end{itemize}
 \end{column}
 \begin{column}{0.32\textwidth}
 \textbf{\color{rhgreen}Knowledge Graph}
-\begin{itemize}\scriptsize
+\begin{itemize}\scriptsize\setlength{\itemsep}{0pt}
   \item Save / search knowledge
   \item Recent changes
   \item Late discoveries
-  \item Discovery lag statistics
   \item Entity with context
   \item Trigger synthesis
 \end{itemize}
 
 \smallskip
 \textbf{\color{rhorange}Filesystem}
-\begin{itemize}\scriptsize
+\begin{itemize}\scriptsize\setlength{\itemsep}{0pt}
   \item Read / write / edit files
   \item Search with regex
   \item List directories
@@ -606,40 +604,32 @@ Skills are \alert{untrusted code} --- defense in depth:
 \end{column}
 \begin{column}{0.32\textwidth}
 \textbf{\color{rhpurple}Introspection}
-\begin{itemize}\scriptsize
-  \item Search KG entities
-  \item Search conversation history
-  \item Get tool documentation
-  \item Inspect MCP prompts
-  \item Execute MCP prompts
+\begin{itemize}\scriptsize\setlength{\itemsep}{0pt}
+  \item Search KG entities / history
+  \item Tool documentation
+  \item MCP prompts
 \end{itemize}
 
 \smallskip
-\textbf{\color{rhteal}Date \& Time}
-\begin{itemize}\scriptsize
-  \item Get current date
-  \item Get current timestamp
-\end{itemize}
-
-\smallskip
-\textbf{\color{rhred}Goals}
-\begin{itemize}\scriptsize
+\textbf{\color{rhteal}Goals}
+\begin{itemize}\scriptsize\setlength{\itemsep}{0pt}
   \item Create / list / update goals
   \item Autonomous OODA pursuit
 \end{itemize}
 
 \smallskip
 \textbf{\color{rhdarkgray}Planning \& Data}
-\begin{itemize}\scriptsize
+\begin{itemize}\scriptsize\setlength{\itemsep}{0pt}
   \item Think / plan / reason
   \item JSON query via \texttt{jq}
+  \item Date \& time
 \end{itemize}
 \end{column}
 \end{columns}
 
 \vfill
 \centering
-\small\color{gray} 30+ built-in tools --- the agent decides which to use based on the query
+\scriptsize\color{gray} 30+ built-in tools --- the agent decides which to use based on the query
 \end{frame}
 
 % ── Report Management ────────────────────────────────────────────
@@ -985,40 +975,35 @@ KG sections are capped at 1500 chars}
 \begin{frame}[fragile]{Set It and Forget It: Monitor Mode}
 \begin{columns}[T]
 \begin{column}{0.45\textwidth}
-\begin{itemize}\small
+\begin{itemize}\scriptsize\setlength{\itemsep}{1pt}
   \item Define actions in \texttt{event-schedules.json}
   \item Interval or time-based scheduling
   \item \alert{Hot-reload}: edit config, changes apply immediately
   \item Laptop suspension recovery
   \item MCP prompts as tasks: \texttt{mcp://dci/weekly}
   \item Notifications: desktop, file, console, TUI
-  \item \alert{Systemd user service}: \texttt{/service install} for persistent background monitoring
+  \item \alert{Systemd service}: \texttt{/service install}
 \end{itemize}
 \end{column}
 \begin{column}{0.50\textwidth}
-\begin{lstlisting}[style=json,title={\scriptsize event-schedules.json}]
+\begin{lstlisting}[style=json,basicstyle=\ttfamily\fontsize{5}{6}\selectfont,title={\scriptsize event-schedules.json}]
 {
   "version": "2.0",
   "actions": [
     {
       "name": "Failing Jobs Report",
-      "prompt": "Search for DCI jobs
-        that failed in the last
-        24h and write a report",
+      "prompt": "Search for DCI jobs that failed
+        in the last 24h and write a report",
       "trigger": {"type": "schedule",
-        "at": "8:00",
-        "days": "weekdays"},
+        "at": "8:00", "days": "weekdays"},
       "notify": true,
-      "notification_channels":
-        ["desktop", "file"]
+      "notification_channels": ["desktop", "file"]
     },
     {
       "name": "KG Synthesis",
-      "prompt":
-        "__builtin__:kg_synthesis",
+      "prompt": "__builtin__:kg_synthesis",
       "trigger": {"type": "schedule",
-        "at": "22:00",
-        "days": "weekdays"}
+        "at": "22:00", "days": "weekdays"}
     }
   ]
 }
@@ -1068,7 +1053,7 @@ KG sections are capped at 1500 chars}
 \begin{columns}[T]
 \begin{column}{0.45\textwidth}
 \textbf{Unified Trigger + Action Model}
-\begin{itemize}\small
+\begin{itemize}\scriptsize\setlength{\itemsep}{1pt}
   \item Everything is a \alert{trigger + prompt}
   \item Time is just one trigger type
   \item \textbf{MQTT}: react to IoT / broker messages
@@ -1078,40 +1063,30 @@ KG sections are capped at 1500 chars}
   \item Pluggable: add new event sources via ABC
 \end{itemize}
 
-\medskip
+\smallskip
 \textbf{How events reach the agent}
-\begin{itemize}\scriptsize
+\begin{itemize}\scriptsize\setlength{\itemsep}{1pt}
   \item Event arrives $\to$ trigger matcher checks rules
   \item Match $\to$ prompt executed with event context
   \item Agent decides what to do (tools, notifications)
 \end{itemize}
 \end{column}
 \begin{column}{0.50\textwidth}
-\begin{lstlisting}[style=json,title={\scriptsize event-schedules.json}]
+\begin{lstlisting}[style=json,basicstyle=\ttfamily\fontsize{5}{6}\selectfont,title={\scriptsize event-schedules.json}]
 {
   "event_sources": {
-    "mqtt": {
-      "broker": "localhost",
-      "port": 1883
-    }
+    "mqtt": {"broker": "localhost", "port": 1883}
   },
   "actions": [
     {
       "name": "CI Alert",
-      "trigger": {
-        "type": "mqtt",
-        "topic": "alerts/#"
-      },
-      "prompt": "Analyze this alert
-        and notify the user
-        if action is needed."
+      "trigger": {"type": "mqtt", "topic": "alerts/#"},
+      "prompt": "Analyze this alert and notify
+        the user if action is needed."
     },
     {
       "name": "DCI Check",
-      "trigger": {
-        "type": "interval",
-        "every": "5m"
-      },
+      "trigger": {"type": "interval", "every": "5m"},
       "prompt": "Check DCI failures"
     }
   ]
@@ -1367,74 +1342,68 @@ ai-assist /sandbox service pr-review logs -f
 \begin{columns}[T]
 \begin{column}{0.48\textwidth}
 \textbf{Intent-Driven Orchestration}
-\begin{itemize}\small
+\begin{itemize}\scriptsize\setlength{\itemsep}{1pt}
   \item Scripts describe \emph{what} to achieve, not \emph{how}
   \item Agent autonomously selects tools and strategies
-  \item Deterministic workflow structure with dynamic reasoning
+  \item Deterministic structure with dynamic reasoning
   \item Variables propagate between tasks
 \end{itemize}
 
-\medskip
+\smallskip
 \textbf{Directives}
-\begin{itemize}\small
-  \item \texttt{@task} -- agent objectives with goals and exposed variables
+\begin{itemize}\scriptsize\setlength{\itemsep}{1pt}
+  \item \texttt{@task} -- agent objectives with exposed variables
   \item \texttt{@set} -- variable assignment
   \item \texttt{@if/@else} -- conditional execution
   \item \texttt{@loop} -- iterate over collections
-  \item \texttt{@while} -- conditional loop (poll until done)
-  \item \texttt{@wait} -- pause execution
-  \item \texttt{@notify} -- emit user message
-  \item \texttt{@return} -- workflow result
+  \item \texttt{@while} -- conditional loop
+  \item \texttt{@wait} / \texttt{@notify} / \texttt{@return}
 \end{itemize}
 \end{column}
 \begin{column}{0.48\textwidth}
-\begin{lstlisting}[style=code,language={}]
+\begin{lstlisting}[style=code,basicstyle=\ttfamily\fontsize{5.5}{7}\selectfont,language={}]
 @start
-
 @task find_handlers @no-kg
 Goal: Find HTTP handlers.
 Expose: handlers
 @end
 
 @if len(handlers) > 0
-
 @loop handlers as h limit=5
   @task inspect @no-history
   Goal: What does ${h} do?
   Expose: summary
   @end
 @end
-
 @end
 
 @return handlers
 @end
 \end{lstlisting}
 \vspace{-2mm}
-{\scriptsize\texttt{uv run ai-assist /run workflow.awl}}\\
-{\scriptsize\textit{or ask the agent: ``run workflow.awl with project=CILAB''}}
+{\scriptsize\texttt{ai-assist /run workflow.awl project=CILAB}}
 \end{column}
 \end{columns}
 \end{frame}
 
 % ── Slide: AWL in Prompts ─────────────────────────────────────────
 \begin{frame}[fragile]{AWL Execution from Agent Prompts}
-\textbf{Agents can now execute AWL scripts dynamically}
+\textbf{\small Agents can execute AWL scripts dynamically}
 
-\medskip
+\smallskip
 \begin{columns}[T]
 \begin{column}{0.48\textwidth}
 \textbf{How it works}
-\begin{itemize}\small
-  \item New introspection tool: \texttt{execute\_awl\_script}
+\begin{itemize}\scriptsize\setlength{\itemsep}{1pt}
+  \item Introspection tool: \texttt{execute\_awl\_script}
   \item Agent calls it when user references a \texttt{.awl} file
-  \item Variables injected at runtime (no hardcoding)
+  \item Variables injected at runtime
   \item Results returned to conversation
 \end{itemize}
 
-\medskip
+\smallskip
 \textbf{Example prompt}\\
-{\small\textit{``Run analysis.awl with project=CILAB and days=7''}}
+{\scriptsize\textit{``Run analysis.awl with project=CILAB and days=7''}}
 \end{column}
 \begin{column}{0.48\textwidth}
 \begin{lstlisting}[style=code,language={}]
@@ -1456,17 +1425,16 @@ introspection__execute_awl_script(
 \begin{columns}[T]
 \begin{column}{0.45\textwidth}
 \textbf{Goal-Driven Autonomous Agent}
-\begin{itemize}\small
+\begin{itemize}\scriptsize\setlength{\itemsep}{1pt}
   \item New \texttt{@goal} AWL directive
   \item Run from CLI, schedule, or \texttt{/monitor}
   \item Body uses standard AWL constructs
-  \item \alert{Success criteria} evaluated by Claude each cycle
+  \item \alert{Success criteria} evaluated each cycle
   \item Variables \alert{persist between cycles}
   \item Safety: \texttt{max\_actions} limit per cycle
 \end{itemize}
 
-\medskip
-\vspace{-2mm}
+\smallskip
 \begin{lstlisting}[style=code,basicstyle=\ttfamily\tiny,title={\scriptsize goals/track\_failures.awl}]
 @start
 @goal track max_actions=5
@@ -1521,15 +1489,14 @@ One DSL for all agent orchestration --- goals reuse \texttt{@task}, \texttt{@if}
 \begin{columns}[T]
 \begin{column}{0.48\textwidth}
 \textbf{Features}
-\begin{itemize}\small
-  \item \texttt{/awl-viz} command opens flowchart in browser
-  \item Dagre + D3.js for automatic graph layout
+\begin{itemize}\scriptsize\setlength{\itemsep}{1pt}
+  \item \texttt{/awl-viz} opens flowchart in browser
+  \item Dagre + D3.js for automatic layout
   \item Task blocks connected by arrows
-  \item \alert{Variable names} shown on edges (data flow)
-  \item If/else as diamond decision nodes with branches
-  \item Loop/while as dashed-border clusters with back-arrows
-  \item Mouse-over tooltips with full task details
-  \item Zoom and pan support
+  \item \alert{Variable names} on edges (data flow)
+  \item If/else as diamond decision nodes
+  \item Loop/while as dashed-border clusters
+  \item Mouse-over tooltips with task details
 \end{itemize}
 \end{column}
 \begin{column}{0.48\textwidth}
@@ -1561,25 +1528,24 @@ Task blocks show brief description; hover reveals full goal, context, constraint
 \begin{columns}[T]
 \begin{column}{0.48\textwidth}
 \textbf{Recently Completed}
-\begin{itemize}\small
+\begin{itemize}\scriptsize\setlength{\itemsep}{1pt}
   \item \textcolor{green!60!black}{\checkmark} \alert{Autonomous goal-driven agent (OODA)}
   \item \textcolor{green!60!black}{\checkmark} Systemd user service (\texttt{/service install})
   \item \textcolor{green!60!black}{\checkmark} Vector-based semantic search (sqlite-vec)
   \item \textcolor{green!60!black}{\checkmark} Think tool for multi-step planning
-  \item \textcolor{green!60!black}{\checkmark} Extended context (1M tokens on demand) + adaptive limits
+  \item \textcolor{green!60!black}{\checkmark} Extended context (1M tokens) + adaptive limits
   \item \textcolor{green!60!black}{\checkmark} Multi-instance support
-  \item \textcolor{green!60!black}{\checkmark} AWL workflow execution from prompts
-  \item \textcolor{green!60!black}{\checkmark} AWL workflow visualization (\texttt{/awl-viz})
+  \item \textcolor{green!60!black}{\checkmark} AWL workflow execution + visualization
   \item \textcolor{green!60!black}{\checkmark} \alert{Event-driven actions} (MQTT, D-Bus)
   \item \textcolor{green!60!black}{\checkmark} Unified trigger + action model
-  \item \textcolor{green!60!black}{\checkmark} \alert{Sandbox instances} (podman-compose, SSE transport, per-service credential isolation)
+  \item \textcolor{green!60!black}{\checkmark} \alert{Sandbox instances} (podman-compose, per-service credential isolation)
 \end{itemize}
 \end{column}
 \begin{column}{0.48\textwidth}
 \textbf{Future}
-\begin{itemize}\small
-  \item More event sources (webhooks, polling, ...)
-  \item OpenShell policy layer (L7 network rules, dynamic credentials)
+\begin{itemize}\scriptsize\setlength{\itemsep}{1pt}
+  \item More event sources (webhooks, polling)
+  \item OpenShell policy layer (L7 network rules)
   \item A2A (Agent to Agent) communication
   \item Multi-channel notifications (Slack, Teams)
   \item ML-based anomaly detection
@@ -1589,14 +1555,14 @@ Task blocks show brief description; hover reveals full goal, context, constraint
 
 \vfill
 \centering
-\Large\color{rhred}
+\large\color{rhred}
 ai-assist turns information overload into actionable insights.
 
-\bigskip
-\large\color{rhdarkgray} Questions?
-
 \medskip
-\normalsize\url{https://github.com/fredericlepied/ai-assist}
+\normalsize\color{rhdarkgray} Questions?
+
+\smallskip
+\small\url{https://github.com/fredericlepied/ai-assist}
 \end{frame}
 
 \end{document}
