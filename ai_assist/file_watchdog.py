@@ -170,9 +170,7 @@ class _DebounceHandler(FileSystemEventHandler):
         if event_path != target_path:
             return
 
-        # On macOS, FSEvents operates at directory level and may report
-        # spurious events for files that weren't actually modified.
-        # Guard with mtime to avoid false positives.
+        # macOS FSEvents emits directory-level events; guard with mtime to filter false positives.
         try:
             current_mtime = self.target_file.stat().st_mtime
         except OSError:
