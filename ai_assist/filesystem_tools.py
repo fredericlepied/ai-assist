@@ -95,7 +95,7 @@ SHELL_BUILTINS = frozenset(
 
 PYTHON_COMMANDS = frozenset({"python", "python3"})
 
-TRANSPARENT_WRAPPERS = frozenset({"env", "nohup", "nice", "ionice", "timeout"})
+TRANSPARENT_WRAPPERS = frozenset({"env", "nohup", "nice", "ionice", "timeout", "stdbuf", "script"})
 
 PRIVILEGE_WRAPPERS = frozenset({"sudo", "su", "doas"})
 
@@ -108,6 +108,50 @@ PROTECTED_CONFIG_FILES = frozenset(
 )
 
 ENV_VAR_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _resolve_command_token(token: str) -> str:
+    """Return the effective command name for allowlist matching.
+
+    Bare names (e.g. "grep") are returned as-is — the shell resolves them via PATH.
+    Fully qualified or home-relative paths (e.g. "/usr/bin/grep", "~/bin/tool")
+    are kept as-is so that the allowlist must explicitly permit that exact path.
+    This prevents a malicious binary at an arbitrary path from matching a
+    basename-only allowlist entry.
+    """
+    if "/" in token or token.startswith("~"):
+        return token
+    return token
+
+
+_NUMERIC_ARG = re.compile(r"^\d+(\.\d+)?[smhd]?$")
+
+
+def _skip_wrapper_args(tokens: list[str], idx: int) -> int:
+    """Skip flags and positional args belonging to a transparent wrapper.
+
+    After the wrapper name has been consumed, this skips:
+    - env var assignments (KEY=value)
+    - flags (-x, --long) and their non-flag argument
+    - bare numeric tokens (e.g. timeout's duration, nice's adjustment)
+    Stops at the first token that looks like a command name.
+    """
+    while idx < len(tokens):
+        tok = tokens[idx]
+        if ENV_VAR_PATTERN.match(tok):
+            idx += 1
+        elif tok.startswith("-"):
+            idx += 1
+            if idx < len(tokens) and not tokens[idx].startswith("-") and not ENV_VAR_PATTERN.match(tokens[idx]):
+                # Could be a flag value (e.g. -n 10) or the real command.
+                # If it's numeric, consume it as a flag value.
+                if _NUMERIC_ARG.match(tokens[idx]):
+                    idx += 1
+        elif _NUMERIC_ARG.match(tok):
+            idx += 1
+        else:
+            break
+    return idx
 
 
 def _strip_shell_comments(command: str) -> str:
@@ -237,10 +281,18 @@ def extract_command_names(command: str) -> list[str]:
         if idx >= len(tokens):
             continue
 
+        # Strip transparent wrappers and their arguments
+        while idx < len(tokens) and _resolve_command_token(tokens[idx]) in TRANSPARENT_WRAPPERS:
+            idx += 1
+            idx = _skip_wrapper_args(tokens, idx)
+
+        if idx >= len(tokens):
+            continue
+
         cmd_token = tokens[idx].lstrip("(").rstrip(")")
         if not cmd_token or cmd_token.startswith("-"):
             continue
-        cmd_name = Path(cmd_token).name
+        cmd_name = _resolve_command_token(cmd_token)
         commands.append(cmd_name)
 
     return commands
@@ -280,12 +332,10 @@ def compute_allowlist_prefix(command: str) -> str | None:
     if idx >= len(tokens):
         return None
 
-    # Strip transparent wrappers
-    while idx < len(tokens) and Path(tokens[idx]).name in TRANSPARENT_WRAPPERS:
+    # Strip transparent wrappers and their arguments
+    while idx < len(tokens) and _resolve_command_token(tokens[idx]) in TRANSPARENT_WRAPPERS:
         idx += 1
-        # Also skip any env var assignments after the wrapper
-        while idx < len(tokens) and ENV_VAR_PATTERN.match(tokens[idx]):
-            idx += 1
+        idx = _skip_wrapper_args(tokens, idx)
 
     if idx >= len(tokens):
         return None
@@ -293,8 +343,9 @@ def compute_allowlist_prefix(command: str) -> str | None:
     prefix_parts: list[str] = []
 
     # Keep privilege wrappers as part of the prefix
-    if Path(tokens[idx]).name in PRIVILEGE_WRAPPERS:
-        prefix_parts.append(Path(tokens[idx]).name)
+    cmd_token = _resolve_command_token(tokens[idx])
+    if cmd_token in PRIVILEGE_WRAPPERS:
+        prefix_parts.append(cmd_token)
         idx += 1
         # Skip flags after sudo (e.g. sudo -u user)
         while idx < len(tokens) and tokens[idx].startswith("-"):
@@ -306,8 +357,8 @@ def compute_allowlist_prefix(command: str) -> str | None:
     if idx >= len(tokens):
         return " ".join(prefix_parts) if prefix_parts else None
 
-    # Add the command name
-    cmd_name = Path(tokens[idx]).name
+    # Add the command name (preserving full path if given)
+    cmd_name = _resolve_command_token(tokens[idx])
     if cmd_name in SHELL_BUILTINS:
         return None
     prefix_parts.append(cmd_name)
@@ -974,15 +1025,19 @@ class FilesystemTools:
         except Exception as e:
             return f"Error listing directory: {str(e)}"
 
-    def _is_command_prefix_allowed(self, full_command: str) -> bool:
+    def _is_command_prefix_allowed(self, full_command: str) -> list[str]:
         """Check if a command matches any allowlist prefix.
 
         For each pipeline segment, extracts tokens (stripping env vars and
         transparent wrappers), then checks if any allowlist entry matches
         as a prefix of the segment's tokens. Shell builtins are always allowed.
+
+        Returns an empty list if all commands are allowed, or a list of
+        rejected command names.
         """
         stripped = _strip_shell_comments(full_command)
         segments = _split_shell_commands(stripped)
+        rejected: list[str] = []
 
         for segment in segments:
             try:
@@ -1001,26 +1056,25 @@ class FilesystemTools:
             if idx >= len(tokens):
                 continue
 
-            # Strip transparent wrappers
-            while idx < len(tokens) and Path(tokens[idx]).name in TRANSPARENT_WRAPPERS:
+            # Strip transparent wrappers and their arguments
+            while idx < len(tokens) and _resolve_command_token(tokens[idx]) in TRANSPARENT_WRAPPERS:
                 idx += 1
-                while idx < len(tokens) and ENV_VAR_PATTERN.match(tokens[idx]):
-                    idx += 1
+                idx = _skip_wrapper_args(tokens, idx)
 
             if idx >= len(tokens):
                 continue
 
-            cmd_name = Path(tokens[idx]).name
+            cmd_name = _resolve_command_token(tokens[idx])
             if cmd_name in SHELL_BUILTINS:
                 continue
 
-            # Build the effective token list for matching (resolve full paths to names)
+            # Build the effective token list for matching (preserve full paths)
             effective: list[str] = []
             for t in tokens[idx:]:
                 if effective:
                     effective.append(t)
                 else:
-                    effective.append(Path(t).name)
+                    effective.append(_resolve_command_token(t))
 
             # Check if any allowlist entry is a prefix of the effective tokens
             matched = False
@@ -1031,9 +1085,9 @@ class FilesystemTools:
                     break
 
             if not matched:
-                return False
+                rejected.append(cmd_name)
 
-        return True
+        return rejected
 
     async def _check_command_allowed(self, cmd_names: list[str], full_command: str) -> str | None:
         """Check if all commands in a command line are allowed.
@@ -1044,7 +1098,8 @@ class FilesystemTools:
         Returns:
             Error message if blocked, None if allowed
         """
-        if self._is_command_prefix_allowed(full_command):
+        rejected = self._is_command_prefix_allowed(full_command)
+        if not rejected:
             return None
 
         if self.confirmation_callback is not None:
@@ -1054,8 +1109,9 @@ class FilesystemTools:
             return f"Error: Command '{full_command}' was rejected by the user. Try a different approach or use only allowed commands: {', '.join(self.allowed_commands)}."
 
         allowed_list = ", ".join(self.allowed_commands)
-        non_allowed = [name for name in cmd_names if name not in SHELL_BUILTINS]
-        return f"Error: Command '{', '.join(non_allowed)}' is not in the allowed commands list: {allowed_list}. Not allowed."
+        return (
+            f"Error: Command '{', '.join(rejected)}' is not in the allowed commands list: {allowed_list}. Not allowed."
+        )
 
     async def _validate_command_arguments(self, command: str, was_auto_allowed: bool) -> str | None:
         """Validate path arguments and parameters for specific commands.
@@ -1203,7 +1259,7 @@ class FilesystemTools:
         cmd_names = extract_command_names(command)
 
         # Determine if all commands are auto-allowed (builtins or prefix-matched allowlist)
-        was_auto_allowed = self._is_command_prefix_allowed(command)
+        was_auto_allowed = not self._is_command_prefix_allowed(command)
 
         # Commands authorized by AWL scripts are treated as user-confirmed
         # (skip extra confirmation for python -c, etc.)
